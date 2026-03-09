@@ -1,0 +1,184 @@
+{
+  "meta": {
+    "sklearn_version": "1.8.0",
+    "numpy_version": "2.4.2",
+    "n_jobs": 1,
+    "data_source": "UCI CSV fixtures (shared with Rust)"
+  },
+  "cold_start": {
+    "cold_start/dt": {
+      "median_us": 306.11,
+      "p5_us": 292.45,
+      "p95_us": 356.26
+    },
+    "cold_start/knn": {
+      "median_us": 572.58,
+      "p5_us": 558.89,
+      "p95_us": 656.54
+    },
+    "cold_start/rf": {
+      "median_us": 8823.86,
+      "p5_us": 8784.94,
+      "p95_us": 8890.13
+    }
+  },
+  "training": {
+    "train/dt/iris": {
+      "median_us": 270.41,
+      "p5_us": 261.74,
+      "p95_us": 307.92
+    },
+    "train/rf/iris": {
+      "median_us": 8261.53,
+      "p5_us": 8241.92,
+      "p95_us": 8292.23
+    },
+    "train/knn/iris": {
+      "median_us": 164.04,
+      "p5_us": 161.54,
+      "p95_us": 193.02
+    },
+    "train/dt/wine": {
+      "median_us": 576.34,
+      "p5_us": 568.16,
+      "p95_us": 603.38
+    },
+    "train/rf/wine": {
+      "median_us": 9037.73,
+      "p5_us": 8994.4,
+      "p95_us": 9102.25
+    },
+    "train/knn/wine": {
+      "median_us": 183.32,
+      "p5_us": 179.12,
+      "p95_us": 217.0
+    },
+    "train/dt/breast_cancer": {
+      "median_us": 4733.52,
+      "p5_us": 4700.28,
+      "p95_us": 4777.37
+    },
+    "train/rf/breast_cancer": {
+      "median_us": 16149.24,
+      "p5_us": 16071.08,
+      "p95_us": 16198.82
+    },
+    "train/knn/breast_cancer": {
+      "median_us": 119.77,
+      "p5_us": 118.66,
+      "p95_us": 125.02
+    },
+    "train/logreg/breast_cancer": {
+      "median_us": 893.08,
+      "p5_us": 868.69,
+      "p95_us": 943.8
+    },
+    "train/kmeans/iris": {
+      "median_us": 428.62,
+      "p5_us": 413.46,
+      "p95_us": 469.67
+    },
+    "train/kmeans/wine": {
+      "median_us": 447.25,
+      "p5_us": 439.21,
+      "p95_us": 485.0
+    },
+    "train/kmeans/breast_cancer": {
+      "median_us": 680.3,
+      "p5_us": 670.87,
+      "p95_us": 711.23
+    }
+  },
+  "prediction": {
+    "predict/dt/iris": {
+      "median_us": 21.97,
+      "p5_us": 20.93,
+      "p95_us": 24.45,
+      "accuracy": 1.0
+    },
+    "predict/rf/iris": {
+      "median_us": 490.18,
+      "p5_us": 482.78,
+      "p95_us": 515.14,
+      "accuracy": 1.0
+    },
+    "predict/knn/iris": {
+      "median_us": 424.64,
+      "p5_us": 410.47,
+      "p95_us": 460.92,
+      "accuracy": 0.966667
+    },
+    "predict/dt/wine": {
+      "median_us": 22.92,
+      "p5_us": 22.12,
+      "p95_us": 25.6,
+      "accuracy": 1.0
+    },
+    "predict/rf/wine": {
+      "median_us": 496.72,
+      "p5_us": 485.8,
+      "p95_us": 531.72,
+      "accuracy": 1.0
+    },
+    "predict/knn/wine": {
+      "median_us": 478.46,
+      "p5_us": 464.44,
+      "p95_us": 554.41,
+      "accuracy": 0.786517
+    },
+    "predict/dt/breast_cancer": {
+      "median_us": 29.28,
+      "p5_us": 27.92,
+      "p95_us": 32.66,
+      "accuracy": 1.0
+    },
+    "predict/rf/breast_cancer": {
+      "median_us": 585.25,
+      "p5_us": 557.1,
+      "p95_us": 647.56,
+      "accuracy": 1.0
+    },
+    "predict/knn/breast_cancer": {
+      "median_us": 864.87,
+      "p5_us": 855.5,
+      "p95_us": 894.99,
+      "accuracy": 0.947276
+    }
+  },
+  "memory": {
+    "memory/dt": {
+      "current_bytes": 1551,
+      "peak_bytes": 107424
+    },
+    "memory/rf": {
+      "current_bytes": 26183,
+      "peak_bytes": 156540
+    },
+    "memory/knn": {
+      "current_bytes": 5715,
+      "peak_bytes": 30924
+    },
+    "memory/logreg": {
+      "current_bytes": 1974,
+      "peak_bytes": 50175
+    }
+  },
+  "accuracy": {
+    "accuracy/dt/iris": 1.0,
+    "accuracy/rf/iris": 1.0,
+    "accuracy/knn/iris": 0.966667,
+    "accuracy/dt/wine": 1.0,
+    "accuracy/rf/wine": 1.0,
+    "accuracy/knn/wine": 0.786517,
+    "accuracy/dt/breast_cancer": 1.0,
+    "accuracy/rf/breast_cancer": 1.0,
+    "accuracy/knn/breast_cancer": 0.947276
+  },
+  "lasso": {
+    "lasso/train": {
+      "median_us": 3926.99,
+      "p5_us": 3906.0,
+      "p95_us": 3944.37
+    }
+  }
+}

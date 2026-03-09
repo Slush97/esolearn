@@ -1,0 +1,64 @@
+[package]
+name = "scry-llm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Llama inference engine in Rust with CUDA backend"
+license.workspace = true
+
+[features]
+default = ["cuda"]
+cuda = ["dep:cudarc"]
+bf16 = ["cuda", "cudarc/f16", "dep:half"]
+safetensors = ["dep:safetensors"]
+tokenizer = ["dep:serde_json"]
+blas = ["dep:cblas-sys"]
+mkl = ["dep:cblas-sys"]
+dnnl = []
+wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+auto = ["blas", "wgpu"]
+quantize = []
+
+[dependencies]
+cudarc = { version = "0.19", features = ["cublas", "nvrtc", "cuda-13010"], optional = true }
+half = { version = "2", optional = true }
+safetensors = { version = "0.4", optional = true }
+cblas-sys = { version = "0.1", optional = true }
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+arrayvec = "0.7"
+thiserror = "2"
+fastrand = "2"
+rayon = "1"
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "llm_ops"
+harness = false
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+many_single_char_names = "allow"
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+similar_names = "allow"
+module_name_repetitions = "allow"
+return_self_not_must_use = "allow"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+cast_possible_wrap = "allow"
+doc_markdown = "allow"
+too_many_lines = "allow"
+needless_return = "allow"
+redundant_else = "allow"
+unnecessary_wraps = "allow"
+float_cmp = "allow"
+cast_sign_loss = "allow"

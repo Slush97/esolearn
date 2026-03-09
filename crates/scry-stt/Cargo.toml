@@ -1,0 +1,65 @@
+[package]
+name = "scry-stt"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Native Rust speech-to-text engine — Whisper inference with zero-copy model loading"
+license.workspace = true
+
+[features]
+default = ["blas"]
+cuda = ["scry-llm/cuda"]
+blas = ["scry-llm/blas"]
+mkl = ["scry-llm/mkl"]
+dnnl = ["scry-llm/dnnl"]
+wgpu = ["scry-llm/wgpu"]
+auto = ["scry-llm/auto"]
+safetensors = ["dep:safetensors", "dep:memmap2", "dep:half"]
+quantize = ["scry-llm/quantize"]
+live = ["dep:cpal"]
+dictate = ["live", "safetensors", "dep:rusqlite"]
+
+[dependencies]
+scry-llm = { path = "../scry-llm", default-features = false }
+rustfft = "6"
+thiserror = "2"
+fastrand = "2"
+safetensors = { version = "0.4", optional = true }
+memmap2 = { version = "0.9", optional = true }
+half = { version = "2", optional = true }
+rayon = "1"
+serde_json = "1"
+cpal = { version = "0.15", optional = true }
+libc = "0.2"
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+
+[[bin]]
+name = "scry-dictate"
+path = "src/bin/dictate.rs"
+required-features = ["dictate"]
+
+[[bin]]
+name = "scry-dictate-ctl"
+path = "src/bin/dictate_ctl.rs"
+
+[dev-dependencies]
+pretty_assertions = "1"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+many_single_char_names = "allow"
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+similar_names = "allow"
+module_name_repetitions = "allow"
+return_self_not_must_use = "allow"
+too_many_lines = "allow"
+needless_range_loop = "allow"
+items_after_statements = "allow"
+doc_markdown = "allow"
+type_complexity = "allow"

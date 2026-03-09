@@ -1,0 +1,79 @@
+[package]
+name = "scry-llm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+fastrand = "2"
+
+[dependencies.scry-llm]
+path = ".."
+default-features = false
+
+# ═══════════════════════════════════════════
+# Tensor / Shape fuzz targets
+# ═══════════════════════════════════════════
+
+[[bin]]
+name = "fuzz_shape_broadcast"
+path = "fuzz_targets/fuzz_shape_broadcast.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_tensor_ops"
+path = "fuzz_targets/fuzz_tensor_ops.rs"
+test = false
+doc = false
+bench = false
+
+# ═══════════════════════════════════════════
+# CPU backend fuzz targets
+# ═══════════════════════════════════════════
+
+[[bin]]
+name = "fuzz_matmul"
+path = "fuzz_targets/fuzz_matmul.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_softmax"
+path = "fuzz_targets/fuzz_softmax.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_layernorm"
+path = "fuzz_targets/fuzz_layernorm.rs"
+test = false
+doc = false
+bench = false
+
+# ═══════════════════════════════════════════
+# Inference fuzz targets
+# ═══════════════════════════════════════════
+
+[[bin]]
+name = "fuzz_attention"
+path = "fuzz_targets/fuzz_attention.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_generate"
+path = "fuzz_targets/fuzz_generate.rs"
+test = false
+doc = false
+bench = false

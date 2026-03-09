@@ -1,0 +1,19 @@
+{
+  "gpu": "NVIDIA GeForce RTX 5070 Ti",
+  "model": "Llama-3.2-1B",
+  "pytorch_bf16": {
+    "load_time_s": 0.63,
+    "rss_before_mb": 704.2,
+    "rss_after_mb": 1062.8,
+    "rss_delta_mb": 358.6,
+    "vram_after_load_mb": 2472.7,
+    "ttft_s": 0.237,
+    "vram_peak_inference_mb": 2482.2,
+    "decode_tok_s": 192.9,
+    "decode_latency_ms": 5.18,
+    "output": "The capital of France is Paris. It is the most visited city in the world. It is also the most expensive city in the world. The average cost of living in Paris",
+    "rss_peak_mb": 1814.0,
+    "n_params": 1235814400,
+    "param_bytes_mb": 2471.6
+  }
+}

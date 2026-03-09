@@ -1,0 +1,92 @@
+{
+  "regression_metrics": {
+    "linear_regression": {
+      "r2": 0.575788,
+      "rmse": 0.745581,
+      "mae": 0.5332
+    },
+    "lasso": {
+      "r2": 0.581615,
+      "rmse": 0.740442,
+      "mae": 0.535326
+    },
+    "elastic_net": {
+      "r2": 0.580319,
+      "rmse": 0.741588,
+      "mae": 0.534077
+    },
+    "knn_regressor": {
+      "r2": 0.67001,
+      "rmse": 0.657588,
+      "mae": 0.446154
+    },
+    "gradient_boosting": {
+      "r2": 0.790025,
+      "rmse": 0.524551,
+      "mae": 0.355312
+    },
+    "ridge": {
+      "r2": 0.575816,
+      "rmse": 0.745557,
+      "mae": 0.533193
+    }
+  },
+  "training_time": {
+    "linear_regression": {
+      "median_us": 995.54,
+      "n_samples": 16512
+    },
+    "lasso": {
+      "median_us": 1142.02,
+      "n_samples": 16512
+    },
+    "elastic_net": {
+      "median_us": 1144.41,
+      "n_samples": 16512
+    },
+    "knn_regressor": {
+      "median_us": 6958.0,
+      "n_samples": 16512
+    },
+    "gradient_boosting": {
+      "median_us": 1566071.67,
+      "n_samples": 16512
+    },
+    "ridge": {
+      "median_us": 553.93,
+      "n_samples": 16512
+    }
+  },
+  "prediction_latency": {
+    "linear_regression": {
+      "p50_us": 12.351,
+      "p95_us": 13.19,
+      "p99_us": 14.83
+    },
+    "lasso": {
+      "p50_us": 14.06,
+      "p95_us": 14.971,
+      "p99_us": 16.29
+    },
+    "elastic_net": {
+      "p50_us": 13.94,
+      "p95_us": 14.79,
+      "p99_us": 16.21
+    },
+    "knn_regressor": {
+      "p50_us": 142.642,
+      "p95_us": 164.702,
+      "p99_us": 179.472
+    },
+    "gradient_boosting": {
+      "p50_us": 46.23,
+      "p95_us": 48.28,
+      "p99_us": 62.721
+    },
+    "ridge": {
+      "p50_us": 12.511,
+      "p95_us": 13.491,
+      "p99_us": 14.95
+    }
+  }
+}

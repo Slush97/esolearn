@@ -1,0 +1,501 @@
+customer_id,age,gender,income,education,satisfaction_score,purchase_frequency,tenure_months,region,product_category,rating,referral_source,email_valid,response_date,comments
+1226,48,Female,45118,PhD,9,3,1,Northeast,Food & Beverage,1,In-Store,yes,"January 02, 2024",
+1216,45,,89887,Associate's,6,1,84,Southwest,Home & Garden,3,Email,true,2025/11/13,Fast shipping!
+1348,35,male,67882,Master's,3,2,17,Southwest,Health & Beauty,1,Social Media,true,2024/08/03,
+1128,18,f,34983,PhD,8,3,14,Southeast,Electronics,5,Social Media,False,28-08-2024,"Meh, it's okay."
+1385,33,M,70166,,2,2,22,West,Food & Beverage,4,TV Ad,yes,09/06/2024,N/A
+1093,33,Male,86548,,9,3,16,West,Electronics,1,TV Ad,1,"April 20, 2025",Disappointed.
+1474,53,f,23564,PhD,7,3,83,Southwest,Food & Beverage,4,TV Ad,true,10-09-2024,worst purchase ever
+1140,45,m,83204,Bachelor's,4,2,1,Midwest,Home & Garden,2,Friend,0,01/27/2025,....
+1202,27,Female,18958,Some College,7,4,3,West,Health & Beauty,5,TV Ad,no,07-01-2024,Terrible experience.
+1189,50,female,83503,,10,3,2,Southeast,Food & Beverage,1,TV Ad,false,2025/11/15,5 stars!!!
+1141,46,male,88020,Master's,10,2,9,Southwest,Electronics,4,Friend,True,2024/09/23,Fast shipping!
+1427,53,female,110607,Master's,5,5,35,Northeast,Food & Beverage,,Email,True,12/24/2024,N/A
+1094,85,M,28219,Some College,1,1,2,Southwest,Clothing,1,Email,0,21-04-2025,worst purchase ever
+1148,43,Male,40970,Bachelor's,2,4,33,Southwest,Electronics,4,TV Ad,0,"March 18, 2024",....
+1487,30,F,36277,High School,10,10,2,Northeast,Home & Garden,1,Email,,2024-12-15,Not worth the price.
+1032,36,Female,20371,Associate's,3,2,17,West,Clothing,3,Email,Y,2025/05/10,Not worth the price.
+1009,22,Female,38086,High School,5,3,17,West,Clothing,4,Social Media,True,21-05-2025,Product broke after 2 weeks.
+1121,28,F,113820,Associate's,5,5,1,Southwest,Electronics,2,In-Store,yes,"May 15, 2025",worst purchase ever
+1181,42,f,1000000,Some College,7,1,57,Southeast,Home & Garden,5,Email,false,"March 11, 2025",Fast shipping!
+1248,76,F,34723,Some College,6,5,31,Northeast,Health & Beauty,2,Friend,no,"October 10, 2024",worst purchase ever
+1490,36,Male,113740,Bachelor's,3,4,4,Midwest,Electronics,1,Google,Y,10/26/2024,N/A
+1268,22,M,52041,Master's,6,1,17,Southeast,Electronics,1,,False,2025/02/14,Would recommend to friends.
+1400,34,male,72363,Bachelor's,2,4,10,Southeast,Electronics,5,,N,"August 19, 2024",Better than expected.
+1046,24,Prefer not to say,39575,PhD,1,5,54,Southwest,Electronics,2,Social Media,,03/24/2024,"Meh, it's okay."
+1379,49,M,57292,Master's,5,7,4,Northeast,Clothing,4,Google,,27-08-2024,
+1199,52,m,56149,Associate's,3,0,2,Midwest,Clothing,3,Email,N,2024/10/22,Too expensive for what you get.
+1038,53,female,54442,Master's,8,4,9,Northeast,Health & Beauty,,TV Ad,false,10-09-2025,Great product!
+1144,24,Prefer not to say,77806,,5,4,7,Southwest,Electronics,5,In-Store,no,10/11/2024,
+1008,59,Male,83050,Bachelor's,2,5,30,Southeast,Home & Garden,4,,Y,2024/02/07,Would recommend to friends.
+1290,38,female,25782,High School,9,4,63,West,Food & Beverage,5,,no,2025/10/02,worst purchase ever
+1354,48,male,65117,Associate's,8,6,19,Northeast,Electronics,2,In-Store,1,"November 14, 2024",Great product!
+1157,40,Male,54388,,3,4,17,West,Home & Garden,4,TV Ad,0,"April 12, 2025",Excellent customer service.
+1366,47,Non-binary,60759,High School,5,8,16,West,Home & Garden,1,Social Media,true,"August 24, 2025",no comment
+1435,49,Non-binary,69046,,9,5,20,West,Food & Beverage,2,Email,yes,2024/08/27,Not satisfied with delivery time.
+1165,57,female,47868,,3,3,1,West,Electronics,3,,False,2025-03-26,Amazing!
+1473,,male,35568,Some College,2,4,5,West,Home & Garden,1,,false,"November 21, 2025",Better than expected.
+1126,31,f,55819,High School,4,2,24,Midwest,Clothing,1,,,2024/04/12,Product broke after 2 weeks.
+1042,18,M,54823,Bachelor's,6,3,1,West,Clothing,2,Friend,1,"March 21, 2024",Better than expected.
+1022,31,Prefer not to say,132824,Bachelor's,8,2,19,Midwest,Electronics,3,In-Store,Y,2024-06-10,Good value for money.
+1152,55,F,104803,Bachelor's,8,6,10,Midwest,Clothing,1,Friend,yes,08-08-2025,
+1075,38,M,150723,Bachelor's,1,3,13,Southwest,Electronics,3,,0,13-09-2025,"Meh, it's okay."
+1069,64,,20783,Associate's,3,2,23,Northeast,Electronics,5,Social Media,1,02-04-2024,Fast shipping!
+1133,58,male,49322,Bachelor's,9,2,24,Southwest,Home & Garden,4,,true,2024-12-12,Good value for money.
+1161,42,m,38902,Master's,9,7,77,Midwest,Electronics,5,Google,no,12-01-2025,
+1054,35,Female,55523,High School,10,2,40,Southwest,Home & Garden,1,In-Store,no,2024/11/05,Too expensive for what you get.
+1178,33,F,39604,Some College,9,6,33,Southeast,Food & Beverage,5,TV Ad,N,2024/06/07,N/A
+1164,18,female,23568,Associate's,6,7,55,Southeast,Food & Beverage,3,Google,,"January 11, 2025",N/A
+1204,60,m,49642,,8,3,56,Northeast,Clothing,1,Google,false,09/06/2024,
+1263,38,Non-binary,33932,,4,6,26,Midwest,Clothing,3,,1,"May 13, 2024",Will buy again.
+1238,52,M,73147,,4,3,19,Southwest,Home & Garden,,Social Media,True,2024/05/09,Amazing!
+1270,55,f,44880,High School,8,2,34,Southwest,Clothing,5,Social Media,no,2025-10-20,Not satisfied with delivery time.
+1262,30,female,56738,Master's,2,2,41,Northeast,Home & Garden,3,Email,,"August 22, 2025",....
+1254,35,Non-binary,56343,Master's,2,3,40,Northeast,Health & Beauty,4,Friend,yes,2024/12/13,Better than expected.
+1214,32,female,110864,Some College,8,3,56,Northeast,Electronics,1,In-Store,false,"May 13, 2024",Not satisfied with delivery time.
+1445,41,Female,26862,,7,0,15,Northeast,Home & Garden,5,Email,0,2024/06/07,"Meh, it's okay."
+1314,46,Non-binary,29841,PhD,4,6,79,West,Health & Beauty,5,In-Store,,2025-07-24,
+1460,45,F,,Bachelor's,5,4,28,Midwest,Home & Garden,,,1,2025/08/02,Would recommend to friends.
+1142,42,M,178422,Master's,7,3,72,West,Home & Garden,3,,N,2025-09-02,Not satisfied with delivery time.
+1390,31,M,45864,Associate's,7,3,10,West,Health & Beauty,5,Google,false,2025-03-16,Terrible experience.
+1051,55,Non-binary,31086,Master's,10,7,58,Northeast,Electronics,2,,true,23-10-2024,Too expensive for what you get.
+1060,999,male,53649,Some College,9,7,1,Southwest,Home & Garden,1,TV Ad,True,2025-04-15,Fast shipping!
+1316,58,,36993,High School,6,7,12,Southeast,Health & Beauty,3,Google,yes,04/18/2024,Not worth the price.
+1387,40,female,47415,Some College,6,10,73,Southeast,Electronics,5,Friend,false,12/25/2024,"Meh, it's okay."
+1191,22,male,67595,Associate's,2,3,26,Southeast,Food & Beverage,5,TV Ad,,"August 01, 2025",Fast shipping!
+1200,63,male,52543,Associate's,5,6,1,Midwest,Health & Beauty,3,TV Ad,no,2024-02-08,Packaging was damaged.
+1324,51,Male,111433,Master's,10,3,10,Southwest,Electronics,2,Social Media,N,"May 02, 2025",Excellent customer service.
+1356,18,Female,116611,Associate's,3,6,47,Northeast,Clothing,5,Email,N,11-06-2024,Packaging was damaged.
+1185,41,Female,79050,Associate's,6,5,6,Northeast,Home & Garden,3,Social Media,,09/09/2025,Fast shipping!
+1172,47,Female,27891,Associate's,7,4,4,Southeast,Health & Beauty,5,TV Ad,,12/02/2024,no comment
+1005,34,,30463,Associate's,7,1,3,Southwest,Home & Garden,,Social Media,1,07-08-2024,worst purchase ever
+1463,21,male,43698,,2,3,38,Southwest,Health & Beauty,1,In-Store,false,09/24/2025,
+1285,32,Prefer not to say,55736,Master's,1,3,39,West,Home & Garden,4,Email,true,04/04/2025,Disappointed.
+1449,31,f,69404,Associate's,10,4,14,West,Food & Beverage,5,Email,yes,06/14/2024,
+1357,53,M,27098,PhD,2,4,18,Southwest,Electronics,3,TV Ad,Y,2024/05/30,Would recommend to friends.
+1472,30,f,28489,Master's,1,1,9,West,Health & Beauty,1,Social Media,0,29-01-2024,Too expensive for what you get.
+1231,32,male,25618,,8,5,2,Southeast,Food & Beverage,0,Google,true,08/08/2024,Disappointed.
+1097,75,female,90103,Bachelor's,2,3,10,Northeast,Clothing,4,Google,False,"May 26, 2025",Disappointed.
+1255,200,Prefer not to say,85451,Master's,1,4,3,Southwest,Home & Garden,1,Email,false,"March 10, 2024",Disappointed.
+1406,68,Non-binary,,,8,2,8,Northeast,Food & Beverage,1,Social Media,False,12/19/2024,5 stars!!!
+1293,42,Prefer not to say,29775,High School,6,3,83,Southwest,Home & Garden,4,In-Store,no,10/08/2025,
+1464,45,f,,Some College,1,4,20,Southeast,Electronics,4,,Y,29-04-2025,Not satisfied with delivery time.
+1089,45,Female,85802,Associate's,6,3,6,Midwest,Electronics,4,In-Store,no,30-01-2025,Product broke after 2 weeks.
+1484,31,Non-binary,57287,Master's,2,3,18,West,Health & Beauty,3,Social Media,False,22-03-2024,no comment
+1242,29,female,44840,Master's,1,1,110,Midwest,Health & Beauty,1,Google,,2025/10/14,Packaging was damaged.
+1386,36,male,89659,PhD,8,5,10,Northeast,Clothing,3,Social Media,yes,2025-08-03,
+1421,33,Female,54276,PhD,3,1,32,Southwest,Home & Garden,2,Google,True,2024/07/09,Amazing!
+1234,43,F,98781,Some College,10,3,4,Midwest,Food & Beverage,1,TV Ad,1,2025-03-31,
+1346,45,Female,67920,PhD,9,6,14,Midwest,Home & Garden,2,,false,06/04/2025,Too expensive for what you get.
+1480,56,m,92129,PhD,10,6,2,Midwest,Food & Beverage,5,Google,False,2024/11/12,....
+1012,30,female,54128,Bachelor's,2,4,53,West,Food & Beverage,5,In-Store,N,07/05/2024,Not worth the price.
+1007,49,Male,36591,Some College,6,3,20,Southeast,Home & Garden,3,,False,09/13/2024,N/A
+1404,47,,65341,PhD,3,4,12,Southwest,Health & Beauty,5,Social Media,N,2024-02-12,Would recommend to friends.
+1453,46,Prefer not to say,37549,PhD,7,6,10,Southwest,Electronics,3,In-Store,true,05/09/2025,
+1304,47,f,16861,Master's,7,5,1,West,Food & Beverage,3,,false,2024/12/19,Excellent customer service.
+1267,62,Male,142813,Bachelor's,8,5,32,Southeast,Clothing,4,,N,03/04/2025,Product broke after 2 weeks.
+1362,50,Female,27071,PhD,8,7,1,West,Home & Garden,4,Email,no,09/03/2024,
+1416,40,f,93208,Associate's,8,0,9,Midwest,Health & Beauty,,Google,yes,17-05-2024,5 stars!!!
+1101,33,M,81744,Some College,6,5,14,Southwest,Home & Garden,5,Social Media,N,"November 27, 2025",Too expensive for what you get.
+1308,18,Female,42300,Bachelor's,3,6,26,Southeast,Health & Beauty,1,Google,1,2024/12/07,Amazing!
+1335,38,Non-binary,41717,Bachelor's,3,4,33,West,Health & Beauty,3,Email,Y,2025/06/29,....
+1027,26,M,55207,Master's,10,2,15,Midwest,Electronics,5,Email,0,"February 22, 2024",Could be improved.
+1078,39,Prefer not to say,31961,,4,5,4,Northeast,Health & Beauty,1,TV Ad,false,03/04/2025,Not worth the price.
+1363,43,Prefer not to say,58331,Associate's,1,5,4,Southeast,Health & Beauty,4,Email,yes,11/17/2024,Good value for money.
+1053,38,Female,85940,Associate's,5,1,6,Southwest,Food & Beverage,5,Social Media,0,31-10-2024,....
+1227,59,Female,52012,,5,3,6,Midwest,Electronics,4,,false,29-05-2024,Not satisfied with delivery time.
+1384,40,Female,75100,Associate's,8,4,54,Southeast,Clothing,5,In-Store,true,2024-05-20,
+1096,48,M,59616,Associate's,4,5,21,Northeast,Electronics,1,In-Store,1,"January 06, 2024",Product broke after 2 weeks.
+1500,24,f,77173,Bachelor's,6,6,48,Midwest,Electronics,5,Friend,Y,02/08/2024,Not worth the price.
+1424,22,M,87824,Master's,3,2,7,Midwest,Electronics,,Email,N,19-04-2024,Terrible experience.
+1155,41,Non-binary,178642,,9,4,4,West,Home & Garden,2,In-Store,no,25-10-2025,....
+1132,51,F,18439,Some College,10,4,3,West,Food & Beverage,1,Friend,1,03-05-2025,"Meh, it's okay."
+1318,999,m,68262,Bachelor's,5,7,11,Southwest,Health & Beauty,,In-Store,false,2024-08-29,no comment
+1376,33,female,49794,Associate's,5,2,22,Northeast,Home & Garden,2,TV Ad,1,"April 10, 2025",Packaging was damaged.
+1197,33,f,21078,,4,4,15,Southeast,Health & Beauty,4,Email,false,"March 20, 2024",Too expensive for what you get.
+1370,48,Non-binary,54770,Some College,6,2,7,Southwest,Food & Beverage,5,TV Ad,False,2025/06/06,
+1211,33,female,52744,Master's,5,4,1,Northeast,Food & Beverage,6,Email,False,2024/02/16,Packaging was damaged.
+1086,41,M,141843,Master's,1,6,21,Midwest,Food & Beverage,4,Social Media,yes,2025/04/04,Better than expected.
+1338,31,Non-binary,42255,High School,3,4,18,Southwest,Food & Beverage,2,,True,24-01-2024,Good value for money.
+1337,47,Non-binary,70710,Master's,6,6,105,Southeast,Home & Garden,1,Google,,"March 05, 2025",worst purchase ever
+1412,48,m,55526,High School,8,3,28,Southwest,Electronics,4,Friend,Y,2024-08-10,Excellent customer service.
+1219,48,Prefer not to say,43132,Associate's,6,7,21,Southeast,Home & Garden,5,Friend,yes,03-11-2024,Not satisfied with delivery time.
+1417,35,male,40720,Master's,1,2,30,Midwest,Food & Beverage,4,TV Ad,1,2024/11/03,Product broke after 2 weeks.
+1039,39,m,37652,,8,6,1,Northeast,Health & Beauty,5,Friend,yes,05-09-2024,Love the quality!
+1091,43,f,92900,Associate's,4,10,12,Northeast,Home & Garden,1,,False,"July 11, 2024",5 stars!!!
+1070,64,m,35820,High School,4,2,8,Southeast,Electronics,2,In-Store,N,2024/07/28,"Meh, it's okay."
+1107,27,female,30925,Bachelor's,5,1,105,Midwest,Health & Beauty,4,,false,27-07-2024,Fast shipping!
+1365,18,m,999999,Bachelor's,3,4,12,Southeast,Home & Garden,2,TV Ad,Y,01-11-2025,Will buy again.
+1176,25,,195992,Associate's,6,5,17,Southeast,Clothing,5,In-Store,True,2025-06-20,Would recommend to friends.
+1073,32,M,33434,Some College,2,3,1,Southeast,Electronics,1,Email,,"November 13, 2025",Could be improved.
+1095,,Non-binary,1000000,PhD,5,8,40,Northeast,Health & Beauty,2,Google,False,06/20/2025,"Meh, it's okay."
+1063,34,Female,32108,Bachelor's,7,3,50,West,Health & Beauty,3,In-Store,False,2025-10-31,Would recommend to friends.
+1169,32,f,0,High School,8,6,19,West,Home & Garden,1,Email,True,08/23/2024,....
+1090,39,M,30364,Bachelor's,9,4,5,Southwest,Electronics,1,Friend,N,2024/05/27,Would recommend to friends.
+1147,34,Prefer not to say,56065,PhD,6,7,7,West,Clothing,1,Email,false,2024-02-24,Not worth the price.
+1163,45,Prefer not to say,58884,Master's,6,9,51,Northeast,Home & Garden,2,Social Media,Y,2025/01/19,Product broke after 2 weeks.
+1130,39,Male,53531,Some College,2,5,1,Northeast,Home & Garden,2,In-Store,yes,20-11-2024,Too expensive for what you get.
+1208,53,f,20057,Some College,2,6,34,Southeast,Food & Beverage,4,Google,True,01-04-2024,Disappointed.
+1458,49,Female,999999,Master's,2,5,1,Southwest,Clothing,4,Friend,1,02-10-2024,Will buy again.
+1410,42,female,93356,,2,2,23,Midwest,Home & Garden,4,Email,N,2024/07/19,Too expensive for what you get.
+1228,,female,26478,,6,5,34,West,Home & Garden,5,Friend,true,"November 24, 2024",....
+1156,40,female,15000,Associate's,8,6,4,Southwest,Clothing,4,Social Media,False,07/31/2025,
+1003,51,Non-binary,,Associate's,8,1,27,Southeast,Food & Beverage,1,,yes,2025/11/20,Excellent customer service.
+1019,55,,22738,Master's,2,5,12,West,Health & Beauty,5,,yes,2025-07-10,
+1342,54,Non-binary,84013,High School,4,2,25,Midwest,Clothing,4,,false,2025-03-16,Great product!
+1378,39,Non-binary,86708,Some College,8,8,3,Midwest,Food & Beverage,5,Friend,false,2024/01/26,Too expensive for what you get.
+1077,37,Male,103727,Some College,6,2,27,Midwest,Home & Garden,4,Social Media,no,2024/04/09,5 stars!!!
+1402,48,F,,Associate's,2,3,20,Northeast,Home & Garden,2,In-Store,0,06/12/2025,Disappointed.
+1327,53,f,33137,Some College,3,2,1,West,Food & Beverage,,Email,0,"April 05, 2025",Not worth the price.
+1201,35,m,15000,,2,5,15,Southwest,Electronics,3,Social Media,0,2025-04-13,Will buy again.
+1287,38,,38485,Master's,10,5,1,Northeast,Home & Garden,2,,,"October 31, 2024",
+1154,44,Male,15000,Bachelor's,3,2,1,Southwest,Food & Beverage,4,TV Ad,1,"May 13, 2025",....
+1470,27,male,41412,Some College,3,4,2,Midwest,Food & Beverage,1,TV Ad,1,2024/07/18,Disappointed.
+1067,61,,85372,Master's,8,2,18,Southeast,Electronics,2,Social Media,True,10/08/2024,Disappointed.
+1183,51,Prefer not to say,62074,PhD,9,4,54,Northeast,Health & Beauty,3,Email,True,"March 27, 2025",Love the quality!
+1134,60,,55191,High School,8,4,1,Midwest,Home & Garden,1,,0,"August 02, 2024",....
+1145,32,,36668,,4,4,37,Southeast,Electronics,5,Email,1,27-11-2024,Terrible experience.
+1180,41,Non-binary,177258,High School,3,6,27,West,Electronics,2,In-Store,1,09/12/2024,....
+1451,38,,18013,Associate's,5,7,48,West,Food & Beverage,1,TV Ad,Y,11-10-2024,Good value for money.
+1250,20,M,162924,High School,8,7,5,Midwest,Electronics,4,,0,21-05-2025,Fast shipping!
+1159,62,Prefer not to say,112201,,6,4,6,Northeast,Electronics,4,Google,False,2024/06/10,Good value for money.
+1301,999,m,48274,Associate's,5,4,21,Southeast,Home & Garden,1,Social Media,,10/26/2025,Not satisfied with delivery time.
+1455,58,m,39439,High School,1,5,84,Southeast,Food & Beverage,5,In-Store,no,2024-01-10,....
+1315,26,female,19273,Some College,7,1,17,Northeast,Electronics,3,Friend,yes,05/16/2024,Would recommend to friends.
+1229,,,41629,Some College,3,5,4,West,Health & Beauty,1,Google,1,"May 06, 2024",5 stars!!!
+1146,53,Female,102078,Associate's,2,6,7,Southeast,Health & Beauty,3,,True,05-11-2025,Love the quality!
+1295,42,female,32450,,4,2,14,West,Food & Beverage,5,Google,Y,13-01-2024,Fast shipping!
+1245,39,Prefer not to say,64153,Some College,8,2,103,Northeast,Electronics,2,Google,True,"February 11, 2025",Terrible experience.
+1213,43,female,64313,Associate's,9,5,1,Southwest,Health & Beauty,1,Email,0,"June 08, 2024",Fast shipping!
+1171,57,,26266,Associate's,7,3,26,Southeast,Electronics,1,TV Ad,N,2025-09-15,Terrible experience.
+1331,57,male,44427,Associate's,1,7,20,Southeast,Food & Beverage,3,Friend,false,09-05-2024,5 stars!!!
+1018,57,M,99929,PhD,2,4,25,Midwest,Health & Beauty,5,Social Media,True,"May 26, 2025",Product broke after 2 weeks.
+1469,41,Male,59710,High School,4,8,34,Southwest,Electronics,,,True,2024-09-07,Could be improved.
+1021,37,male,111907,PhD,7,3,9,Southeast,Home & Garden,3,Social Media,False,08-08-2025,Too expensive for what you get.
+1131,24,male,18283,High School,7,4,6,Northeast,Food & Beverage,3,Social Media,False,2025/07/20,Great product!
+1388,44,F,32206,Bachelor's,10,6,1,West,Clothing,2,Friend,True,2025-02-23,"Meh, it's okay."
+1497,25,M,999999,,5,8,5,Northeast,Clothing,4,Google,1,2024-10-13,Not satisfied with delivery time.
+1461,20,Non-binary,42124,Master's,2,4,15,Southwest,Electronics,4,Google,N,2025-08-04,Not worth the price.
+1352,47,F,29075,,7,5,7,Midwest,Home & Garden,2,Friend,N,04/21/2024,Too expensive for what you get.
+1313,28,female,27187,,4,3,29,West,Home & Garden,1,Friend,,"November 07, 2024",Not satisfied with delivery time.
+1150,38,male,53975,Bachelor's,7,5,24,Southwest,Electronics,2,Google,yes,"April 08, 2025",5 stars!!!
+1341,28,Male,52753,High School,1,5,43,Southeast,Clothing,1,Email,N,2024-09-22,Great product!
+1486,49,,41556,,6,4,26,Northeast,Electronics,5,TV Ad,yes,2025-05-23,Better than expected.
+1340,52,m,56595,Master's,3,5,2,Northeast,Health & Beauty,3,TV Ad,yes,2025/07/17,Not satisfied with delivery time.
+1439,31,female,50326,PhD,4,4,16,Southwest,Electronics,3,TV Ad,Y,11-05-2025,
+1218,39,male,,PhD,4,4,30,Northeast,Home & Garden,5,Social Media,N,08/26/2024,Too expensive for what you get.
+1438,49,Non-binary,130227,High School,4,2,53,Southwest,Food & Beverage,2,Friend,0,29-08-2025,
+1015,33,Prefer not to say,,Associate's,6,2,17,Southwest,Health & Beauty,4,Email,true,2024/06/28,Not satisfied with delivery time.
+1056,27,m,,Master's,1,2,18,Midwest,Health & Beauty,2,,false,2024-03-01,Excellent customer service.
+1076,46,Male,80831,High School,6,6,31,West,Health & Beauty,2,Friend,yes,2025/10/16,N/A
+1411,32,Non-binary,47407,,6,4,18,Southeast,Health & Beauty,3,Friend,1,"January 02, 2024",Better than expected.
+1040,40,Prefer not to say,,PhD,6,6,3,Southwest,Clothing,4,Friend,false,03/20/2024,Packaging was damaged.
+1210,29,Male,101504,Associate's,6,4,41,West,Electronics,1,Social Media,true,2024-04-20,Not satisfied with delivery time.
+1466,43,male,74971,Master's,6,1,7,Southwest,Food & Beverage,5,In-Store,,08/18/2024,Good value for money.
+1305,55,F,,Bachelor's,2,3,8,Northeast,Home & Garden,1,Email,False,"December 12, 2024",
+1269,26,female,15000,Master's,3,8,40,Northeast,Electronics,4,In-Store,Y,07-07-2025,no comment
+1188,54,M,41185,Master's,3,4,12,Northeast,Home & Garden,,Google,true,"November 08, 2025",Could be improved.
+1179,,male,67636,Master's,2,7,22,Midwest,Food & Beverage,3,Google,,2025/07/11,Product broke after 2 weeks.
+1441,29,male,33181,Master's,5,3,1,Southeast,Home & Garden,1,Google,,"December 18, 2024",Not worth the price.
+1383,49,Non-binary,50715,PhD,7,5,24,Southwest,Food & Beverage,3,Google,yes,"February 05, 2024",
+1440,49,,67783,,8,2,36,Southeast,Clothing,2,Google,yes,2024/03/21,Love the quality!
+1266,24,Prefer not to say,32428,,2,4,3,Northeast,Food & Beverage,3,Email,no,"January 13, 2024",
+1100,41,female,39326,PhD,2,2,17,Northeast,Health & Beauty,5,Social Media,yes,2024/09/27,N/A
+1420,32,M,19524,PhD,10,3,52,West,Electronics,2,Google,no,02-10-2024,Great product!
+1369,54,F,21587,Associate's,2,5,12,Southeast,Clothing,3,Social Media,yes,2025-09-11,Love the quality!
+1212,38,female,38756,,6,3,5,Northeast,Health & Beauty,5,TV Ad,1,"June 20, 2025",Great product!
+1246,41,m,48572,Master's,1,4,16,Midwest,Clothing,5,TV Ad,,2024-05-06,"Meh, it's okay."
+1294,50,male,37572,PhD,6,6,74,Midwest,Clothing,1,Social Media,True,2025-01-30,Product broke after 2 weeks.
+1492,29,m,32812,Associate's,4,4,55,Midwest,Food & Beverage,1,TV Ad,1,10/24/2025,
+1311,56,Prefer not to say,178864,Associate's,5,4,17,West,Food & Beverage,2,TV Ad,true,"November 24, 2025",
+1298,33,Non-binary,64600,,6,2,2,Southwest,Health & Beauty,1,TV Ad,False,10-12-2024,N/A
+1105,32,,39371,Bachelor's,4,1,75,Southeast,Health & Beauty,5,TV Ad,,11/23/2024,5 stars!!!
+1043,44,F,30287,Master's,1,4,4,Southwest,Health & Beauty,2,In-Store,Y,2025/10/15,no comment
+1061,60,male,58077,Some College,5,2,2,Northeast,Food & Beverage,5,,1,27-11-2025,N/A
+1193,32,F,70564,Bachelor's,5,2,22,Southwest,Home & Garden,1,,,"August 20, 2025",
+1448,60,Non-binary,72042,PhD,5,3,8,West,Electronics,2,Social Media,yes,2025/08/06,Excellent customer service.
+1279,59,Male,50726,Some College,6,5,63,Northeast,Electronics,2,Email,1,2025-05-16,Excellent customer service.
+1489,45,female,34308,High School,1,5,5,Southwest,Clothing,3,,Y,2024-07-14,no comment
+1409,-5,m,22725,Some College,2,8,14,West,Health & Beauty,1,Social Media,true,"April 11, 2025",
+1403,48,,76185,Master's,6,6,4,Southeast,Clothing,4,Google,0,08/17/2024,Love the quality!
+1013,47,male,33162,,1,6,17,West,Home & Garden,5,Google,,2024-04-20,Not satisfied with delivery time.
+1247,49,female,17043,Associate's,3,6,6,Southeast,Electronics,5,Social Media,N,09/12/2025,Not worth the price.
+1141,39,Prefer not to say,29427,High School,8,5,10,Southeast,Health & Beauty,5,Friend,false,23-02-2025,Product broke after 2 weeks.
+1375,45,m,117346,Some College,1,0,34,Northeast,Electronics,4,Friend,False,2025-06-07,5 stars!!!
+1241,21,,25240,Bachelor's,5,4,14,West,Electronics,1,,true,03-01-2025,Not worth the price.
+1207,50,M,,Some College,3,4,23,Midwest,Home & Garden,3,In-Store,False,16-01-2025,Product broke after 2 weeks.
+1114,46,f,98708,,8,3,1,West,Clothing,1,,1,2024/04/16,
+1020,33,f,123656,Bachelor's,10,7,1,Northeast,Clothing,4,TV Ad,True,05-03-2024,N/A
+1224,70,,95754,Associate's,10,5,13,Southeast,Home & Garden,5,Google,yes,11/08/2025,Could be improved.
+1239,32,female,46648,PhD,1,8,12,Northeast,Clothing,4,,1,2024/03/17,Fast shipping!
+1119,40,M,39209,Master's,7,4,1,Southeast,Electronics,4,Google,no,02-04-2025,Too expensive for what you get.
+1381,57,M,53344,PhD,9,6,38,Northeast,Electronics,3,Email,Y,2024/07/30,Fast shipping!
+1493,18,m,24295,,10,1,31,Southwest,Food & Beverage,4,Google,False,11/05/2025,Great product!
+1483,18,F,15000,High School,1,4,33,Southeast,Food & Beverage,4,Google,true,09/17/2025,Love the quality!
+1355,39,m,60602,Associate's,6,1,7,Northeast,Food & Beverage,,In-Store,,2025-08-25,worst purchase ever
+1115,43,Prefer not to say,28946,Master's,1,5,1,Southwest,Electronics,5,TV Ad,Y,"June 30, 2024",Product broke after 2 weeks.
+1395,30,female,35751,Bachelor's,9,2,18,West,Food & Beverage,2,Social Media,yes,17-12-2024,Good value for money.
+1345,41,Prefer not to say,17022,Bachelor's,9,2,79,Midwest,Health & Beauty,5,In-Store,true,12/19/2024,....
+1498,27,Non-binary,74715,Associate's,2,2,31,Midwest,Health & Beauty,4,In-Store,Y,2024/10/19,
+1456,0,M,51950,High School,4,5,85,Midwest,Clothing,2,,True,10/29/2024,worst purchase ever
+1028,19,f,98601,Associate's,9,1,6,Southeast,Health & Beauty,3,In-Store,,2024/02/18,Better than expected.
+1258,50,,37430,High School,5,5,29,Southeast,Health & Beauty,4,,0,10-10-2025,worst purchase ever
+1292,30,m,51621,Bachelor's,8,6,12,Southeast,Electronics,5,Google,yes,2024/02/11,Will buy again.
+1087,50,Prefer not to say,999999,Associate's,3,3,1,Northeast,Clothing,5,,,2024/11/04,
+1252,70,Female,33621,PhD,2,2,33,Southwest,Clothing,1,Social Media,0,06-08-2024,Fast shipping!
+1104,50,Prefer not to say,20585,,1,7,1,Northeast,Home & Garden,5,Email,0,10-02-2024,Better than expected.
+1058,43,female,83271,High School,9,4,11,Midwest,Health & Beauty,1,Social Media,,16-07-2024,Amazing!
+1026,40,Non-binary,52468,Some College,4,7,4,West,Electronics,4,In-Store,False,2024-06-06,Good value for money.
+1319,,Male,20682,PhD,2,7,5,Southwest,Clothing,4,In-Store,yes,19-03-2025,Great product!
+1168,28,M,63206,,10,4,16,Northeast,Electronics,3,,,"November 04, 2024",Would recommend to friends.
+1471,40,female,64306,Master's,3,6,1,Southwest,Clothing,5,Social Media,,27-05-2024,no comment
+1496,58,,231825,PhD,9,4,46,Southeast,Electronics,,Email,N,"February 07, 2025",Disappointed.
+1429,44,Female,108072,,9,5,16,Southeast,Clothing,3,Friend,False,"July 04, 2024",Not satisfied with delivery time.
+1222,35,Non-binary,88930,Bachelor's,2,3,6,Midwest,Electronics,3,Social Media,1,11/18/2025,Too expensive for what you get.
+1436,36,m,28185,PhD,5,8,3,Southwest,Clothing,3,TV Ad,1,05-01-2024,"Meh, it's okay."
+1106,25,,99968,Some College,6,2,46,West,Food & Beverage,4,Email,False,"June 28, 2024",Would recommend to friends.
+1297,50,male,36866,Associate's,2,5,1,Northeast,Electronics,5,Email,yes,08/27/2025,Not satisfied with delivery time.
+1426,56,Non-binary,22246,Bachelor's,7,9,14,Southeast,Health & Beauty,4,Email,Y,2024/04/02,Packaging was damaged.
+1221,57,Prefer not to say,45604,Some College,8,4,1,Southeast,Clothing,2,In-Store,no,2025-01-02,"Meh, it's okay."
+1467,46,F,54956,Some College,9,6,79,Midwest,Food & Beverage,1,Google,,2024-11-27,....
+1049,28,F,94050,PhD,10,4,18,Southeast,Food & Beverage,1,Email,true,01/20/2025,Amazing!
+1098,38,Female,39751,PhD,1,0,15,Southwest,Clothing,5,In-Store,true,08/04/2024,Product broke after 2 weeks.
+1209,53,Male,18586,Bachelor's,2,3,55,West,Food & Beverage,4,Google,0,02/14/2024,
+1289,47,Non-binary,,PhD,3,3,6,Northeast,Clothing,4,Email,N,2025-10-14,5 stars!!!
+1125,54,Male,51125,Master's,8,3,2,Southeast,Clothing,5,,1,"September 30, 2025",Will buy again.
+1243,58,f,57474,Master's,7,6,35,Southeast,Electronics,,Email,Y,2025/12/01,Excellent customer service.
+1068,50,Prefer not to say,83406,PhD,9,5,17,Northeast,Electronics,5,Email,True,2025/11/25,Amazing!
+1110,45,Non-binary,42292,Master's,7,7,7,Midwest,Health & Beauty,5,Google,yes,17-05-2024,Could be improved.
+1320,30,Male,37655,Master's,5,1,7,Southeast,Electronics,5,Email,False,2025-06-16,Better than expected.
+1433,18,Female,21082,Master's,10,4,1,Midwest,Home & Garden,3,Email,true,2025/11/27,worst purchase ever
+1122,40,Non-binary,40719,PhD,8,6,23,Midwest,Home & Garden,4,In-Store,1,2025-11-06,5 stars!!!
+1264,31,male,40480,,6,6,12,Southwest,Health & Beauty,2,TV Ad,,2024-01-06,Excellent customer service.
+1278,30,Male,16615,High School,10,7,24,Northeast,Food & Beverage,5,Social Media,N,02/28/2024,N/A
+1170,,,18949,Some College,1,1,1,Southwest,Health & Beauty,2,In-Store,True,01/03/2025,N/A
+1401,-5,Male,128969,Bachelor's,7,3,3,West,Health & Beauty,1,Google,Y,"October 18, 2024",
+1035,54,F,122129,Master's,7,1,10,Southwest,Electronics,1,Email,False,30-05-2025,Fast shipping!
+1281,35,F,54241,PhD,5,3,24,West,Food & Beverage,3,,no,2025/11/28,
+1031,48,F,55494,Some College,4,4,18,Midwest,Food & Beverage,1,In-Store,true,11-09-2024,Would recommend to friends.
+1419,52,Female,17707,Master's,6,2,3,Midwest,Clothing,2,TV Ad,0,08/28/2024,Will buy again.
+1482,32,m,15128,,2,7,37,Northeast,Electronics,5,Google,Y,2024/02/13,Packaging was damaged.
+1371,52,Prefer not to say,113037,,9,7,29,Midwest,Food & Beverage,1,Email,yes,"May 04, 2025",Not satisfied with delivery time.
+1399,38,,27117,High School,9,2,52,West,Home & Garden,2,TV Ad,N,13-04-2024,Packaging was damaged.
+1011,62,Non-binary,27483,PhD,6,1,24,Midwest,Clothing,3,Social Media,yes,2024/10/13,Product broke after 2 weeks.
+1174,35,,34985,Bachelor's,4,5,106,Southwest,Food & Beverage,2,TV Ad,True,2024/06/29,Could be improved.
+1478,39,,152486,,8,2,16,Midwest,Home & Garden,4,Google,1,03/02/2024,Will buy again.
+1116,35,f,46107,Bachelor's,9,1,11,Southwest,Home & Garden,3,,,09/12/2025,
+1378,47,male,41970,Bachelor's,9,4,52,West,Food & Beverage,3,TV Ad,,05/28/2024,N/A
+1062,64,,99099,High School,2,5,18,Southeast,Home & Garden,3,In-Store,true,2025/09/11,Will buy again.
+1232,47,Female,54719,Master's,7,5,5,Southeast,Clothing,2,In-Store,true,03/22/2024,Product broke after 2 weeks.
+1265,25,f,44316,Master's,9,5,14,Northeast,Electronics,4,Social Media,0,10-09-2024,Good value for money.
+1225,35,male,,Associate's,6,8,12,Midwest,Food & Beverage,3,Email,no,"May 18, 2024",Product broke after 2 weeks.
+1325,41,,34869,Associate's,9,7,37,Midwest,Home & Garden,1,TV Ad,true,2025/01/09,Will buy again.
+1373,,Non-binary,57611,Bachelor's,5,4,95,West,Health & Beauty,,TV Ad,no,2024-11-02,worst purchase ever
+1160,37,m,96339,Some College,7,3,34,Southwest,Food & Beverage,4,,yes,13-08-2024,Would recommend to friends.
+1103,41,Prefer not to say,56629,Bachelor's,9,9,2,Midwest,Food & Beverage,2,Social Media,False,2025/10/14,
+1323,18,f,-5000,PhD,1,4,51,Southeast,Electronics,4,In-Store,True,2024-08-26,Excellent customer service.
+1481,-5,Female,69991,Master's,6,2,15,West,Electronics,2,Google,true,2025-02-05,Disappointed.
+1422,18,F,96227,High School,4,3,39,West,Food & Beverage,2,TV Ad,False,06/17/2025,Could be improved.
+1407,55,Female,28663,Associate's,9,1,147,Southwest,Electronics,2,Social Media,True,11/13/2025,Too expensive for what you get.
+1382,32,M,86844,High School,7,1,32,Southeast,Electronics,4,In-Store,N,07-06-2024,worst purchase ever
+1085,49,Male,66771,,1,7,16,Northeast,Home & Garden,1,Friend,no,26-08-2024,Disappointed.
+1282,52,f,44451,Master's,6,2,2,Southeast,Home & Garden,4,Email,true,2025/07/09,Love the quality!
+1244,31,Female,15737,,10,4,1,Southwest,Clothing,3,,true,08-07-2025,Good value for money.
+1066,200,female,55713,PhD,6,3,39,Southwest,Clothing,5,,yes,"July 13, 2024",no comment
+1065,39,Prefer not to say,74640,Bachelor's,2,6,10,Northeast,Health & Beauty,2,Friend,True,2024-07-25,Could be improved.
+1273,,,29354,PhD,10,5,27,Southwest,Home & Garden,,Friend,N,2024-03-13,Love the quality!
+1443,46,Male,79560,Bachelor's,9,6,16,West,Home & Garden,5,Social Media,Y,2024-02-11,Terrible experience.
+1249,28,Non-binary,32311,PhD,7,3,1,Southeast,Clothing,2,Email,Y,2025-03-01,worst purchase ever
+1044,36,f,33667,High School,3,2,43,Southeast,Health & Beauty,2,Email,N,29-03-2025,Fast shipping!
+1437,42,Female,29287,,6,2,44,Southwest,Clothing,5,In-Store,true,2025/01/03,Good value for money.
+1392,,M,96312,PhD,3,7,27,Midwest,Electronics,3,Google,true,"July 20, 2025",Disappointed.
+1124,18,Male,,Bachelor's,3,2,4,Southeast,Home & Garden,2,Social Media,true,"April 04, 2024",Better than expected.
+1030,40,Male,87486,Some College,8,5,36,Southwest,Electronics,5,TV Ad,False,27-02-2024,Packaging was damaged.
+1123,59,Male,37689,Associate's,10,5,11,Northeast,Food & Beverage,3,Email,N,02-06-2024,Amazing!
+1158,43,,36138,Master's,10,6,50,Southwest,Health & Beauty,4,Friend,1,2024-12-10,Could be improved.
+1372,,female,44861,Master's,3,4,25,Southeast,Food & Beverage,5,Friend,Y,"September 22, 2025","Meh, it's okay."
+1343,29,female,96303,High School,2,5,11,West,Food & Beverage,3,Email,,25-01-2024,Product broke after 2 weeks.
+1010,18,f,52649,,4,1,11,Southeast,Home & Garden,1,Google,True,"September 05, 2024",Excellent customer service.
+1251,38,M,26994,Bachelor's,8,4,14,West,Electronics,2,Friend,Y,19-06-2025,Disappointed.
+1166,42,male,68068,Master's,10,6,1,Southwest,Electronics,2,,N,2024-10-04,Good value for money.
+1307,,female,73402,Associate's,6,2,8,Northeast,Electronics,4,Friend,yes,2025-06-04,Fast shipping!
+1001,50,Male,52110,Master's,9,2,8,Northeast,Electronics,3,TV Ad,yes,2024-06-09,Packaging was damaged.
+1272,63,F,54114,PhD,5,2,36,Northeast,Home & Garden,1,Email,true,08/18/2024,Fast shipping!
+1277,42,Male,42876,Associate's,10,2,6,Southeast,Food & Beverage,3,Email,false,"April 04, 2025",Excellent customer service.
+1083,62,Non-binary,46075,Some College,5,5,113,Southwest,Clothing,2,In-Store,N,10-06-2024,Would recommend to friends.
+1192,18,Male,67660,Some College,1,2,5,Midwest,Food & Beverage,3,Friend,0,04/19/2024,Product broke after 2 weeks.
+1364,42,Prefer not to say,60071,Some College,10,5,26,Southeast,Clothing,4,Friend,Y,2025/09/11,....
+1494,28,female,30136,Some College,4,5,3,Northeast,Food & Beverage,3,TV Ad,0,11/18/2025,worst purchase ever
+1418,24,f,25503,Bachelor's,8,5,7,Southeast,Food & Beverage,4,In-Store,false,"February 07, 2025",5 stars!!!
+1334,39,,43992,PhD,2,2,4,West,Food & Beverage,2,Email,Y,2025-02-09,Disappointed.
+1408,61,M,20860,Bachelor's,5,5,77,West,Clothing,1,In-Store,Y,2024/05/25,N/A
+1153,38,Male,50451,Associate's,9,3,23,Southeast,Food & Beverage,2,TV Ad,N,2024/07/25,Would recommend to friends.
+1321,46,male,63293,High School,8,4,24,Midwest,Electronics,5,Email,1,"January 22, 2025",Better than expected.
+1055,42,Female,27615,Some College,3,3,1,Southeast,Clothing,3,Social Media,no,10/22/2024,Too expensive for what you get.
+1260,48,M,71046,Master's,8,3,45,West,Health & Beauty,4,Friend,0,2025/08/25,Good value for money.
+1092,39,Prefer not to say,,PhD,5,3,15,Southwest,Health & Beauty,2,Friend,True,30-10-2025,Not satisfied with delivery time.
+1257,,Prefer not to say,30403,High School,1,4,34,Northeast,Food & Beverage,3,Email,,"September 01, 2025",
+1377,46,Prefer not to say,21884,,5,7,10,Midwest,Home & Garden,4,,Y,07-03-2024,Could be improved.
+1002,19,F,23701,Some College,4,2,16,Southwest,Electronics,5,Google,no,11-09-2025,Not worth the price.
+1432,52,Non-binary,38398,Some College,10,6,10,Southwest,Food & Beverage,4,,1,09/16/2025,....
+1081,51,Male,,Associate's,2,7,21,Southeast,Health & Beauty,3,Social Media,Y,10/14/2025,Great product!
+1223,34,F,26483,PhD,9,2,1,Midwest,Electronics,4,In-Store,N,2025-09-22,Product broke after 2 weeks.
+1452,42,,75040,High School,3,7,50,West,Clothing,5,Social Media,no,2025-02-27,Amazing!
+1058,18,Female,1000000,,6,1,3,Northeast,Clothing,4,In-Store,Y,"June 18, 2024",
+1476,46,F,74172,High School,5,2,8,West,Electronics,4,,true,"August 09, 2024",Terrible experience.
+1329,18,M,26424,Master's,9,0,31,Northeast,Food & Beverage,3,TV Ad,Y,13-11-2024,Excellent customer service.
+1423,31,Non-binary,101765,Associate's,1,6,11,West,Food & Beverage,1,Social Media,True,2025-08-31,Fast shipping!
+1072,,Non-binary,80204,High School,10,7,18,Midwest,Clothing,3,Email,false,2025-03-27,Will buy again.
+1059,30,M,67071,High School,4,4,22,Southwest,Home & Garden,3,Email,0,2024-06-24,Terrible experience.
+1444,56,f,26934,Associate's,1,4,64,Northeast,Food & Beverage,2,In-Store,N,2025/08/29,
+1006,49,m,83499,PhD,2,8,10,West,Health & Beauty,4,Google,no,2024/11/13,Could be improved.
+1284,48,Prefer not to say,78226,Some College,6,5,37,Midwest,Food & Beverage,1,Social Media,no,04/17/2025,Terrible experience.
+1129,32,male,116617,Associate's,2,2,29,Midwest,Health & Beauty,5,TV Ad,yes,2025/08/27,"Meh, it's okay."
+1271,41,f,64400,,10,5,16,West,Food & Beverage,2,Friend,,2025-11-16,5 stars!!!
+1240,51,f,63106,Bachelor's,9,4,48,Northeast,Food & Beverage,1,Email,False,2025/09/02,Fast shipping!
+1359,35,Male,29211,PhD,1,6,42,Southeast,Clothing,5,Email,no,07/19/2024,no comment
+1196,36,,53424,Master's,6,3,23,Northeast,Health & Beauty,,Email,yes,10-05-2024,Not satisfied with delivery time.
+1198,59,M,,PhD,6,3,13,Northeast,Home & Garden,5,TV Ad,,2024/11/21,Better than expected.
+1033,29,,25086,PhD,7,3,26,Midwest,Food & Beverage,2,Friend,True,2024-03-14,Excellent customer service.
+1306,59,female,24070,Some College,7,3,7,West,Health & Beauty,4,Email,yes,2025/07/19,Better than expected.
+1477,49,Prefer not to say,,Master's,4,3,4,Southwest,Home & Garden,3,Google,True,2025/08/04,....
+1349,63,Male,33927,,5,4,5,West,Health & Beauty,1,Friend,no,2025-10-07,no comment
+1479,18,F,45395,PhD,1,4,1,West,Food & Beverage,3,TV Ad,false,28-10-2024,Product broke after 2 weeks.
+1450,40,F,54798,High School,8,4,1,Southwest,Clothing,3,,N,28-01-2024,Could be improved.
+1079,58,F,90057,Bachelor's,5,6,4,Northeast,Electronics,2,In-Store,no,01/13/2025,Will buy again.
+1057,38,male,57877,Bachelor's,2,4,20,Southeast,Health & Beauty,4,,yes,01/27/2025,no comment
+1025,37,m,18506,High School,5,6,1,Northeast,Electronics,3,TV Ad,Y,2024/08/27,no comment
+1047,29,male,45046,Bachelor's,8,6,21,West,Home & Garden,1,Google,Y,14-10-2025,Not worth the price.
+1253,63,F,106321,High School,5,2,5,Southwest,Food & Beverage,2,In-Store,,08/25/2025,Amazing!
+1261,47,male,-5000,,2,0,6,Northeast,Food & Beverage,4,Social Media,0,17-10-2024,Love the quality!
+1071,49,M,32235,,4,1,14,Southwest,Electronics,5,Friend,yes,"November 03, 2025",
+1405,29,male,73808,High School,8,7,5,Midwest,Food & Beverage,3,Social Media,1,16-03-2024,worst purchase ever
+1447,62,M,114715,Some College,8,3,60,Northeast,Food & Beverage,4,Friend,,2025-05-18,Excellent customer service.
+1205,51,Prefer not to say,93319,Associate's,5,6,6,Northeast,Electronics,3,,no,2024/01/20,Excellent customer service.
+1299,,M,202465,Associate's,6,5,41,West,Health & Beauty,,In-Store,no,2025/05/04,Better than expected.
+1220,35,Male,999999,High School,10,1,16,Southwest,Home & Garden,1,In-Store,,02-04-2024,Disappointed.
+1300,18,f,48615,Some College,3,5,4,Southwest,Electronics,3,In-Store,yes,19-04-2024,Could be improved.
+1135,32,m,67888,Associate's,10,4,8,Southeast,Food & Beverage,3,TV Ad,Y,2025-04-05,Not satisfied with delivery time.
+1276,27,M,52039,Associate's,9,5,58,West,Health & Beauty,1,Google,1,2025-05-15,Could be improved.
+1495,18,m,45466,Some College,1,4,11,Midwest,Electronics,5,Google,False,2024/04/26,
+1127,46,m,54454,Associate's,7,7,4,Midwest,Electronics,2,Social Media,0,"February 16, 2024",Product broke after 2 weeks.
+1072,83,male,27100,Bachelor's,9,3,1,Southeast,Food & Beverage,2,Google,,2025/09/19,worst purchase ever
+1462,49,Male,,Some College,2,4,1,Southwest,Home & Garden,4,In-Store,1,07/30/2024,N/A
+1074,32,m,23037,High School,10,2,22,Southeast,Food & Beverage,3,Social Media,yes,"January 05, 2024","Meh, it's okay."
+1235,22,Male,34931,PhD,9,5,18,Southeast,Food & Beverage,3,Google,0,04/25/2024,no comment
+1330,57,f,92330,High School,1,5,2,Midwest,Home & Garden,5,,no,2024-02-14,5 stars!!!
+1203,29,male,57138,High School,2,3,11,Southeast,Food & Beverage,2,In-Store,,11/29/2024,worst purchase ever
+1256,40,m,54505,Master's,4,2,37,Northeast,Food & Beverage,4,Friend,0,2025/09/16,Product broke after 2 weeks.
+1336,41,m,30977,Some College,6,4,30,Southeast,Electronics,2,Google,no,2025/04/14,Product broke after 2 weeks.
+1393,59,F,53061,Associate's,10,6,46,Southeast,Health & Beauty,1,TV Ad,Y,05/15/2025,
+1397,40,M,90583,Some College,4,4,1,Midwest,Food & Beverage,5,Friend,N,2024/01/06,Not satisfied with delivery time.
+1368,38,Non-binary,,PhD,7,4,11,West,Electronics,5,,True,02/20/2025,Excellent customer service.
+1291,55,Male,,Associate's,5,5,10,Southeast,Food & Beverage,1,TV Ad,no,2024/05/21,Product broke after 2 weeks.
+1109,33,f,-5000,Master's,6,5,5,Southwest,Electronics,5,Email,N,2024-07-31,
+1034,39,M,43244,Bachelor's,1,0,39,Northeast,Food & Beverage,3,Social Media,1,"October 25, 2025",....
+1138,71,m,57590,PhD,2,4,38,West,Health & Beauty,2,Social Media,false,"September 30, 2024",no comment
+1206,63,Female,24672,PhD,2,4,53,West,Health & Beauty,3,TV Ad,N,2025-01-11,Love the quality!
+1162,42,Male,60694,High School,2,6,15,Southeast,Home & Garden,2,,0,2025-06-17,Terrible experience.
+1013,45,male,27100,Associate's,1,2,5,Midwest,Clothing,2,,Y,22-10-2025,Not worth the price.
+1118,55,Female,81665,PhD,9,2,28,West,Food & Beverage,3,Friend,true,2024/08/20,Packaging was damaged.
+1029,39,M,98079,Some College,10,6,9,Southeast,Health & Beauty,2,Friend,0,2024-04-29,Fast shipping!
+1398,36,Female,30018,High School,6,4,40,Midwest,Clothing,2,Email,true,2024-05-04,Better than expected.
+1394,33,f,75175,Associate's,9,1,28,Southwest,Home & Garden,3,,N,11/13/2025,
+1167,52,f,26765,Master's,1,1,1,Southeast,Health & Beauty,5,,0,01-04-2025,Would recommend to friends.
+1351,18,m,40151,,5,2,9,Southeast,Electronics,1,Email,yes,2024/07/18,Fast shipping!
+1488,48,M,73309,Some College,7,5,2,Midwest,Food & Beverage,3,Social Media,no,2025-07-28,Love the quality!
+1286,37,female,77193,,7,3,12,West,Clothing,2,Friend,true,"May 01, 2025",Fast shipping!
+1353,50,female,101608,Bachelor's,7,4,34,Southeast,Health & Beauty,2,Friend,1,25-01-2025,Disappointed.
+1328,33,F,109200,PhD,8,3,23,Southeast,Electronics,3,In-Store,,2025-04-28,N/A
+1139,50,male,56930,Some College,1,6,21,Northeast,Home & Garden,5,In-Store,false,2025/08/18,
+1465,56,,61119,High School,6,7,14,Southwest,Health & Beauty,,Social Media,1,2025-08-18,Excellent customer service.
+1237,18,male,100078,Bachelor's,7,5,25,Midwest,Electronics,1,Email,0,10/05/2025,worst purchase ever
+1430,58,Non-binary,31398,,5,5,43,Midwest,Home & Garden,2,Google,1,14-06-2025,Packaging was damaged.
+1126,35,male,67093,Some College,4,7,20,Southwest,Health & Beauty,5,In-Store,Y,2024/04/26,Good value for money.
+1459,60,male,61808,Bachelor's,6,3,1,Southeast,Food & Beverage,3,Friend,true,2024-01-30,"Meh, it's okay."
+1274,39,m,30198,High School,7,7,32,Northeast,Electronics,,TV Ad,yes,02/13/2024,Too expensive for what you get.
+1088,39,Prefer not to say,83885,Bachelor's,1,3,87,Northeast,Home & Garden,1,Email,0,08/24/2025,Product broke after 2 weeks.
+1431,,male,33558,PhD,6,3,1,Midwest,Clothing,5,Friend,Y,2025-08-06,Too expensive for what you get.
+1312,39,Non-binary,31321,Bachelor's,3,1,6,Southwest,Electronics,2,Email,no,"January 10, 2025",Product broke after 2 weeks.
+1037,18,male,42678,Master's,4,1,3,Southwest,Clothing,3,Google,no,"April 22, 2024",Excellent customer service.
+1332,41,F,65359,Bachelor's,8,4,3,Northeast,Food & Beverage,3,In-Store,no,"August 19, 2024",Not worth the price.
+1350,31,m,22523,,8,2,39,Midwest,Clothing,,In-Store,no,2025-11-19,Better than expected.
+1491,36,Male,28112,Associate's,10,2,15,Northeast,Clothing,3,Friend,N,2025-02-17,"Meh, it's okay."
+1137,50,F,16789,PhD,5,4,23,West,Home & Garden,4,TV Ad,Y,10/12/2024,worst purchase ever
+1344,40,f,16886,Some College,1,2,41,Northeast,Electronics,1,Friend,yes,11-09-2025,Excellent customer service.
+1108,40,Male,33478,Master's,8,7,43,Southeast,Home & Garden,3,Email,false,"July 07, 2025",Great product!
+1182,,female,24085,Master's,6,7,9,West,Food & Beverage,5,In-Store,true,2024/06/17,Not worth the price.
+1190,35,f,125208,Master's,9,3,20,Southwest,Health & Beauty,2,Email,True,04-02-2025,Could be improved.
+1084,38,,39706,Bachelor's,1,5,20,Northeast,Health & Beauty,,,false,"December 23, 2024",Great product!
+1187,79,female,34429,Bachelor's,7,3,62,Midwest,Electronics,3,Email,False,08-03-2024,Too expensive for what you get.
+1428,,Female,,Associate's,7,5,2,Southwest,Health & Beauty,4,Email,True,2024/11/20,
+1326,30,f,99492,Bachelor's,8,4,49,Southwest,Home & Garden,4,Friend,no,2025-10-12,Disappointed.
+1233,44,F,29639,Some College,10,0,49,Northeast,Health & Beauty,1,Email,Y,2025/05/01,Love the quality!
+1475,29,F,67568,Associate's,9,4,15,Midwest,Clothing,5,TV Ad,,07/14/2025,Great product!
+1468,59,male,27947,,8,5,16,Midwest,Health & Beauty,4,Email,,"March 02, 2024",Love the quality!
+1052,32,male,156923,,7,5,5,West,Home & Garden,2,,yes,30-09-2024,N/A
+1499,22,m,53356,Some College,1,4,1,Southeast,Home & Garden,4,TV Ad,,02/07/2024,Product broke after 2 weeks.
+1454,,F,15000,,1,4,14,West,Electronics,3,Email,true,2024/03/06,Packaging was damaged.
+1149,34,female,59736,Some College,4,3,38,Northeast,Health & Beauty,5,In-Store,N,21-06-2025,Could be improved.
+1396,62,Male,33895,,10,3,20,West,Clothing,1,Friend,0,2024/10/08,Not worth the price.
+1117,39,f,73217,High School,6,1,42,Southwest,Food & Beverage,3,,1,2025/01/06,....
+1339,63,,53247,,1,2,78,Southeast,Home & Garden,3,,,"May 04, 2024","Meh, it's okay."
+1024,49,female,55133,Bachelor's,2,8,7,Southeast,Home & Garden,4,In-Store,false,2025/10/21,
+1036,55,f,91402,,6,4,14,West,Electronics,5,Google,false,"March 06, 2025",5 stars!!!
+1361,30,f,23136,Associate's,3,5,2,West,Clothing,,Friend,,08-11-2024,
+1099,46,Non-binary,24621,Associate's,3,4,15,Southwest,Food & Beverage,4,,1,09/23/2024,no comment
+1296,58,F,78154,Some College,7,5,1,West,Health & Beauty,5,In-Store,N,10/03/2025,Would recommend to friends.
+1186,50,male,,PhD,7,7,5,Southwest,Home & Garden,2,Email,False,"January 15, 2024",Not worth the price.
+1442,26,,35689,Some College,4,4,8,Midwest,Home & Garden,4,,0,09/06/2025,Terrible experience.
+1317,27,male,15562,Bachelor's,5,3,18,Southeast,Health & Beauty,5,In-Store,,2025-04-14,Great product!
+1322,41,female,41506,Associate's,7,8,1,Southwest,Home & Garden,1,Social Media,0,27-04-2025,
+1425,52,Prefer not to say,64862,High School,5,3,94,Southwest,Health & Beauty,3,Friend,Y,"February 12, 2024",Product broke after 2 weeks.
+1151,49,Female,121763,Bachelor's,9,2,2,West,Clothing,2,TV Ad,true,2025/01/04,Terrible experience.
+1283,50,F,57219,Some College,6,7,1,West,Clothing,4,Google,0,2024-06-01,"Meh, it's okay."
+1041,24,male,52981,Master's,1,3,20,West,Home & Garden,4,TV Ad,False,2024-05-31,Packaging was damaged.
+1194,37,male,93865,,5,5,5,Southwest,Health & Beauty,1,Email,N,2024/07/03,Would recommend to friends.
+1064,35,Male,47053,Associate's,2,6,14,West,Home & Garden,3,Friend,True,2024/03/24,....
+1275,30,F,-5000,Associate's,10,5,1,West,Home & Garden,5,Friend,0,19-02-2024,Fast shipping!
+1236,18,Non-binary,33026,Master's,5,5,12,Southeast,Clothing,1,Google,0,2024/06/15,worst purchase ever
+1374,45,,28446,,7,3,19,Midwest,Health & Beauty,3,Email,0,2025/05/16,Better than expected.
+1023,58,female,40064,Bachelor's,10,4,10,Southeast,Food & Beverage,5,Social Media,no,11/23/2025,N/A
+1414,66,f,29317,High School,5,2,4,West,Food & Beverage,3,Friend,1,01-12-2025,"Meh, it's okay."
+1136,46,M,40146,PhD,2,1,4,Southwest,Food & Beverage,5,,true,29-12-2024,
+1310,44,Male,90300,,3,4,52,West,Electronics,3,Social Media,N,2025/04/10,
+1177,61,male,115574,PhD,5,7,42,Northeast,Food & Beverage,0,Google,1,2025/11/02,Good value for money.
+1434,58,Prefer not to say,53327,,10,5,17,Midwest,Food & Beverage,2,Google,0,2024-04-24,....
+1184,51,m,17004,Some College,7,1,7,Southwest,Clothing,2,TV Ad,yes,2024-01-23,Product broke after 2 weeks.
+1050,40,f,63055,,8,7,111,Southwest,Clothing,4,Google,false,2024-01-09,N/A
+1195,43,female,40061,PhD,9,4,23,Midwest,Electronics,5,In-Store,N,2025/11/25,"Meh, it's okay."
+1328,31,female,26445,Bachelor's,7,3,12,West,Electronics,3,TV Ad,yes,01/22/2024,Terrible experience.
+1053,47,f,57004,Associate's,6,2,1,Southwest,Food & Beverage,4,TV Ad,,30-10-2025,
+1173,56,male,132355,Associate's,2,2,43,West,Clothing,4,Google,yes,20-05-2025,"Meh, it's okay."
+1391,,M,65822,Associate's,3,3,20,Southeast,Health & Beauty,,Google,false,2025-03-16,
+1111,36,f,39527,Bachelor's,1,1,37,Southwest,Home & Garden,5,Email,,2024-04-16,Good value for money.
+1080,40,Male,46465,PhD,2,6,56,Southwest,Electronics,1,,0,01/05/2025,5 stars!!!
+1485,41,Non-binary,81475,Some College,6,2,39,Midwest,Clothing,4,,True,2024/09/08,Fast shipping!
+1175,18,F,32061,Bachelor's,4,4,49,Southeast,Health & Beauty,4,TV Ad,yes,"April 14, 2025",
+1380,32,f,-5000,High School,6,1,33,Midwest,Food & Beverage,1,TV Ad,True,11/07/2025,
+1358,41,,33041,Master's,7,4,20,Southwest,Home & Garden,3,Google,true,"June 24, 2025",Excellent customer service.
+1082,50,m,75251,PhD,8,2,10,Midwest,Food & Beverage,1,Google,Y,2024/12/08,5 stars!!!
+1413,65,Non-binary,29171,High School,9,1,11,Southwest,Home & Garden,2,Google,True,"July 06, 2025",Will buy again.
+1389,28,female,70611,High School,6,5,12,Midwest,Health & Beauty,1,TV Ad,true,2025-08-09,Good value for money.
+1004,52,Prefer not to say,24648,Associate's,9,6,26,Southwest,Clothing,5,In-Store,1,"January 21, 2025",5 stars!!!
+1446,36,Prefer not to say,43313,Master's,2,8,15,Southeast,Food & Beverage,1,TV Ad,1,05/02/2025,Good value for money.
+1415,23,female,141491,Master's,5,4,65,Southwest,Food & Beverage,4,In-Store,yes,06/15/2024,Amazing!
+1143,54,male,67893,PhD,2,2,40,Southeast,Food & Beverage,5,Social Media,False,2025/09/08,Too expensive for what you get.
+1302,51,M,31743,Bachelor's,6,3,92,Midwest,Home & Garden,2,,N,2025-03-07,Terrible experience.
+1230,54,f,,PhD,6,6,7,Northeast,Electronics,5,TV Ad,false,2025/01/21,5 stars!!!
+1113,48,male,31533,Master's,8,4,1,Southeast,Home & Garden,5,TV Ad,yes,2024/08/26,Fast shipping!
+1215,52,f,58119,,3,3,15,Northeast,Health & Beauty,3,Email,,"May 06, 2024",Would recommend to friends.
+1115,28,Prefer not to say,43242,PhD,4,1,2,West,Health & Beauty,5,Friend,True,10/08/2024,"Meh, it's okay."
+1360,49,Prefer not to say,25783,PhD,6,4,1,West,Health & Beauty,,,True,2024/12/14,Product broke after 2 weeks.
+1333,68,Female,54766,High School,9,3,22,Southeast,Home & Garden,1,Friend,true,02/21/2025,Not satisfied with delivery time.
+1367,55,M,71469,High School,6,3,17,Southeast,Food & Beverage,1,Google,0,"September 02, 2024",
+1102,38,Non-binary,70399,High School,6,5,7,West,Health & Beauty,4,In-Store,0,20-01-2024,Disappointed.
+1288,46,m,72517,Some College,5,2,31,Southwest,Food & Beverage,5,Friend,1,"January 17, 2025",Product broke after 2 weeks.
+1014,26,female,98619,High School,1,3,42,West,Health & Beauty,1,Google,no,"October 06, 2024",Will buy again.
+1309,24,Female,56323,,9,4,1,Midwest,Electronics,1,Social Media,False,2025-02-08,Excellent customer service.
+1259,51,female,28289,,6,1,18,Midwest,Home & Garden,3,Friend,,25-11-2024,Love the quality!
+1120,60,M,70618,High School,10,2,22,West,Electronics,4,Email,no,"February 06, 2025",Would recommend to friends.
+1112,80,Male,21304,,8,2,4,Northeast,Home & Garden,5,Social Media,yes,2024-06-30,Too expensive for what you get.

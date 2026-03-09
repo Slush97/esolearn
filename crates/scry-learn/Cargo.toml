@@ -1,0 +1,119 @@
+[package]
+name = "scry-learn"
+version = "0.7.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Production-grade machine learning toolkit"
+license.workspace = true
+repository = "https://github.com/Slush97/scry"
+documentation = "https://docs.rs/scry-learn"
+keywords = ["machine-learning", "decision-tree", "random-forest", "gradient-boosting", "neural-network"]
+categories = ["science", "algorithms"]
+readme = "README.md"
+
+[features]
+default = []
+experimental = []
+csv = ["dep:csv"]
+serde = ["dep:serde"]
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+polars = ["dep:polars"]
+mmap = ["dep:memmap2", "dep:bytemuck"]
+extended-bench = []
+
+[dependencies]
+rayon = "1"
+csv = { version = "1", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+
+# Optional: GPU acceleration via wgpu compute shaders
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+# Optional: Polars DataFrame interop
+polars = { version = "0.46", optional = true, default-features = false, features = ["lazy"] }
+
+# Optional: Memory-mapped dataset loading
+memmap2 = { version = "0.9", optional = true }
+
+[dev-dependencies]
+fastrand = "2"
+csv = "1"
+insta = { version = "1", features = ["glob"] }
+pretty_assertions = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+smartcore = "0.4"
+linfa = "0.8"
+linfa-trees = "0.8"
+linfa-linear = "0.8"
+linfa-logistic = "0.8"
+linfa-nn = "0.8"
+linfa-clustering = "0.8"
+linfa-ensemble = "0.8.1"
+linfa-reduction = "0.8"
+linfa-elasticnet = "0.8"
+ndarray = "0.16"
+ndarray-rand = "0.15"
+rand = "0.8"
+serde_json = "1"
+
+[[bench]]
+name = "ml_algorithms"
+harness = false
+
+[[bench]]
+name = "competitor_bench"
+harness = false
+
+[[bench]]
+name = "industry_benchmark"
+harness = false
+
+[[bench]]
+name = "scaling_benchmark"
+harness = false
+
+[[bench]]
+name = "full_model_benchmark"
+harness = false
+
+[[bench]]
+name = "fair_bench"
+harness = false
+
+[[bench]]
+name = "honest_bench"
+harness = false
+
+[[example]]
+name = "industry_report"
+
+[[example]]
+name = "crosslib_comparison"
+
+[lints.rust]
+missing_docs = "warn"
+unreachable_pub = "allow"
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+missing_const_for_fn = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+suboptimal_flops = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+needless_pass_by_value = "allow"

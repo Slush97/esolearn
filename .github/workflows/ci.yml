@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Weekly Monday 06:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  check:
+    name: check (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, "1.83.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: rustfmt
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all -- --check
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p scry-learn
+      - run: cargo test -p scry-llm --no-default-features
+      - run: cargo test -p scry-stt --no-default-features
+
+  test-features:
+    name: test-features
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p scry-learn --features csv,serde
+      - run: cargo test -p scry-learn --features experimental
+      - run: cargo test -p scry-learn --features polars
+      - run: cargo test -p scry-learn --features mmap
+      - run: cargo test -p scry-llm --no-default-features --features safetensors,tokenizer
+      - run: cargo test -p scry-stt --no-default-features --features safetensors
+
+  miri:
+    name: miri
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri test -p scry-llm --no-default-features --test miri_safe

@@ -1,0 +1,300 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\title{Correctness and Token-Per-Second Optimization for LLaMA-Style Inference in Raw Rust}
+\author{Student Notes (generated for learning)}
+\date{February 21, 2026}
+
+\lstdefinelanguage{Rust}{
+  keywords={fn,let,mut,struct,enum,impl,trait,for,while,loop,if,else,match,return,Self,crate,super,mod,pub,use,where,async,await},
+  keywordstyle=\color{blue}\bfseries,
+  comment=[l]{//},
+  commentstyle=\color{gray},
+  stringstyle=\color{orange},
+  morestring=[b]",
+}
+
+\lstset{
+  language=Rust,
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document is a practical, student-friendly guide to improving correctness and throughput (tokens per second, or tok/s) for LLaMA-style inference engines implemented in ``raw'' Rust. It aims to explain the engineering processes involved in building and validating a transformer inference stack from scratch, while also showing how performance improvements on consumer hardware are discovered, measured, and kept correct. The focus is on: (1) correctness across numerical precision, attention implementations, and sampling, and (2) performance across memory layout, kernel fusion, and threading.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Context and Goals}
+You have a Rust-based LLaMA implementation. You want it to be:
+\begin{itemize}
+  \item \textbf{Correct}: matches reference outputs within expected tolerance.
+  \item \textbf{Fast}: competitive tok/s on consumer CPUs/GPUs.
+  \item \textbf{Understandable}: you can explain why it works.
+\end{itemize}
+
+These goals often conflict, so the work is a balancing act between math, systems programming, and scientific testing.
+
+\section{What ``Correctness'' Means in LLM Inference}
+Correctness does \emph{not} mean bit-identical output across all backends. Floating point math, parallelism, and fused kernels introduce small differences. A good correctness strategy uses multiple layers:
+
+\subsection{Layer 0: Sanity Checks}
+\begin{itemize}
+  \item Deterministic decoding with a fixed seed.
+  \item Known prompts with known top-1 token from a reference implementation.
+  \item Small models (e.g., tiny LLaMA) where you can run exhaustive comparisons.
+\end{itemize}
+
+\subsection{Layer 1: Unit-Level Equivalence}
+Validate each subcomponent in isolation:
+\begin{itemize}
+  \item Linear layers vs. reference: $Y = XW^T + b$.
+  \item RMSNorm vs. reference.
+  \item RoPE (rotary positional embedding) correctness.
+  \item Attention math: masking, scaling, and softmax.
+\end{itemize}
+
+\subsection{Layer 2: End-to-End Equivalence}
+Compare against a trusted backend (e.g., PyTorch) with tolerances:
+\begin{itemize}
+  \item Same weights, same prompt, same decoding, same seed.
+  \item Validate logits at each step.
+  \item Use $L_\infty$ or $L_2$ error thresholds per layer or per token.
+\end{itemize}
+
+\subsection{Layer 3: Behavioral Correctness}
+When exact numeric equivalence fails, use behavioral tests:
+\begin{itemize}
+  \item Perplexity over a small dataset.
+  \item Top-k overlap (how often do top-k tokens match).
+  \item Sampling distribution similarity.
+\end{itemize}
+
+\section{Floating Point Realities}
+Rust, like C++, does not change floating point behavior by itself. Differences come from:
+\begin{itemize}
+  \item \textbf{Precision}: f32 vs f16 vs bf16.
+  \item \textbf{Order of operations}: parallel reduction order changes rounding.
+  \item \textbf{Fused kernels}: combining operations alters rounding.
+  \item \textbf{Vectorization}: SIMD instructions are not bitwise deterministic.
+\end{itemize}
+
+Therefore, set up tolerances and test plans accordingly.
+
+\section{A Minimal LLaMA Inference Pipeline}
+A simplified pipeline per token:
+\begin{enumerate}
+  \item Embed input token.
+  \item For each transformer layer:
+    \begin{itemize}
+      \item RMSNorm on input.
+      \item QKV projection.
+      \item RoPE on Q and K.
+      \item Attention: compute scores, apply mask, softmax, weighted sum.
+      \item Output projection.
+      \item MLP: gated activation + output projection.
+      \item Residual adds.
+    \end{itemize}
+  \item Final RMSNorm and output projection to logits.
+  \item Sampling: greedy, top-k, top-p, temperature.
+\end{enumerate}
+
+Each bullet point is a place where correctness can break or performance can be optimized.
+
+\section{Correctness Pitfalls (Common Bugs)}
+\begin{itemize}
+  \item \textbf{Wrong shape assumptions}: attention head dimension mismatch.
+  \item \textbf{RoPE offsets}: incorrect position index when caching.
+  \item \textbf{KV cache layout bugs}: misaligned cache strides.
+  \item \textbf{Masking bugs}: causal mask not applied correctly for new tokens.
+  \item \textbf{Sampling mistakes}: softmax over wrong dimension or wrong temperature.
+  \item \textbf{Activation mismatch}: using GELU instead of SwiGLU.
+\end{itemize}
+
+\section{KV Cache: The Center of Both Correctness and Speed}
+The KV cache stores keys and values for previous tokens. For each new token:
+\begin{itemize}
+  \item Compute K and V for that token.
+  \item Append into the cache.
+  \item Use cached K/V for attention scores.
+\end{itemize}
+
+\subsection{Correctness Concerns}
+\begin{itemize}
+  \item Position index must match cache slot.
+  \item Cache layout must be consistent across layers and heads.
+  \item Any quantized cache needs careful dequantization.
+\end{itemize}
+
+\subsection{Performance Concerns}
+\begin{itemize}
+  \item Cache layout should be contiguous and cache-friendly.
+  \item Avoid per-token allocations.
+  \item Align buffers for SIMD.
+\end{itemize}
+
+\section{Measuring tok/s}
+Tok/s is the main performance metric for inference. Basic formula:
+\[\text{tok/s} = \frac{\text{tokens decoded}}{\text{seconds elapsed}}\]
+
+Best practice:
+\begin{itemize}
+  \item Separate \textbf{prefill} (processing the prompt) from \textbf{decode} (one token at a time).
+  \item Measure both:\; prefill tok/s and decode tok/s.
+  \item Use multiple runs to average.
+\end{itemize}
+
+\section{Optimization Process (High-Level)}
+A practical loop:
+\begin{enumerate}
+  \item Establish a reference test (correctness + baseline tok/s).
+  \item Change one thing at a time.
+  \item Validate correctness at multiple levels.
+  \item Measure tok/s and memory.
+  \item Keep the change only if correctness holds and performance improves.
+\end{enumerate}
+
+\section{Performance Bottlenecks in Raw Rust}
+\subsection{Matrix Multiply (GEMM)}
+\begin{itemize}
+  \item This dominates runtime.
+  \item Use high-quality kernels or SIMD intrinsics.
+  \item Pay attention to layout: row-major vs column-major.
+\end{itemize}
+
+\subsection{Attention Softmax}
+\begin{itemize}
+  \item Softmax must be numerically stable.
+  \item Compute max, subtract, exponentiate, sum, divide.
+  \item For speed, fuse steps if possible.
+\end{itemize}
+
+\subsection{Memory Bandwidth}
+\begin{itemize}
+  \item Large models are memory-bound.
+  \item Reuse buffers; avoid copies.
+  \item Keep hot data in cache: KV cache layout matters.
+\end{itemize}
+
+\section{Typical Rust-Level Optimizations}
+\begin{itemize}
+  \item \textbf{Avoid bounds checks in hot loops}: use iterators carefully, or unsafe blocks with care.
+  \item \textbf{SIMD} with `std::simd` or platform intrinsics.
+  \item \textbf{Memory alignment}: use \texttt{\#[repr(align(64))]} for hot buffers.
+  \item \textbf{Threading}: rayon or custom thread pools.
+  \item \textbf{Minimize allocations}: preallocate scratch buffers.
+  \item \textbf{Fused ops}: combine RMSNorm + linear if possible.
+\end{itemize}
+
+\section{Quantization and Its Impact}
+Quantization compresses weights to 8-bit or 4-bit for faster inference.
+\begin{itemize}
+  \item Increases tok/s by reducing memory bandwidth.
+  \item Risks correctness if scale/zero-point handling is wrong.
+  \item Use per-channel scales when possible.
+\end{itemize}
+
+\section{Sampling Correctness}
+Sampling bugs are easy to miss.
+\begin{itemize}
+  \item Ensure logits are in float and stable before softmax.
+  \item Top-k or top-p should renormalize the distribution.
+  \item Temperature scaling must be applied before softmax.
+\end{itemize}
+
+\section{Process: What ``Vibe-Coded in 9 Days'' Actually Means}
+If you built an implementation quickly, you likely:
+\begin{itemize}
+  \item Glued together minimal components.
+  \item Tested only end-to-end behavior.
+  \item Used small prompts and simple sampling.
+\end{itemize}
+
+The next step is \emph{making it rigorous}:
+\begin{itemize}
+  \item Add unit tests per layer.
+  \item Add reference comparisons.
+  \item Add benchmarks with fixed settings.
+  \item Document every assumption.
+\end{itemize}
+
+\section{A Concrete Debugging Checklist}
+\begin{enumerate}
+  \item Compare single-layer outputs to reference.
+  \item Validate attention scores before softmax.
+  \item Check RoPE against a known implementation.
+  \item Ensure cache positions align with token index.
+  \item Validate logits for the first 5 tokens.
+  \item Measure tok/s before and after changes.
+\end{enumerate}
+
+\section{Example: Stable Softmax in Rust}
+\begin{lstlisting}
+fn softmax(x: &mut [f32]) {
+    let mut max = f32::NEG_INFINITY;
+    for &v in x.iter() { if v > max { max = v; } }
+
+    let mut sum = 0.0f32;
+    for v in x.iter_mut() {
+        *v = (*v - max).exp();
+        sum += *v;
+    }
+
+    let inv = 1.0f32 / sum;
+    for v in x.iter_mut() { *v *= inv; }
+}
+\end{lstlisting}
+
+\section{Testing Strategy (Minimal but Useful)}
+\begin{itemize}
+  \item \textbf{Golden tests}: known prompt, known logits for a small model.
+  \item \textbf{Diff tests}: compare against PyTorch (tolerances).
+  \item \textbf{Performance tests}: fixed prompt length, fixed decode length.
+  \item \textbf{Regression tests}: run on every change.
+\end{itemize}
+
+\section{Hardware Considerations}
+Consumer hardware matters:
+\begin{itemize}
+  \item CPU: number of cores, AVX2/AVX-512 support.
+  \item GPU: memory size and bandwidth.
+  \item RAM: large models can page if memory is low.
+\end{itemize}
+
+You must measure on the actual hardware you care about.
+
+\section{Putting It Together: A Practical Workflow}
+\begin{enumerate}
+  \item Start with a known-correct model and small prompt.
+  \item Implement one component at a time.
+  \item Validate each component in isolation.
+  \item Integrate into end-to-end.
+  \item Optimize the slowest parts only.
+  \item Re-test correctness after every optimization.
+\end{enumerate}
+
+\section{Appendix: Suggested Reading Topics}
+\begin{itemize}
+  \item Transformer attention math.
+  \item Numerical stability in softmax.
+  \item SIMD in Rust.
+  \item Quantization fundamentals.
+  \item Profiling tools for Rust.
+\end{itemize}
+
+\end{document}

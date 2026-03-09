@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+Cargo.lock
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+*.safetensors
+*.bin
+*.gguf
+*.onnx
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+
+# Generated chart outputs in repo root
+/*.svg
+/*.html

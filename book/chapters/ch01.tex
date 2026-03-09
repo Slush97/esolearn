@@ -1,0 +1,337 @@
+\chapter{Why Rust for Data Science}
+\label{ch:why-rust}
+
+Most data scientists reach for Python. It is the default. The ecosystem is vast,
+the learning curve is gentle, and nearly every ML paper ships a Python reference
+implementation. So why would anyone choose Rust?
+
+This chapter answers that question. We will set up a Rust environment, load a
+real dataset, compute summary statistics, and produce a scatter plot --- all
+before the end of the chapter. By the time you turn the page, you will have a
+working project and a clear sense of what Rust brings to the table.
+
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{The Case for Rust in Data Science}
+\label{sec:case-for-rust}
+
+Rust is a systems language. It compiles to native code, manages memory without a
+garbage collector, and enforces thread safety at compile time. These properties
+matter for data science more than you might expect.
+
+\subsection{Performance}
+
+Rust programs run fast. There is no interpreter overhead, no garbage collector
+pausing in the middle of a training loop, and no boxing of numeric types unless
+you ask for it. The compiler applies aggressive optimizations: inlining,
+autovectorization, loop unrolling, dead code elimination. Zero-cost abstractions
+mean that iterators compile down to the same machine code as hand-written loops.
+
+When your dataset grows from a CSV on your laptop to a hundred million rows on a
+server, these properties stop being academic. A pipeline that takes four hours in
+Python may finish in twenty minutes in Rust --- without reaching for C extensions
+or Cython.
+
+SIMD intrinsics are available when you need them, but in practice the
+autovectorizer handles most numeric loops. The \texttt{ndarray} crate provides
+$n$-dimensional arrays with BLAS-backed linear algebra, comparable to NumPy but
+compiled ahead of time.
+
+\subsection{Safety}
+
+Rust's type system catches entire categories of bugs at compile time. There are
+no null pointers --- \texttt{Option<T>} forces you to handle the absent case. There
+are no data races --- the borrow checker prevents shared mutable state across
+threads. There are no use-after-free bugs, no buffer overflows, no silent integer
+truncation (unless you explicitly call \texttt{as}).
+
+For data science, this means fewer midnight debugging sessions. If your pipeline
+compiles, it will not segfault on row 50 million. Type errors in feature
+engineering surface immediately, not after an hour of training.
+
+\subsection{Reproducibility}
+
+Cargo, Rust's build system, pins every dependency version in \texttt{Cargo.lock}.
+A project that builds today will build identically six months from now, on any
+platform, with the same compiler version. There is no \texttt{pip freeze} drift,
+no conda environment corruption, no ``works on my machine.''
+
+Cross-compilation is straightforward. A model trained on Linux can be deployed as
+a single static binary on a minimal container image --- no Python runtime, no
+shared libraries, no virtualenv.
+
+\subsection{When Python is Still Better}
+
+Rust is not always the right tool. Python excels at:
+
+\begin{itemize}
+  \item \textbf{Rapid prototyping.} A Jupyter notebook lets you explore data
+    interactively. Rust's compile step, even if fast, adds friction to
+    exploratory work.
+  \item \textbf{Ecosystem breadth.} Python has libraries for everything:
+    geospatial analysis, web scraping, bioinformatics, symbolic math. Rust's
+    ecosystem is younger and narrower.
+  \item \textbf{Team familiarity.} If your team knows Python and ships products
+    in Python, switching languages has a real cost.
+\end{itemize}
+
+The pragmatic approach: prototype in Python, then rewrite the hot path in Rust.
+Or, if you are starting fresh and performance matters from day one, start in
+Rust. This book assumes the latter.
+
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Setting Up Your Environment}
+\label{sec:setup}
+
+\subsection{Install Rust}
+
+Install Rust through \texttt{rustup}, the official toolchain manager. On Linux
+or macOS:
+
+\begin{lstlisting}[language=bash, numbers=none]
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+\end{lstlisting}
+
+On Windows, download and run \texttt{rustup-init.exe} from
+\url{https://rustup.rs}. Accept the defaults. After installation, open a new
+terminal and verify:
+
+\begin{lstlisting}[language=bash, numbers=none]
+rustc --version
+cargo --version
+\end{lstlisting}
+
+You should see version 1.75 or later. Any recent stable release will work.
+
+\subsection{Create a New Project}
+
+Cargo creates a new project with a single command:
+
+\begin{lstlisting}[language=bash, numbers=none]
+cargo new hello_ds
+cd hello_ds
+\end{lstlisting}
+
+This generates the following structure:
+
+\begin{lstlisting}[language=bash, numbers=none]
+hello_ds/
+  Cargo.toml
+  src/
+    main.rs
+\end{lstlisting}
+
+\texttt{Cargo.toml} is the project manifest. \texttt{src/main.rs} contains a
+\texttt{main} function that prints ``Hello, world!'' --- we will replace it
+shortly.
+
+\subsection{Add Dependencies}
+
+Open \texttt{Cargo.toml} and add two dependencies:
+
+\begin{lstlisting}[language=toml]
+[dependencies]
+scry-learn = { version = "0.7", features = ["csv"] }
+esoc-chart = "0.1"
+\end{lstlisting}
+
+\texttt{scry-learn} is the machine learning library we will use throughout this
+book. The \texttt{csv} feature enables loading datasets from CSV files.
+\texttt{esoc-chart} provides visualization through a grammar-of-graphics API.
+
+\subsection{Essential Cargo Commands}
+
+Four commands cover most of your workflow:
+
+\begin{lstlisting}[language=bash, numbers=none]
+cargo build          # compile the project
+cargo run            # compile and run
+cargo test           # run tests
+cargo doc --open     # generate and open API documentation
+\end{lstlisting}
+
+Cargo fetches dependencies automatically on the first build. Subsequent builds
+are incremental and fast.
+
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Hello, Data Science}
+\label{sec:hello-ds}
+
+Let us do something real. We will load the Iris dataset, print summary
+statistics, and produce a scatter plot. This is the ``Hello, World'' of data
+science, and it will exercise the core workflow: load data, inspect it,
+visualize it.
+
+\subsection{Loading the Dataset}
+
+The Iris dataset contains 150 measurements of three species of iris flowers.
+Each row has four features (sepal length, sepal width, petal length, petal
+width) and a class label (setosa, versicolor, or virginica).
+
+\texttt{scry-learn} provides a \texttt{Dataset} struct that holds feature
+matrices and target vectors together. The \texttt{from\_csv} constructor reads a
+CSV file and designates one column as the target:
+
+\begin{lstlisting}[language=rust]
+use scry_learn::dataset::Dataset;
+
+let ds = Dataset::from_csv("datasets/iris/iris.csv", "species")
+    .expect("failed to load iris.csv");
+\end{lstlisting}
+
+The second argument, \texttt{"species"}, names the target column. All remaining
+columns become features. Categorical targets are automatically encoded as
+integers, and the original class labels are stored in
+\texttt{ds.class\_labels}.
+
+\subsection{Summary Statistics}
+
+Call \texttt{describe()} to print a summary table:
+
+\begin{lstlisting}[language=rust]
+ds.describe();
+\end{lstlisting}
+
+This prints a table like the following:
+
+\begin{lstlisting}[numbers=none]
+              count   mean    std     min     25%     50%     75%     max
+sepal_length  150     5.843   0.828   4.300   5.100   5.800   6.400   7.900
+sepal_width   150     3.054   0.434   2.000   2.800   3.000   3.300   4.400
+petal_length  150     3.759   1.764   1.000   1.600   4.350   5.100   6.900
+petal_width   150     1.199   0.763   0.100   0.300   1.300   1.800   2.500
+\end{lstlisting}
+
+You immediately see the scale of each feature. Sepal length ranges from 4.3 to
+7.9; petal width from 0.1 to 2.5. This kind of inspection is the first step in
+any analysis.
+
+\subsection{Making a Scatter Plot}
+
+The \texttt{esoc-chart} crate provides an express API for common plots. To make
+a scatter plot of sepal length versus sepal width, colored by species, we need
+the feature columns and the class labels:
+
+\begin{lstlisting}[language=rust]
+use esoc_chart::express::scatter;
+
+// Extract feature columns
+let sepal_length = ds.column("sepal_length");
+let sepal_width = ds.column("sepal_width");
+
+// Map encoded target back to species names
+let species: Vec<String> = ds.target.iter()
+    .map(|&t| {
+        ds.class_labels.as_ref().unwrap()[t as usize].clone()
+    })
+    .collect();
+
+// Build the scatter plot
+let svg = scatter(&sepal_length, &sepal_width)
+    .color_by(&species)
+    .title("Iris: Sepal Length vs Width")
+    .x_label("Sepal Length")
+    .y_label("Sepal Width")
+    .to_svg();
+
+std::fs::write("iris_scatter.svg", &svg)
+    .expect("failed to write SVG");
+
+println!("Wrote iris_scatter.svg");
+\end{lstlisting}
+
+This produces an SVG file with three color-coded clusters. Setosa separates
+cleanly from the other two species along sepal width. Versicolor and virginica
+overlap --- a pattern we will revisit when we build classifiers in
+Chapter~\ref{ch:classification}.
+
+\subsection{The Complete Program}
+
+Here is the full \texttt{src/main.rs}:
+
+\begin{lstlisting}[language=rust, caption={src/main.rs --- Hello Data Science}]
+use scry_learn::dataset::Dataset;
+use esoc_chart::express::scatter;
+
+fn main() {
+    // Load the Iris dataset
+    let ds = Dataset::from_csv(
+        "datasets/iris/iris.csv", "species"
+    ).expect("failed to load iris.csv");
+
+    // Print summary statistics
+    ds.describe();
+
+    // Extract feature columns
+    let sepal_length = ds.column("sepal_length");
+    let sepal_width = ds.column("sepal_width");
+
+    // Map encoded target back to species names
+    let species: Vec<String> = ds.target.iter()
+        .map(|&t| {
+            ds.class_labels
+                .as_ref()
+                .unwrap()[t as usize]
+                .clone()
+        })
+        .collect();
+
+    // Build a scatter plot
+    let svg = scatter(&sepal_length, &sepal_width)
+        .color_by(&species)
+        .title("Iris: Sepal Length vs Width")
+        .x_label("Sepal Length")
+        .y_label("Sepal Width")
+        .to_svg();
+
+    std::fs::write("iris_scatter.svg", &svg)
+        .expect("failed to write SVG");
+
+    println!("Wrote iris_scatter.svg");
+}
+\end{lstlisting}
+
+Run it:
+
+\begin{lstlisting}[language=bash, numbers=none]
+cargo run
+\end{lstlisting}
+
+Cargo compiles the project, fetches dependencies, and executes the binary. You
+should see the summary statistics table followed by the confirmation message.
+Open \texttt{iris\_scatter.svg} in a browser to see the plot.
+
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{What Comes Next}
+\label{sec:what-next}
+
+This book is organized in four parts.
+
+\textbf{Part~I: Foundations} (Chapters~\ref{ch:why-rust}--\ref{ch:preprocessing})
+covers the prerequisites: working with tabular data, visualization, and data
+cleaning. These chapters establish the patterns you will use in every subsequent
+chapter.
+
+\textbf{Part~II: Supervised Learning}
+(Chapters~\ref{ch:linear-regression}--\ref{ch:gradient-boosting}) builds models
+that predict outcomes from labeled data. We start with linear regression, move
+through decision trees and random forests, and finish with gradient boosting.
+Each chapter includes model evaluation and practical advice on when to use which
+algorithm.
+
+\textbf{Part~III: Unsupervised Learning and Beyond}
+(Chapters~\ref{ch:clustering}--\ref{ch:svm-knn}) covers clustering, anomaly
+detection, text analysis, neural networks, and support vector machines. These
+methods find structure in data without explicit labels, or operate in domains
+where the supervised framing is less natural.
+
+\textbf{Part~IV: Production and Practice}
+(Chapters~\ref{ch:hyperparameter}--\ref{ch:case-study}) addresses the concerns
+that arise when models leave the notebook: hyperparameter tuning,
+explainability, calibration, ensembling, and a complete end-to-end case study
+that ties everything together.
+
+Turn the page. We have data to work with.

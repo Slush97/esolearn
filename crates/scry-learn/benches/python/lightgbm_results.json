@@ -1,0 +1,67 @@
+{
+  "accuracy_cv": {
+    "iris": {
+      "mean_accuracy": 0.946667,
+      "std_accuracy": 0.04,
+      "fold_scores": [
+        0.966667,
+        1.0,
+        0.9,
+        0.966667,
+        0.9
+      ]
+    },
+    "wine": {
+      "mean_accuracy": 0.966032,
+      "std_accuracy": 0.042036,
+      "fold_scores": [
+        0.972222,
+        1.0,
+        0.972222,
+        0.885714,
+        1.0
+      ]
+    },
+    "breast_cancer": {
+      "mean_accuracy": 0.963111,
+      "std_accuracy": 0.014,
+      "fold_scores": [
+        0.982456,
+        0.947368,
+        0.947368,
+        0.964912,
+        0.973451
+      ]
+    },
+    "digits": {
+      "mean_accuracy": 0.97162,
+      "std_accuracy": 0.00324,
+      "fold_scores": [
+        0.969444,
+        0.972222,
+        0.97493,
+        0.966574,
+        0.97493
+      ]
+    }
+  },
+  "training": {
+    "1000": {
+      "median_us": 467823.65,
+      "rows_per_sec": 2138.0
+    },
+    "10000": {
+      "median_us": 37172.16,
+      "rows_per_sec": 269019.0
+    },
+    "100000": {
+      "median_us": 1432067.88,
+      "rows_per_sec": 69829.0
+    }
+  },
+  "prediction_latency": {
+    "p50_us": 1696.515,
+    "p95_us": 5932.432,
+    "p99_us": 8623.426
+  }
+}

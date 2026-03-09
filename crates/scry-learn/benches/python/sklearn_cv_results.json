@@ -1,0 +1,496 @@
+{
+  "accuracy_cv": {
+    "decision_tree/iris": {
+      "mean_accuracy": 0.953333,
+      "std_accuracy": 0.033993,
+      "fold_scores": [
+        1.0,
+        0.966667,
+        0.933333,
+        0.966667,
+        0.9
+      ]
+    },
+    "random_forest/iris": {
+      "mean_accuracy": 0.953333,
+      "std_accuracy": 0.033993,
+      "fold_scores": [
+        0.966667,
+        0.966667,
+        0.933333,
+        1.0,
+        0.9
+      ]
+    },
+    "gradient_boosting/iris": {
+      "mean_accuracy": 0.953333,
+      "std_accuracy": 0.033993,
+      "fold_scores": [
+        1.0,
+        0.966667,
+        0.933333,
+        0.966667,
+        0.9
+      ]
+    },
+    "hist_gbt/iris": {
+      "mean_accuracy": 0.94,
+      "std_accuracy": 0.03266,
+      "fold_scores": [
+        0.966667,
+        0.966667,
+        0.9,
+        0.966667,
+        0.9
+      ]
+    },
+    "logistic_regression/iris": {
+      "mean_accuracy": 0.953333,
+      "std_accuracy": 0.045216,
+      "fold_scores": [
+        1.0,
+        0.966667,
+        0.9,
+        1.0,
+        0.9
+      ]
+    },
+    "knn/iris": {
+      "mean_accuracy": 0.973333,
+      "std_accuracy": 0.024944,
+      "fold_scores": [
+        1.0,
+        0.966667,
+        0.933333,
+        1.0,
+        0.966667
+      ]
+    },
+    "linear_svc/iris": {
+      "mean_accuracy": 0.926667,
+      "std_accuracy": 0.053333,
+      "fold_scores": [
+        0.966667,
+        0.966667,
+        0.833333,
+        0.966667,
+        0.9
+      ]
+    },
+    "gaussian_nb/iris": {
+      "mean_accuracy": 0.946667,
+      "std_accuracy": 0.04,
+      "fold_scores": [
+        0.966667,
+        0.966667,
+        0.9,
+        1.0,
+        0.9
+      ]
+    },
+    "decision_tree/wine": {
+      "mean_accuracy": 0.893175,
+      "std_accuracy": 0.038028,
+      "fold_scores": [
+        0.888889,
+        0.916667,
+        0.888889,
+        0.828571,
+        0.942857
+      ]
+    },
+    "random_forest/wine": {
+      "mean_accuracy": 0.983016,
+      "std_accuracy": 0.02278,
+      "fold_scores": [
+        0.972222,
+        1.0,
+        1.0,
+        0.942857,
+        1.0
+      ]
+    },
+    "gradient_boosting/wine": {
+      "mean_accuracy": 0.910476,
+      "std_accuracy": 0.032024,
+      "fold_scores": [
+        0.888889,
+        0.888889,
+        0.888889,
+        0.914286,
+        0.971429
+      ]
+    },
+    "hist_gbt/wine": {
+      "mean_accuracy": 0.96619,
+      "std_accuracy": 0.033135,
+      "fold_scores": [
+        0.944444,
+        0.972222,
+        1.0,
+        0.914286,
+        1.0
+      ]
+    },
+    "logistic_regression/wine": {
+      "mean_accuracy": 0.983333,
+      "std_accuracy": 0.013608,
+      "fold_scores": [
+        0.972222,
+        0.972222,
+        0.972222,
+        1.0,
+        1.0
+      ]
+    },
+    "knn/wine": {
+      "mean_accuracy": 0.971746,
+      "std_accuracy": 0.018074,
+      "fold_scores": [
+        0.972222,
+        0.972222,
+        1.0,
+        0.942857,
+        0.971429
+      ]
+    },
+    "linear_svc/wine": {
+      "mean_accuracy": 0.977619,
+      "std_accuracy": 0.011195,
+      "fold_scores": [
+        0.972222,
+        0.972222,
+        0.972222,
+        1.0,
+        0.971429
+      ]
+    },
+    "gaussian_nb/wine": {
+      "mean_accuracy": 0.971905,
+      "std_accuracy": 0.025206,
+      "fold_scores": [
+        0.944444,
+        1.0,
+        0.972222,
+        0.942857,
+        1.0
+      ]
+    },
+    "decision_tree/breast_cancer": {
+      "mean_accuracy": 0.910402,
+      "std_accuracy": 0.027876,
+      "fold_scores": [
+        0.929825,
+        0.868421,
+        0.885965,
+        0.938596,
+        0.929204
+      ]
+    },
+    "random_forest/breast_cancer": {
+      "mean_accuracy": 0.957848,
+      "std_accuracy": 0.015043,
+      "fold_scores": [
+        0.964912,
+        0.929825,
+        0.964912,
+        0.95614,
+        0.973451
+      ]
+    },
+    "gradient_boosting/breast_cancer": {
+      "mean_accuracy": 0.952523,
+      "std_accuracy": 0.009117,
+      "fold_scores": [
+        0.947368,
+        0.964912,
+        0.95614,
+        0.95614,
+        0.938053
+      ]
+    },
+    "hist_gbt/breast_cancer": {
+      "mean_accuracy": 0.966589,
+      "std_accuracy": 0.014094,
+      "fold_scores": [
+        0.991228,
+        0.95614,
+        0.95614,
+        0.973684,
+        0.955752
+      ]
+    },
+    "logistic_regression/breast_cancer": {
+      "mean_accuracy": 0.973669,
+      "std_accuracy": 0.016627,
+      "fold_scores": [
+        0.973684,
+        0.947368,
+        0.964912,
+        0.991228,
+        0.99115
+      ]
+    },
+    "knn/breast_cancer": {
+      "mean_accuracy": 0.963096,
+      "std_accuracy": 0.017886,
+      "fold_scores": [
+        0.982456,
+        0.947368,
+        0.938596,
+        0.982456,
+        0.964602
+      ]
+    },
+    "linear_svc/breast_cancer": {
+      "mean_accuracy": 0.966636,
+      "std_accuracy": 0.012854,
+      "fold_scores": [
+        0.95614,
+        0.95614,
+        0.95614,
+        0.982456,
+        0.982301
+      ]
+    },
+    "gaussian_nb/breast_cancer": {
+      "mean_accuracy": 0.938534,
+      "std_accuracy": 0.023468,
+      "fold_scores": [
+        0.964912,
+        0.903509,
+        0.929825,
+        0.929825,
+        0.964602
+      ]
+    },
+    "decision_tree/digits": {
+      "mean_accuracy": 0.855305,
+      "std_accuracy": 0.016414,
+      "fold_scores": [
+        0.858333,
+        0.869444,
+        0.830084,
+        0.874652,
+        0.844011
+      ]
+    },
+    "random_forest/digits": {
+      "mean_accuracy": 0.965492,
+      "std_accuracy": 0.005765,
+      "fold_scores": [
+        0.969444,
+        0.972222,
+        0.963788,
+        0.966574,
+        0.955432
+      ]
+    },
+    "gradient_boosting/digits": {
+      "mean_accuracy": 0.961599,
+      "std_accuracy": 0.006468,
+      "fold_scores": [
+        0.969444,
+        0.961111,
+        0.963788,
+        0.963788,
+        0.949861
+      ]
+    },
+    "hist_gbt/digits": {
+      "mean_accuracy": 0.977184,
+      "std_accuracy": 0.003699,
+      "fold_scores": [
+        0.977778,
+        0.977778,
+        0.97493,
+        0.972145,
+        0.983287
+      ]
+    },
+    "logistic_regression/digits": {
+      "mean_accuracy": 0.971066,
+      "std_accuracy": 0.003749,
+      "fold_scores": [
+        0.969444,
+        0.966667,
+        0.977716,
+        0.972145,
+        0.969359
+      ]
+    },
+    "knn/digits": {
+      "mean_accuracy": 0.97885,
+      "std_accuracy": 0.006255,
+      "fold_scores": [
+        0.988889,
+        0.975,
+        0.983287,
+        0.97493,
+        0.972145
+      ]
+    },
+    "linear_svc/digits": {
+      "mean_accuracy": 0.956041,
+      "std_accuracy": 0.006163,
+      "fold_scores": [
+        0.944444,
+        0.961111,
+        0.955432,
+        0.961003,
+        0.958217
+      ]
+    },
+    "gaussian_nb/digits": {
+      "mean_accuracy": 0.845306,
+      "std_accuracy": 0.017561,
+      "fold_scores": [
+        0.816667,
+        0.858333,
+        0.857939,
+        0.832869,
+        0.860724
+      ]
+    }
+  },
+  "training": {
+    "decision_tree/1000": {
+      "median_us": 841.32,
+      "n_samples": 1000
+    },
+    "random_forest/1000": {
+      "median_us": 23389.91,
+      "n_samples": 1000
+    },
+    "gradient_boosting/1000": {
+      "median_us": 68058.17,
+      "n_samples": 1000
+    },
+    "hist_gbt/1000": {
+      "median_us": 95511.9,
+      "n_samples": 1000
+    },
+    "logistic_regression/1000": {
+      "median_us": 5049.06,
+      "n_samples": 1000
+    },
+    "knn/1000": {
+      "median_us": 416.44,
+      "n_samples": 1000
+    },
+    "linear_svc/1000": {
+      "median_us": 506.44,
+      "n_samples": 1000
+    },
+    "gaussian_nb/1000": {
+      "median_us": 291.02,
+      "n_samples": 1000
+    },
+    "decision_tree/10000": {
+      "median_us": 7607.19,
+      "n_samples": 10000
+    },
+    "random_forest/10000": {
+      "median_us": 23986.58,
+      "n_samples": 10000
+    },
+    "gradient_boosting/10000": {
+      "median_us": 780929.84,
+      "n_samples": 10000
+    },
+    "hist_gbt/10000": {
+      "median_us": 67331.26,
+      "n_samples": 10000
+    },
+    "logistic_regression/10000": {
+      "median_us": 5305.91,
+      "n_samples": 10000
+    },
+    "knn/10000": {
+      "median_us": 4588.04,
+      "n_samples": 10000
+    },
+    "linear_svc/10000": {
+      "median_us": 1669.95,
+      "n_samples": 10000
+    },
+    "gaussian_nb/10000": {
+      "median_us": 989.71,
+      "n_samples": 10000
+    },
+    "decision_tree/100000": {
+      "median_us": 86729.74,
+      "n_samples": 100000
+    },
+    "random_forest/100000": {
+      "median_us": 86998.54,
+      "n_samples": 100000
+    },
+    "gradient_boosting/100000": {
+      "median_us": 9646839.39,
+      "n_samples": 100000
+    },
+    "hist_gbt/100000": {
+      "median_us": 163981.88,
+      "n_samples": 100000
+    },
+    "logistic_regression/100000": {
+      "median_us": 178394.57,
+      "n_samples": 100000
+    },
+    "knn/100000": {
+      "median_us": 62499.57,
+      "n_samples": 100000
+    },
+    "linear_svc/100000": {
+      "median_us": 13591.94,
+      "n_samples": 100000
+    },
+    "gaussian_nb/100000": {
+      "median_us": 7641.45,
+      "n_samples": 100000
+    }
+  },
+  "prediction_latency": {
+    "decision_tree": {
+      "p50_us": 19.39,
+      "p95_us": 20.7,
+      "p99_us": 29.94
+    },
+    "random_forest": {
+      "p50_us": 11223.085,
+      "p95_us": 11680.849,
+      "p99_us": 12456.457
+    },
+    "gradient_boosting": {
+      "p50_us": 58.29,
+      "p95_us": 60.781,
+      "p99_us": 64.541
+    },
+    "hist_gbt": {
+      "p50_us": 378.153,
+      "p95_us": 2096.809,
+      "p99_us": 3562.634
+    },
+    "logistic_regression": {
+      "p50_us": 18.71,
+      "p95_us": 20.951,
+      "p99_us": 45.011
+    },
+    "knn": {
+      "p50_us": 329.734,
+      "p95_us": 405.354,
+      "p99_us": 517.825
+    },
+    "linear_svc": {
+      "p50_us": 19.201,
+      "p95_us": 20.49,
+      "p99_us": 29.93
+    },
+    "gaussian_nb": {
+      "p50_us": 29.69,
+      "p95_us": 31.89,
+      "p99_us": 62.61
+    }
+  }
+}
