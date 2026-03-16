@@ -72,6 +72,17 @@ pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<Legend
         return vec![];
     }
 
+    // Single-layer bar charts: categories are already shown as x-axis labels,
+    // so a legend would just duplicate them. Suppress it.
+    if layers.len() == 1
+        && matches!(
+            layers[0].mark,
+            crate::grammar::layer::MarkType::Bar
+        )
+    {
+        return vec![];
+    }
+
     let entries: Vec<LegendEntry> = all_cats
         .iter()
         .enumerate()

@@ -3,7 +3,7 @@
 //!
 //! Provides [`LinearSVC`] and [`LinearSVR`] using Pegasos SGD.
 //!
-//! Kernel-based SVMs ([`KernelSVC`], [`KernelSVR`]) are available behind
+//! Kernel-based SVMs (`KernelSVC`, `KernelSVR`) are available behind
 //! `feature = "experimental"` — they use O(n^2) SMO and are impractical
 //! on datasets larger than ~2000 samples.
 

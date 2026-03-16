@@ -91,7 +91,7 @@ fn cv_result(name: &str, scores: Vec<f64>, elapsed_ms: f64) -> ModelResult {
 }
 
 /// Run 5-fold stratified CV for a concrete model type.
-fn run_cv<M: scry_learn::pipeline::PipelineModel + Clone>(
+fn run_cv<M: scry_learn::pipeline::PipelineModel + Clone + Send + Sync>(
     name: &str,
     model: &M,
     data: &Dataset,

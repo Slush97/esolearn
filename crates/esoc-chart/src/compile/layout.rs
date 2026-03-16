@@ -35,11 +35,38 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     };
 
     // ── Bottom margin ──
+    // For bar charts with category labels, account for rotated label height.
+    let has_bar = chart.layers.iter().any(|l| {
+        matches!(l.mark, crate::grammar::layer::MarkType::Bar)
+    });
+    let rotated_label_extra = if has_bar {
+        if let Some(cats) = chart.layers.iter().find_map(|l| l.categories.as_ref()) {
+            // Estimate whether labels will need rotation by checking if they
+            // fit horizontally in the available plot width
+            let plot_w_approx = chart.width * 0.7; // rough estimate after margins
+            let total_label_w: f32 = cats.iter()
+                .map(|c| estimate_text_width(c, chart.theme.tick_font_size) + 4.0)
+                .sum();
+            if total_label_w > plot_w_approx {
+                // Labels will be rotated — add extra bottom space
+                let max_label_len = cats.iter().map(|c| c.len()).max().unwrap_or(0);
+                let max_w = max_label_len as f32 * chart.theme.tick_font_size * 0.6;
+                let rotated_h = max_w * 0.71;
+                (rotated_h - chart.theme.tick_font_size).max(0.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
     let caption_extra = if has_caption { chart.theme.tick_font_size + 10.0 } else { 0.0 };
     let bottom = if has_x_label {
-        chart.theme.tick_font_size + chart.theme.label_font_size + 25.0 + caption_extra
+        chart.theme.tick_font_size + chart.theme.label_font_size + 25.0 + rotated_label_extra + caption_extra
     } else {
-        chart.theme.tick_font_size + 20.0 + caption_extra
+        chart.theme.tick_font_size + 20.0 + rotated_label_extra + caption_extra
     };
 
     // ── Left margin — measure actual Y tick labels ──
@@ -66,26 +93,33 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     let has_legend = chart.layers.iter().any(|l| l.categories.is_some())
         || chart.layers.len() > 1;
     let right = if has_legend {
-        // Collect unique category labels
-        let mut all_cats: Vec<&str> = Vec::new();
+        // Collect unique legend labels from categories and layer labels
+        let mut all_labels: Vec<String> = Vec::new();
+        let has_layer_labels = chart.layers.iter().any(|l| l.label.is_some());
+        if has_layer_labels || chart.layers.len() > 1 {
+            // Multi-layer: use layer labels (or "Series N" fallback)
+            for (i, layer) in chart.layers.iter().enumerate() {
+                let lbl = layer.label.clone()
+                    .unwrap_or_else(|| format!("Series {}", i + 1));
+                if !all_labels.contains(&lbl) {
+                    all_labels.push(lbl);
+                }
+            }
+        }
+        // Also collect category labels
         for layer in &chart.layers {
             if let Some(cats) = &layer.categories {
                 for c in cats {
-                    if !all_cats.contains(&c.as_str()) {
-                        all_cats.push(c.as_str());
+                    if !all_labels.contains(c) {
+                        all_labels.push(c.clone());
                     }
                 }
             }
         }
-        // If no explicit categories but multiple layers, use "Series N" labels
-        if all_cats.is_empty() {
-            for i in 0..chart.layers.len() {
-                // Approximate "Series N" length
-                all_cats.push("Series 00");
-                let _ = i;
-            }
+        if all_labels.is_empty() {
+            all_labels.push("Series 00".into());
         }
-        let max_label_width = all_cats
+        let max_label_width = all_labels
             .iter()
             .map(|c| estimate_text_width(c, chart.theme.legend_font_size))
             .fold(0.0_f32, f32::max);

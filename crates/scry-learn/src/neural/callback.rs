@@ -131,7 +131,7 @@ pub enum CallbackAction {
 ///     }
 /// }
 /// ```
-pub trait TrainingCallback: Send {
+pub trait TrainingCallback: Send + Sync {
     /// Called at the end of each training epoch.
     ///
     /// Return [`CallbackAction::Stop`] to halt training early.

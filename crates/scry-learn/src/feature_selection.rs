@@ -81,7 +81,7 @@ impl VarianceThreshold {
     ///
     /// # Panics
     ///
-    /// Panics if called before [`fit`].
+    /// Panics if called before [`VarianceThreshold::fit`].
     pub fn variances(&self) -> &[f64] {
         &self.variances_
     }

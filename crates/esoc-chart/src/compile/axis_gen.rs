@@ -132,6 +132,7 @@ pub fn generate_axes(
     x_label: Option<&str>,
     y_label: Option<&str>,
     grid_axes: GridAxes,
+    x_categories: Option<&[String]>,
 ) {
     let x_scale = Scale::Linear {
         domain: (bounds.x_min, bounds.x_max),
@@ -207,42 +208,92 @@ pub fn generate_axes(
     scene.insert_child(plot_id, frame);
 
     // ── X tick labels with collision detection ──
-    let strategy = choose_x_label_strategy(&x_ticks, &x_scale, theme.tick_font_size, 4.0);
-    let (x_angle, x_skip, x_anchor) = match &strategy {
-        LabelStrategy::Horizontal => (0.0, 1, TextAnchor::Middle),
-        LabelStrategy::Angled45 => (-45.0, 1, TextAnchor::End),
-        LabelStrategy::Vertical => (-90.0, 1, TextAnchor::End),
-        LabelStrategy::SkipN { n, angle } => (-angle, *n, TextAnchor::End),
-    };
+    // When category labels are provided (bar charts), render them at integer
+    // positions instead of using the linear scale's numeric tick formatting.
+    if let Some(cats) = x_categories {
+        let cat_ticks: Vec<f64> = (0..cats.len()).map(|i| i as f64).collect();
+        let cat_labels: Vec<String> = cats.to_vec();
 
-    for (i, &tick) in x_ticks.iter().enumerate() {
-        // Skip labels based on strategy (but always show first and last)
-        if x_skip > 1 && i % x_skip != 0 && i != x_ticks.len() - 1 {
-            continue;
-        }
-        let x = x_scale.map(tick) + plot_x;
-        let y_offset = if x_angle.abs() > 0.01 {
-            theme.tick_font_size + 8.0
-        } else {
-            theme.tick_font_size + 5.0
+        // Build a temporary scale just for label strategy (uses category text widths)
+        let cat_strategy = choose_x_label_strategy_for_categories(
+            &cat_labels,
+            &cat_ticks,
+            &x_scale,
+            theme.tick_font_size,
+            4.0,
+        );
+        let (x_angle, x_skip, x_anchor) = match &cat_strategy {
+            LabelStrategy::Horizontal => (0.0, 1, TextAnchor::Middle),
+            LabelStrategy::Angled45 => (-45.0, 1, TextAnchor::End),
+            LabelStrategy::Vertical => (-90.0, 1, TextAnchor::End),
+            LabelStrategy::SkipN { n, angle } => (-angle, *n, TextAnchor::End),
         };
-        let y = plot_y + plot_h + y_offset;
-        let label = x_scale.format_tick(tick);
-        let text = Node::with_mark(Mark::Text(TextMark {
-            position: [x, y],
-            text: label,
-            font: FontStyle {
-                family: theme.font_family.clone(),
-                size: theme.tick_font_size,
-                weight: 400,
-                italic: false,
-            },
-            fill: FillStyle::Solid(theme.foreground),
-            angle: x_angle,
-            anchor: x_anchor,
-        }))
-        .z_order(5);
-        scene.insert_child(root_id, text);
+
+        for (i, (label, &tick)) in cat_labels.iter().zip(cat_ticks.iter()).enumerate() {
+            if x_skip > 1 && i % x_skip != 0 && i != cat_labels.len() - 1 {
+                continue;
+            }
+            let x = x_scale.map(tick) + plot_x;
+            let y_offset = if x_angle.abs() > 0.01 {
+                theme.tick_font_size + 8.0
+            } else {
+                theme.tick_font_size + 5.0
+            };
+            let y = plot_y + plot_h + y_offset;
+            let text = Node::with_mark(Mark::Text(TextMark {
+                position: [x, y],
+                text: label.clone(),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.tick_font_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: x_angle,
+                anchor: x_anchor,
+            }))
+            .z_order(5);
+            scene.insert_child(root_id, text);
+        }
+    } else {
+        let strategy = choose_x_label_strategy(&x_ticks, &x_scale, theme.tick_font_size, 4.0);
+        let (x_angle, x_skip, x_anchor) = match &strategy {
+            LabelStrategy::Horizontal => (0.0, 1, TextAnchor::Middle),
+            LabelStrategy::Angled45 => (-45.0, 1, TextAnchor::End),
+            LabelStrategy::Vertical => (-90.0, 1, TextAnchor::End),
+            LabelStrategy::SkipN { n, angle } => (-angle, *n, TextAnchor::End),
+        };
+
+        for (i, &tick) in x_ticks.iter().enumerate() {
+            // Skip labels based on strategy (but always show first and last)
+            if x_skip > 1 && i % x_skip != 0 && i != x_ticks.len() - 1 {
+                continue;
+            }
+            let x = x_scale.map(tick) + plot_x;
+            let y_offset = if x_angle.abs() > 0.01 {
+                theme.tick_font_size + 8.0
+            } else {
+                theme.tick_font_size + 5.0
+            };
+            let y = plot_y + plot_h + y_offset;
+            let label = x_scale.format_tick(tick);
+            let text = Node::with_mark(Mark::Text(TextMark {
+                position: [x, y],
+                text: label,
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.tick_font_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: x_angle,
+                anchor: x_anchor,
+            }))
+            .z_order(5);
+            scene.insert_child(root_id, text);
+        }
     }
 
     // Y tick labels (placed to the left of the plot in root coordinates)
@@ -269,10 +320,31 @@ pub fn generate_axes(
 
     // X axis label
     if let Some(label) = x_label {
+        // Push the axis title below rotated category labels when present
+        let x_label_y_offset = if let Some(cats) = x_categories {
+            let cat_ticks: Vec<f64> = (0..cats.len()).map(|i| i as f64).collect();
+            let cat_labels: Vec<String> = cats.to_vec();
+            let strat = choose_x_label_strategy_for_categories(
+                &cat_labels, &cat_ticks, &x_scale, theme.tick_font_size, 4.0,
+            );
+            if matches!(strat, LabelStrategy::Horizontal) {
+                // Horizontal labels: use normal offset
+                theme.tick_font_size + theme.label_font_size + 15.0
+            } else {
+                let max_label_w = cats.iter()
+                    .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
+                    .fold(0.0_f32, f32::max);
+                // At 45°, vertical extent is w * sin(45°)
+                let rotated_h = max_label_w * 0.71;
+                rotated_h + theme.label_font_size + 12.0
+            }
+        } else {
+            theme.tick_font_size + theme.label_font_size + 15.0
+        };
         let text = Node::with_mark(Mark::Text(TextMark {
             position: [
                 plot_x + plot_w * 0.5,
-                plot_y + plot_h + theme.tick_font_size + theme.label_font_size + 15.0,
+                plot_y + plot_h + x_label_y_offset,
             ],
             text: label.to_string(),
             font: FontStyle {
@@ -309,6 +381,40 @@ pub fn generate_axes(
         }))
         .z_order(5);
         scene.insert_child(root_id, text);
+    }
+}
+
+/// Choose label strategy for category labels (bar charts).
+fn choose_x_label_strategy_for_categories(
+    labels: &[String],
+    ticks: &[f64],
+    scale: &Scale,
+    font_size: f32,
+    min_gap: f32,
+) -> LabelStrategy {
+    if labels.len() <= 1 {
+        return LabelStrategy::Horizontal;
+    }
+
+    let positions: Vec<f32> = ticks.iter().map(|&t| scale.map(t)).collect();
+
+    if labels_fit(labels, &positions, font_size, 0.0, min_gap, 1) {
+        return LabelStrategy::Horizontal;
+    }
+    if labels_fit(labels, &positions, font_size, 45.0, min_gap, 1) {
+        return LabelStrategy::Angled45;
+    }
+    if labels_fit(labels, &positions, font_size, 90.0, min_gap, 1) {
+        return LabelStrategy::Vertical;
+    }
+    for n in 2..labels.len() {
+        if labels_fit(labels, &positions, font_size, 45.0, min_gap, n) {
+            return LabelStrategy::SkipN { n, angle: 45.0 };
+        }
+    }
+    LabelStrategy::SkipN {
+        n: labels.len().max(1),
+        angle: 45.0,
     }
 }
 
@@ -353,6 +459,7 @@ mod tests {
             &mut scene, plot_id, root, &bounds,
             400.0, 300.0, 50.0, 50.0, &theme,
             Some("X"), Some("Y"), GridAxes::HorizontalOnly,
+            None,
         );
         // Should have added nodes (axes, ticks, labels, grid)
         assert!(scene.len() > before);

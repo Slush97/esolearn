@@ -93,6 +93,21 @@ pub(crate) const PEGASOS_LR_DECAY: f64 = 0.01;
 #[cfg(feature = "experimental")]
 pub(crate) const SMO_TOL: f64 = 1e-3;
 
+/// Threshold for treating SMO box constraint bounds L and H as equal.
+/// When |L − H| < this value the pair is skipped.
+#[cfg(feature = "experimental")]
+pub(crate) const SMO_BOUNDS_EQ: f64 = 1e-8;
+
+/// Minimum change in alpha_j to accept an SMO step.
+/// Steps smaller than this are treated as no-ops.
+#[cfg(feature = "experimental")]
+pub(crate) const SMO_ALPHA_CHANGE_THRESH: f64 = 1e-5;
+
+/// Alpha threshold for identifying support vectors.
+/// Points with alpha > this value are retained after SMO.
+#[cfg(feature = "experimental")]
+pub(crate) const SV_ALPHA_THRESH: f64 = 1e-8;
+
 // ─── Parallelism thresholds ───────────────────────────────────────────────
 
 /// Minimum n×m product to enable rayon parallelism in logistic regression

@@ -12,7 +12,18 @@ pub trait ClassificationReportExt {
 
 impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
     fn figure(&self) -> Chart {
-        let labels: Vec<String> = self.per_class.iter().map(|(l, _)| l.clone()).collect();
+        let labels: Vec<String> = self
+            .per_class
+            .iter()
+            .map(|(l, _)| {
+                // Prefix purely numeric class labels for readability on the chart axis
+                if l.parse::<f64>().is_ok() {
+                    format!("Class {l}")
+                } else {
+                    l.clone()
+                }
+            })
+            .collect();
         let precisions: Vec<f64> = self.per_class.iter().map(|(_, m)| m.precision).collect();
         let recalls: Vec<f64> = self.per_class.iter().map(|(_, m)| m.recall).collect();
         let f1s: Vec<f64> = self.per_class.iter().map(|(_, m)| m.f1).collect();

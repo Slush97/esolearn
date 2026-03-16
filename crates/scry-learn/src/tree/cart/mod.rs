@@ -5,7 +5,7 @@
 //! and MSE split criteria. Supports feature bagging for Random Forest.
 //!
 //! Trees are built recursively using `TreeNode`, then flattened into a
-//! contiguous `FlatTree` (Vec<FlatNode>) for cache-optimal prediction.
+//! contiguous `FlatTree` (`Vec<FlatNode>`) for cache-optimal prediction.
 
 mod builder;
 mod flat;

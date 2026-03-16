@@ -21,12 +21,14 @@ impl RocCurveExt for scry_learn::metrics::RocCurve {
         // ROC curve layer
         let roc_layer = Layer::new(MarkType::Line)
             .with_x(self.fpr.clone())
-            .with_y(self.tpr.clone());
+            .with_y(self.tpr.clone())
+            .with_label("ROC Curve");
 
         // Diagonal reference line
         let diag_layer = Layer::new(MarkType::Line)
             .with_x(vec![0.0, 1.0])
-            .with_y(vec![0.0, 1.0]);
+            .with_y(vec![0.0, 1.0])
+            .with_label("Random Classifier");
 
         Chart::new()
             .layer(roc_layer)

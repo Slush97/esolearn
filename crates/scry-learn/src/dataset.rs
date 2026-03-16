@@ -322,7 +322,7 @@ impl Dataset {
 
     /// Get a zero-copy row slice from a pre-computed flat feature buffer.
     ///
-    /// `cache` should be the result of [`flat_feature_matrix`].
+    /// `cache` should be the result of [`Dataset::flat_feature_matrix`].
     #[inline]
     pub fn sample_row<'a>(&self, cache: &'a [f64], idx: usize) -> &'a [f64] {
         let m = self.n_features();

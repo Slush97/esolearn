@@ -95,6 +95,30 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
         }
     }
 
+    // Bar/area charts: re-clamp y_min to 0 after nicing when the actual data minimum
+    // is at or near zero.  nice() can round y_min to something like -0.05 even when
+    // the smallest data value is -0.0004, creating a large gap that makes bars float
+    // above the x-axis baseline.
+    let has_bar_or_area = resolved.iter().any(|l| {
+        matches!(
+            l.mark,
+            crate::grammar::layer::MarkType::Bar | crate::grammar::layer::MarkType::Area
+        )
+    });
+    if has_bar_or_area && data_bounds.y_min < 0.0 {
+        let actual_min: f64 = resolved
+            .iter()
+            .flat_map(|l| l.y_data.iter())
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let range = data_bounds.y_max - data_bounds.y_min;
+        // Clamp if actual data min is non-negative, or if it's negligibly small
+        // relative to the full range (< 2% of range).
+        if actual_min >= 0.0 || (range > 0.0 && actual_min.abs() < 0.02 * range) {
+            data_bounds.y_min = 0.0;
+        }
+    }
+
     // For Flipped coordinate system, swap x/y bounds
     let is_flipped = matches!(chart.coord, crate::grammar::coord::CoordSystem::Flipped);
     if is_flipped {
@@ -346,9 +370,19 @@ fn compile_single_panel(
             axis_gen::GridAxes::Both
         };
 
+        // Extract category labels from bar layers for x-axis labeling
+        let bar_categories: Option<Vec<String>> = if all_bar {
+            resolved
+                .iter()
+                .find_map(|l| l.categories.clone())
+        } else {
+            None
+        };
+
         axis_gen::generate_axes(
             scene, plot_id, root, data_bounds, plot_w, plot_h, plot_x, plot_y, theme,
             x_label, y_label, grid_axes,
+            bar_categories.as_deref(),
         );
     }
 
@@ -444,6 +478,7 @@ fn compile_faceted(
             if show_x { chart.x_label.as_deref() } else { None },
             if show_y { chart.y_label.as_deref() } else { None },
             axis_gen::GridAxes::Both,
+            None,
         );
 
         // Marks

@@ -2,7 +2,7 @@
 //! Layer trait for composable neural network architectures.
 //!
 //! All layer types (Dense, Conv2D, MaxPool2D, Flatten) implement [`Layer`],
-//! enabling heterogeneous layer stacks in [`super::network::Network`].
+//! enabling heterogeneous layer stacks in `Network`.
 
 /// Gradient output from [`Layer::backward`]: `(grad_input, param_grads)`.
 ///

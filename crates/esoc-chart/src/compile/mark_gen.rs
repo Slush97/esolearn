@@ -302,26 +302,33 @@ fn generate_bars(
         }
     }
 
-    // Per-category coloring: each bar gets a color based on its category
-    let fills = if let Some(cats) = &layer.categories {
-        let unique_cats: Vec<String> = {
-            let mut seen = Vec::new();
-            for c in cats {
-                if !seen.contains(c) {
-                    seen.push(c.clone());
+    // Per-category coloring: each bar gets a color based on its category.
+    // Skip per-category coloring for dodged (grouped) bars — those use
+    // the layer's series color so each group (e.g. Precision/Recall/F1)
+    // gets a distinct color instead of coloring by category.
+    let fills = if layer.dodge_width.is_none() {
+        if let Some(cats) = &layer.categories {
+            let unique_cats: Vec<String> = {
+                let mut seen = Vec::new();
+                for c in cats {
+                    if !seen.contains(c) {
+                        seen.push(c.clone());
+                    }
                 }
-            }
-            seen
-        };
-        BatchAttr::Varying(
-            cats.iter()
-                .take(n)
-                .map(|c| {
-                    let idx = unique_cats.iter().position(|u| u == c).unwrap_or(0);
-                    FillStyle::Solid(theme.palette.get(idx))
-                })
-                .collect(),
-        )
+                seen
+            };
+            BatchAttr::Varying(
+                cats.iter()
+                    .take(n)
+                    .map(|c| {
+                        let idx = unique_cats.iter().position(|u| u == c).unwrap_or(0);
+                        FillStyle::Solid(theme.palette.get(idx))
+                    })
+                    .collect(),
+            )
+        } else {
+            BatchAttr::Uniform(FillStyle::Solid(color))
+        }
     } else {
         BatchAttr::Uniform(FillStyle::Solid(color))
     };
