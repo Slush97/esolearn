@@ -11,7 +11,7 @@
 //! - `predict()` assigns new points to the nearest core point's cluster.
 
 use crate::dataset::Dataset;
-use crate::distance::euclidean_sq;
+use crate::distance::{cosine_distance, euclidean_sq, manhattan};
 use crate::error::{Result, ScryLearnError};
 use crate::neighbors::kdtree::KdTree;
 use crate::neighbors::DistanceMetric;
@@ -214,7 +214,7 @@ impl Dbscan {
         match self.metric {
             DistanceMetric::Euclidean => euclidean_sq(a, b),
             DistanceMetric::Manhattan => {
-                let d: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum();
+                let d = manhattan(a, b);
                 d * d
             }
             DistanceMetric::Cosine => {
@@ -295,24 +295,6 @@ impl Dbscan {
     pub fn n_core_points(&self) -> usize {
         self.core_features.len()
     }
-}
-
-/// Cosine distance: `1 − cos(θ)`, range `[0, 2]`.
-#[inline]
-fn cosine_distance(a: &[f64], b: &[f64]) -> f64 {
-    let mut dot = 0.0_f64;
-    let mut norm_a = 0.0_f64;
-    let mut norm_b = 0.0_f64;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        norm_a += x * x;
-        norm_b += y * y;
-    }
-    let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom < f64::EPSILON {
-        return 1.0;
-    }
-    1.0 - (dot / denom)
 }
 
 #[cfg(test)]

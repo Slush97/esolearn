@@ -15,6 +15,9 @@ use rayon::prelude::*;
 use crate::accel;
 use crate::constants::KNN_PAR_THRESHOLD;
 use crate::dataset::Dataset;
+use crate::distance::{
+    cosine_distance, euclidean_sq, manhattan, sparse_cosine, sparse_euclidean_sq, sparse_manhattan,
+};
 use crate::error::{Result, ScryLearnError};
 use crate::neighbors::kdtree::KdTree;
 use crate::sparse::{CsrMatrix, SparseRow};
@@ -209,7 +212,7 @@ impl KnnClassifier {
     /// (or `Auto` heuristic) calls for it.
     ///
     /// If the dataset uses sparse storage, the CSR representation is stored
-    /// for efficient sparse distance computation in [`predict_sparse`].
+    /// for efficient sparse distance computation in [`KnnClassifier::predict_sparse`].
     pub fn fit(&mut self, data: &Dataset) -> Result<()> {
         data.validate_finite()?;
         if data.n_samples() == 0 {
@@ -553,7 +556,7 @@ impl KnnRegressor {
     /// Store training data. Builds KD-tree if appropriate.
     ///
     /// If the dataset uses sparse storage, the CSR representation is stored
-    /// for efficient sparse distance computation in [`predict_sparse`].
+    /// for efficient sparse distance computation in [`KnnRegressor::predict_sparse`].
     pub fn fit(&mut self, data: &Dataset) -> Result<()> {
         data.validate_finite()?;
         if data.n_samples() == 0 {
@@ -588,7 +591,7 @@ impl KnnRegressor {
     /// their mean (or distance-weighted mean) target value.
     ///
     /// When the metric is Euclidean and no KD-tree is in use, distances
-    /// are computed in a single batch via [`ComputeBackend`].
+    /// are computed in a single batch via `ComputeBackend`.
     #[allow(clippy::option_if_let_else)]
     pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         crate::version::check_schema_version(self._schema_version)?;
@@ -887,13 +890,8 @@ fn aggregate_regression(
 #[inline]
 fn distance_for_compare(a: &[f64], b: &[f64], metric: DistanceMetric) -> f64 {
     match metric {
-        DistanceMetric::Euclidean => a
-            .iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).powi(2))
-            .sum::<f64>(),
-        // No sqrt — squared distance preserves ordering.
-        DistanceMetric::Manhattan => a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum(),
+        DistanceMetric::Euclidean => euclidean_sq(a, b),
+        DistanceMetric::Manhattan => manhattan(a, b),
         DistanceMetric::Cosine => cosine_distance(a, b),
     }
 }
@@ -905,35 +903,10 @@ fn distance_for_compare(a: &[f64], b: &[f64], metric: DistanceMetric) -> f64 {
 #[inline]
 fn actual_distance(a: &[f64], b: &[f64], metric: DistanceMetric) -> f64 {
     match metric {
-        DistanceMetric::Euclidean => a
-            .iter()
-            .zip(b.iter())
-            .map(|(x, y)| (x - y).powi(2))
-            .sum::<f64>()
-            .sqrt(),
-        DistanceMetric::Manhattan => a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum(),
+        DistanceMetric::Euclidean => euclidean_sq(a, b).sqrt(),
+        DistanceMetric::Manhattan => manhattan(a, b),
         DistanceMetric::Cosine => cosine_distance(a, b),
     }
-}
-
-/// Cosine distance: `1 − cos(θ)`, range `[0, 2]`.
-///
-/// Returns `1.0` when either vector has zero norm (treat as orthogonal).
-#[inline]
-fn cosine_distance(a: &[f64], b: &[f64]) -> f64 {
-    let mut dot = 0.0_f64;
-    let mut norm_a = 0.0_f64;
-    let mut norm_b = 0.0_f64;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        norm_a += x * x;
-        norm_b += y * y;
-    }
-    let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom < f64::EPSILON {
-        return 1.0; // One or both vectors are zero — treat as orthogonal.
-    }
-    1.0 - (dot / denom)
 }
 
 /// Convert a sparse row view to a dense vector.
@@ -943,90 +916,6 @@ fn sparse_row_to_dense(row: &SparseRow<'_>, n_cols: usize) -> Vec<f64> {
         dense[col] = val;
     }
     dense
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Sparse distance functions (merge-join on sorted index arrays)
-// ─────────────────────────────────────────────────────────────────
-
-/// Sparse dot product via two-pointer merge on sorted indices.
-fn sparse_dot(a: &SparseRow<'_>, b: &SparseRow<'_>) -> f64 {
-    let (a_idx, a_val) = (a.indices(), a.values());
-    let (b_idx, b_val) = (b.indices(), b.values());
-    let (mut i, mut j) = (0, 0);
-    let mut dot = 0.0;
-    while i < a_idx.len() && j < b_idx.len() {
-        match a_idx[i].cmp(&b_idx[j]) {
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
-                dot += a_val[i] * b_val[j];
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    dot
-}
-
-/// Squared L2 norm of a sparse row: `||a||² = Σ a_i²`.
-#[inline]
-fn sparse_norm_sq(a: &SparseRow<'_>) -> f64 {
-    a.values().iter().map(|v| v * v).sum()
-}
-
-/// Sparse squared Euclidean distance: `d²(a,b) = ||a||² + ||b||² - 2·a·b`.
-#[inline]
-fn sparse_euclidean_sq(a: &SparseRow<'_>, b: &SparseRow<'_>) -> f64 {
-    let d2 = sparse_norm_sq(a) + sparse_norm_sq(b) - 2.0 * sparse_dot(a, b);
-    d2.max(0.0) // Guard against floating-point rounding
-}
-
-/// Sparse Manhattan distance via merge-join.
-fn sparse_manhattan(a: &SparseRow<'_>, b: &SparseRow<'_>) -> f64 {
-    let (a_idx, a_val) = (a.indices(), a.values());
-    let (b_idx, b_val) = (b.indices(), b.values());
-    let (mut i, mut j) = (0, 0);
-    let mut dist = 0.0;
-    while i < a_idx.len() && j < b_idx.len() {
-        match a_idx[i].cmp(&b_idx[j]) {
-            std::cmp::Ordering::Less => {
-                dist += a_val[i].abs();
-                i += 1;
-            }
-            std::cmp::Ordering::Greater => {
-                dist += b_val[j].abs();
-                j += 1;
-            }
-            std::cmp::Ordering::Equal => {
-                dist += (a_val[i] - b_val[j]).abs();
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    while i < a_idx.len() {
-        dist += a_val[i].abs();
-        i += 1;
-    }
-    while j < b_idx.len() {
-        dist += b_val[j].abs();
-        j += 1;
-    }
-    dist
-}
-
-/// Sparse cosine distance: `1 − cos(θ)`.
-#[inline]
-fn sparse_cosine(a: &SparseRow<'_>, b: &SparseRow<'_>) -> f64 {
-    let dot = sparse_dot(a, b);
-    let norm_a = sparse_norm_sq(a).sqrt();
-    let norm_b = sparse_norm_sq(b).sqrt();
-    let denom = norm_a * norm_b;
-    if denom < f64::EPSILON {
-        return 1.0;
-    }
-    1.0 - (dot / denom)
 }
 
 /// Compute sparse distance for comparison (skips sqrt for Euclidean).

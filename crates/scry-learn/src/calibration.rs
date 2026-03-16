@@ -122,6 +122,16 @@ impl PlattScaling {
             ));
         }
 
+        // Bail early if all decision values are identical — the sigmoid
+        // cannot separate anything and Newton will produce a singular Hessian.
+        let dv_min = decision_values.iter().copied().fold(f64::INFINITY, f64::min);
+        let dv_max = decision_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if (dv_max - dv_min).abs() < f64::EPSILON {
+            return Err(ScryLearnError::InvalidData(
+                "all decision values are identical — Platt scaling cannot calibrate".into(),
+            ));
+        }
+
         // Modified target values to avoid saturation (Platt 1999).
         let t_pos = (n_pos as f64 + 1.0) / (n_pos as f64 + 2.0);
         let t_neg = 1.0 / (n_neg as f64 + 2.0);
@@ -165,7 +175,10 @@ impl PlattScaling {
             // Solve the 2×2 system: H * [dA, dB]' = -[g1, g2]'
             let det = h11 * h22 - h21 * h21;
             if det.abs() < crate::constants::PLATT_SINGULAR_DET {
-                break;
+                return Err(ScryLearnError::ConvergenceFailure {
+                    iterations: self.max_iter,
+                    tolerance: crate::constants::PLATT_SINGULAR_DET,
+                });
             }
             let da = -(h22 * g1 - h21 * g2) / det;
             let db = -(h11 * g2 - h21 * g1) / det;
@@ -870,5 +883,39 @@ mod tests {
                 assert!((0.0..=1.0).contains(&p), "prob out of range: {p}");
             }
         }
+    }
+
+    #[test]
+    fn test_platt_constant_decision_values() {
+        let mut platt = PlattScaling::new();
+        let dv = vec![1.0; 10];
+        let labels = vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let result = platt.fit(&dv, &labels);
+        assert!(result.is_err(), "constant decision values should fail");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, ScryLearnError::InvalidData(_)),
+            "expected InvalidData, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_platt_near_singular() {
+        let mut platt = PlattScaling::new().max_iter(5);
+        // Decision values with near-zero variance — likely to produce singular Hessian.
+        let dv = vec![1.0, 1.0 + 1e-18, 1.0 - 1e-18, 1.0, 1.0 + 1e-18, 1.0 - 1e-18];
+        let labels = vec![1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+        let result = platt.fit(&dv, &labels);
+        // This should either hit the InvalidData check (values within EPSILON)
+        // or the ConvergenceFailure from singular det.
+        assert!(result.is_err(), "near-singular should fail");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ScryLearnError::InvalidData(_) | ScryLearnError::ConvergenceFailure { .. }
+            ),
+            "expected InvalidData or ConvergenceFailure, got {err:?}"
+        );
     }
 }

@@ -12,6 +12,7 @@ use crate::neural::optimizer::OptimizerState;
 use crate::neural::traits::Layer;
 
 /// GPU dispatch threshold: use backend matmul when batch * max_dim exceeds this.
+/// Only affects the forward pass — the backward pass is always CPU.
 const GPU_THRESHOLD: usize = 4096;
 
 /// A feedforward neural network.
@@ -153,7 +154,7 @@ impl Network {
         current
     }
 
-    /// Backward pass through all layers.
+    /// Backward pass through all layers (always CPU — not GPU-accelerated).
     ///
     /// `grad_output` is `[batch, n_outputs]` — the gradient of loss w.r.t. network output.
     /// `alpha` is the L2 regularization strength.
@@ -167,6 +168,7 @@ impl Network {
         }
     }
 
+    /// MLP backward pass — always CPU, no GPU dispatch.
     fn backward_mlp(&self, grad_output: &[f64], alpha: f64) -> Vec<(Vec<f64>, Vec<f64>)> {
         let n = self.dense_layers.len();
         let mut grads = Vec::with_capacity(n);

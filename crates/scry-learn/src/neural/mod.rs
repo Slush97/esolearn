@@ -7,6 +7,15 @@
 //! Also provides CNN building blocks: [`Conv2D`], [`MaxPool2D`], [`Flatten`],
 //! and the [`Layer`] trait for composing custom architectures.
 //!
+//! # GPU Acceleration
+//!
+//! When a GPU compute backend is available, the **forward pass** is dispatched
+//! to it for MLP networks whose `batch × max_layer_dim` exceeds the internal
+//! `GPU_THRESHOLD` (4096). The **backward pass is always executed on the CPU**
+//! regardless of backend availability — gradient computation has not been
+//! ported to GPU yet. This means training speed is bounded by CPU backward-pass
+//! throughput even when a GPU accelerates inference.
+//!
 //! # Example
 //!
 //! ```ignore

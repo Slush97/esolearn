@@ -17,6 +17,8 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
+use crate::distance::euclidean_sq;
+
 /// A KD-tree for fast nearest-neighbor lookup in Euclidean space.
 ///
 /// Stores points in a flat arena (no `Box`/`Rc`). Each node is either a
@@ -284,7 +286,7 @@ impl KdTree {
     ) {
         match &self.nodes[node_idx] {
             KdNode::Leaf { point_idx } => {
-                let dist_sq = squared_euclidean(query, &points[*point_idx]);
+                let dist_sq = euclidean_sq(query, &points[*point_idx]);
                 if heap.len() < k {
                     heap.push(HeapEntry {
                         dist_sq,
@@ -334,8 +336,8 @@ impl KdTree {
     /// Query all points within a squared-distance radius.
     ///
     /// Returns indices of all points `p` where
-    /// `squared_euclidean(query, p) <= radius_sq`. Uses the same
-    /// branch-pruning strategy as [`query_k_nearest`].
+    /// `euclidean_sq(query, p) <= radius_sq`. Uses the same
+    /// branch-pruning strategy as [`KdTree::query_k_nearest`].
     ///
     /// # Example
     ///
@@ -372,7 +374,7 @@ impl KdTree {
     ) {
         match &self.nodes[node_idx] {
             KdNode::Leaf { point_idx } => {
-                if squared_euclidean(query, &points[*point_idx]) <= radius_sq {
+                if euclidean_sq(query, &points[*point_idx]) <= radius_sq {
                     result.push(*point_idx);
                 }
             }
@@ -410,12 +412,6 @@ impl KdTree {
     pub fn n_dims(&self) -> usize {
         self.n_dims
     }
-}
-
-/// Squared Euclidean distance between two slices.
-#[inline]
-fn squared_euclidean(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| (x - y).powi(2)).sum()
 }
 
 #[cfg(test)]
@@ -510,7 +506,7 @@ mod tests {
             let mut dists: Vec<(f64, usize)> = points
                 .iter()
                 .enumerate()
-                .map(|(i, p)| (squared_euclidean(query, p), i))
+                .map(|(i, p)| (euclidean_sq(query, p), i))
                 .collect();
             dists.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
             let brute: Vec<usize> = dists.iter().take(k).map(|(_, i)| *i).collect();
@@ -602,7 +598,7 @@ mod tests {
         let brute: Vec<usize> = rng_points
             .iter()
             .enumerate()
-            .filter(|(_, p)| squared_euclidean(query, p) <= radius_sq)
+            .filter(|(_, p)| euclidean_sq(query, p) <= radius_sq)
             .map(|(i, _)| i)
             .collect();
 
