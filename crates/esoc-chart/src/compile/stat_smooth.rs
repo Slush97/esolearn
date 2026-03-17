@@ -6,12 +6,21 @@
 /// For each x_i, performs weighted local linear regression using a tricube
 /// kernel. The `bandwidth` parameter controls the fraction of data used
 /// in each local neighborhood (0 < bandwidth <= 1).
-pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> (Vec<f64>, Vec<f64>) {
+///
+/// Returns an error if `x_data` and `y_data` have different lengths.
+pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> crate::error::Result<(Vec<f64>, Vec<f64>)> {
     if x_data.is_empty() || y_data.is_empty() {
-        return (vec![], vec![]);
+        return Ok((vec![], vec![]));
     }
 
-    let n = x_data.len().min(y_data.len());
+    if x_data.len() != y_data.len() {
+        return Err(crate::error::ChartError::LengthMismatch {
+            expected: x_data.len(),
+            got: y_data.len(),
+        });
+    }
+
+    let n = x_data.len();
     let bandwidth = bandwidth.clamp(0.05, 1.0);
     let neighbors = ((n as f64 * bandwidth).ceil() as usize).max(2).min(n);
 
@@ -76,7 +85,7 @@ pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> (Vec<f64
         y_out.push(yi);
     }
 
-    (x_out, y_out)
+    Ok((x_out, y_out))
 }
 
 #[cfg(test)]
@@ -87,7 +96,7 @@ mod tests {
     fn linear_data_near_linear_output() {
         let x: Vec<f64> = (0..20).map(|i| i as f64).collect();
         let y: Vec<f64> = x.iter().map(|&xi| 2.0 * xi + 1.0).collect();
-        let (_x_out, y_out) = compute_loess(&x, &y, 0.5);
+        let (_x_out, y_out) = compute_loess(&x, &y, 0.5).unwrap();
         // For perfectly linear data, LOESS should produce near-linear output
         for (i, &yi) in y_out.iter().enumerate() {
             let expected = 2.0 * _x_out[i] + 1.0;
@@ -103,8 +112,23 @@ mod tests {
 
     #[test]
     fn empty_data() {
-        let (x, y) = compute_loess(&[], &[], 0.5);
+        let (x, y) = compute_loess(&[], &[], 0.5).unwrap();
         assert!(x.is_empty());
         assert!(y.is_empty());
+    }
+
+    #[test]
+    fn length_mismatch_returns_error() {
+        let x = vec![1.0, 2.0, 3.0];
+        let y = vec![1.0, 2.0];
+        let result = compute_loess(&x, &y, 0.5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn single_data_point() {
+        let (x_out, y_out) = compute_loess(&[5.0], &[10.0], 0.5).unwrap();
+        assert_eq!(x_out.len(), 1);
+        assert!((y_out[0] - 10.0).abs() < 1e-10);
     }
 }

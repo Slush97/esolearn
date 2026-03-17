@@ -25,11 +25,14 @@ pub enum Channel {
     Color,
     /// Marker size.
     Size,
-    /// Marker shape.
+    /// Marker shape (not yet supported).
+    #[doc(hidden)]
     Shape,
-    /// Opacity.
+    /// Opacity (not yet supported).
+    #[doc(hidden)]
     Opacity,
-    /// Text content.
+    /// Text content (not yet supported).
+    #[doc(hidden)]
     Text,
 }
 

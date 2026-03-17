@@ -40,6 +40,8 @@ pub enum Annotation {
         y_max: f64,
         /// Fill color (typically semi-transparent).
         color: Color,
+        /// Optional label.
+        label: Option<String>,
     },
     /// Free-form text annotation.
     Text {
@@ -86,6 +88,7 @@ impl Annotation {
             y_min,
             y_max,
             color: Color::new(0.5, 0.5, 0.5, 0.15),
+            label: None,
         }
     }
 
@@ -114,10 +117,12 @@ impl Annotation {
     /// Set the label for reference lines.
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         match &mut self {
-            Self::HLine { label: l, .. } | Self::VLine { label: l, .. } => {
+            Self::HLine { label: l, .. }
+            | Self::VLine { label: l, .. }
+            | Self::Band { label: l, .. } => {
                 *l = Some(label.into());
             }
-            _ => {}
+            Self::Text { .. } => {}
         }
         self
     }

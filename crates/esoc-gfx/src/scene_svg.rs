@@ -16,11 +16,29 @@ use crate::error::Result;
 
 /// Render a scene graph to an SVG string.
 pub fn render_scene_svg(scene: &SceneGraph, width: f32, height: f32) -> Result<String> {
+    render_scene_svg_with_metadata(scene, width, height, None, None)
+}
+
+/// Render a scene graph to an SVG string with optional accessibility metadata.
+pub fn render_scene_svg_with_metadata(
+    scene: &SceneGraph,
+    width: f32,
+    height: f32,
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<String> {
     let mut svg = String::with_capacity(4096);
     writeln!(
         svg,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">"#,
     )?;
+
+    if let Some(t) = title {
+        writeln!(svg, "  <title>{}</title>", escape_xml(t))?;
+    }
+    if let Some(d) = description {
+        writeln!(svg, "  <desc>{}</desc>", escape_xml(d))?;
+    }
 
     // White background
     writeln!(

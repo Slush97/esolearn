@@ -109,8 +109,8 @@ fn labels_fit(
 
     for pair in visible.windows(2) {
         let (pos_a, w_a) = pair[0];
-        let (pos_b, _w_b) = pair[1];
-        if pos_b - pos_a < w_a * 0.5 + min_gap {
+        let (pos_b, w_b) = pair[1];
+        if pos_b - pos_a < (w_a + w_b) * 0.5 + min_gap {
             return false;
         }
     }
@@ -133,6 +133,7 @@ pub fn generate_axes(
     y_label: Option<&str>,
     grid_axes: GridAxes,
     x_categories: Option<&[String]>,
+    y_categories: Option<&[String]>,
 ) {
     let x_scale = Scale::Linear {
         domain: (bounds.x_min, bounds.x_max),
@@ -234,10 +235,11 @@ pub fn generate_axes(
                 continue;
             }
             let x = x_scale.map(tick) + plot_x;
+            let tick_gap = theme.tick_font_size * 0.4; // font-relative gap
             let y_offset = if x_angle.abs() > 0.01 {
-                theme.tick_font_size + 8.0
+                theme.tick_font_size + tick_gap * 2.0
             } else {
-                theme.tick_font_size + 5.0
+                theme.tick_font_size + tick_gap
             };
             let y = plot_y + plot_h + y_offset;
             let text = Node::with_mark(Mark::Text(TextMark {
@@ -271,10 +273,11 @@ pub fn generate_axes(
                 continue;
             }
             let x = x_scale.map(tick) + plot_x;
+            let tick_gap = theme.tick_font_size * 0.4; // font-relative gap
             let y_offset = if x_angle.abs() > 0.01 {
-                theme.tick_font_size + 8.0
+                theme.tick_font_size + tick_gap * 2.0
             } else {
-                theme.tick_font_size + 5.0
+                theme.tick_font_size + tick_gap
             };
             let y = plot_y + plot_h + y_offset;
             let label = x_scale.format_tick(tick);
@@ -297,29 +300,54 @@ pub fn generate_axes(
     }
 
     // Y tick labels (placed to the left of the plot in root coordinates)
-    for &tick in &y_ticks {
-        let x = plot_x - 5.0;
-        let y = y_scale.map(tick) + plot_y;
-        let label = y_scale.format_tick(tick);
-        let text = Node::with_mark(Mark::Text(TextMark {
-            position: [x, y],
-            text: label,
-            font: FontStyle {
-                family: theme.font_family.clone(),
-                size: theme.tick_font_size,
-                weight: 400,
-                italic: false,
-            },
-            fill: FillStyle::Solid(theme.foreground),
-            angle: 0.0,
-            anchor: TextAnchor::End,
-        }))
-        .z_order(5);
-        scene.insert_child(root_id, text);
+    let y_tick_gap = theme.tick_font_size * 0.4; // font-relative gap
+    if let Some(cats) = y_categories {
+        // Render category text labels at integer y positions instead of numeric ticks
+        for (i, label) in cats.iter().enumerate() {
+            let x = plot_x - y_tick_gap;
+            let y = y_scale.map(i as f64) + plot_y;
+            let text = Node::with_mark(Mark::Text(TextMark {
+                position: [x, y],
+                text: label.clone(),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.tick_font_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0,
+                anchor: TextAnchor::End,
+            }))
+            .z_order(5);
+            scene.insert_child(root_id, text);
+        }
+    } else {
+        for &tick in &y_ticks {
+            let x = plot_x - y_tick_gap;
+            let y = y_scale.map(tick) + plot_y;
+            let label = y_scale.format_tick(tick);
+            let text = Node::with_mark(Mark::Text(TextMark {
+                position: [x, y],
+                text: label,
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.tick_font_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0,
+                anchor: TextAnchor::End,
+            }))
+            .z_order(5);
+            scene.insert_child(root_id, text);
+        }
     }
 
     // X axis label
     if let Some(label) = x_label {
+        let title_gap = theme.label_font_size * 1.2; // font-relative spacing
         // Push the axis title below rotated category labels when present
         let x_label_y_offset = if let Some(cats) = x_categories {
             let cat_ticks: Vec<f64> = (0..cats.len()).map(|i| i as f64).collect();
@@ -328,18 +356,16 @@ pub fn generate_axes(
                 &cat_labels, &cat_ticks, &x_scale, theme.tick_font_size, 4.0,
             );
             if matches!(strat, LabelStrategy::Horizontal) {
-                // Horizontal labels: use normal offset
-                theme.tick_font_size + theme.label_font_size + 15.0
+                theme.tick_font_size + theme.label_font_size + title_gap
             } else {
                 let max_label_w = cats.iter()
                     .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
                     .fold(0.0_f32, f32::max);
-                // At 45°, vertical extent is w * sin(45°)
-                let rotated_h = max_label_w * 0.71;
-                rotated_h + theme.label_font_size + 12.0
+                let rotated_h = max_label_w * 0.71 * 1.3;
+                rotated_h + theme.label_font_size + title_gap * 2.0
             }
         } else {
-            theme.tick_font_size + theme.label_font_size + 15.0
+            theme.tick_font_size + theme.label_font_size + title_gap
         };
         let text = Node::with_mark(Mark::Text(TextMark {
             position: [
@@ -363,9 +389,17 @@ pub fn generate_axes(
 
     // Y axis label (rotated)
     if let Some(label) = y_label {
+        let y_label_x = if let Some(cats) = y_categories {
+            let max_cat_w = cats.iter()
+                .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
+                .fold(0.0_f32, f32::max);
+            plot_x - max_cat_w - theme.label_font_size - 5.0
+        } else {
+            plot_x - theme.tick_font_size * 2.5
+        };
         let text = Node::with_mark(Mark::Text(TextMark {
             position: [
-                plot_x - theme.tick_font_size * 3.5,
+                y_label_x,
                 plot_y + plot_h * 0.5,
             ],
             text: label.to_string(),
@@ -447,6 +481,27 @@ mod tests {
     }
 
     #[test]
+    fn labels_fit_uses_both_widths() {
+        // Two labels of very different widths next to each other
+        let labels = vec!["X".to_string(), "WWWWWWWWWW".to_string()];
+        let positions = vec![0.0, 50.0];
+        // With only left width considered (old bug), this would pass
+        // With both widths, it should fail because the right label is very wide
+        let fits = labels_fit(&labels, &positions, 12.0, 0.0, 2.0, 1);
+        // The combined half-widths + gap should be checked
+        // "X" width ≈ 7.2, "WWWWWWWWWW" width ≈ 72 → (7.2+72)/2 + 2 = 41.6
+        // gap = 50, so 50 > 41.6 → should fit
+        assert!(fits);
+
+        // Now test a case that would pass with old logic but fail with new
+        let labels2 = vec!["X".to_string(), "WWWWWWWWWWWWWWWWWW".to_string()];
+        let positions2 = vec![0.0, 50.0];
+        let fits2 = labels_fit(&labels2, &positions2, 12.0, 0.0, 2.0, 1);
+        // "X" ≈ 7.2, "WWW...W" (18 chars) ≈ 129.6 → (7.2+129.6)/2 + 2 = 70.4 > 50
+        assert!(!fits2, "wide right label should cause overlap");
+    }
+
+    #[test]
     fn grid_horizontal_only_for_bars() {
         let mut scene = SceneGraph::with_root();
         let root = scene.root().unwrap();
@@ -459,7 +514,7 @@ mod tests {
             &mut scene, plot_id, root, &bounds,
             400.0, 300.0, 50.0, 50.0, &theme,
             Some("X"), Some("Y"), GridAxes::HorizontalOnly,
-            None,
+            None, None,
         );
         // Should have added nodes (axes, ticks, labels, grid)
         assert!(scene.len() > before);

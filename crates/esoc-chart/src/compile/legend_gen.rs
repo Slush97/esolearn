@@ -24,6 +24,16 @@ pub struct LegendSpec {
     pub title: Option<String>,
     /// Entries in this legend.
     pub entries: Vec<LegendEntry>,
+    /// Continuous gradient legend (for heatmaps).
+    pub gradient: Option<GradientLegend>,
+}
+
+/// A continuous gradient legend for heatmaps.
+pub struct GradientLegend {
+    /// Minimum value.
+    pub v_min: f64,
+    /// Maximum value.
+    pub v_max: f64,
 }
 
 /// Collect legend specs from resolved layers.
@@ -31,6 +41,31 @@ pub struct LegendSpec {
 /// Scans layers for categorical data and generates legend entries.
 /// Deduplicates categories across layers that share the same categorical mapping.
 pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<LegendSpec> {
+    // Check for heatmap layers — generate gradient legend
+    let is_heatmap = layers.iter().all(|l| {
+        matches!(l.mark, crate::grammar::layer::MarkType::Heatmap)
+    });
+    if is_heatmap {
+        if let Some(data) = layers.first().and_then(|l| l.heatmap_data.as_ref()) {
+            let mut v_min = f64::INFINITY;
+            let mut v_max = f64::NEG_INFINITY;
+            for row in data {
+                for &v in row {
+                    if v < v_min { v_min = v; }
+                    if v > v_max { v_max = v; }
+                }
+            }
+            if v_min < v_max {
+                return vec![LegendSpec {
+                    title: None,
+                    entries: vec![],
+                    gradient: Some(GradientLegend { v_min, v_max }),
+                }];
+            }
+        }
+        return vec![];
+    }
+
     // Collect unique categories from layers that have them
     let mut all_cats: Vec<String> = Vec::new();
     let mut has_categories = false;
@@ -61,6 +96,7 @@ pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<Legend
         return vec![LegendSpec {
             title: None,
             entries,
+            gradient: None,
         }];
     }
 
@@ -95,6 +131,7 @@ pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<Legend
     vec![LegendSpec {
         title: None,
         entries,
+        gradient: None,
     }]
 }
 
@@ -109,7 +146,7 @@ pub fn generate_legends(
     plot_x: f32,
     plot_y: f32,
     plot_w: f32,
-    _plot_h: f32,
+    plot_h: f32,
     theme: &NewTheme,
 ) {
     let legend_x = plot_x + plot_w + 15.0;
@@ -118,6 +155,60 @@ pub fn generate_legends(
     let line_height = theme.legend_font_size * 1.5;
 
     for legend in legends {
+        // Gradient legend for heatmaps
+        if let Some(grad) = &legend.gradient {
+            let bar_w = 15.0_f32;
+            let bar_h = plot_h * 0.85;
+            let n_steps = 50_usize;
+            let step_h = bar_h / n_steps as f32;
+            let color_scale = theme.color_scale.clone().unwrap_or_else(esoc_color::ColorScale::viridis);
+
+            for i in 0..n_steps {
+                let t = 1.0 - i as f32 / n_steps as f32; // top = max
+                let color = color_scale.map(t);
+                let rect = Node::with_mark(Mark::Rect(RectMark {
+                    bounds: BoundingBox::new(legend_x, y + i as f32 * step_h, bar_w, step_h + 0.5),
+                    fill: FillStyle::Solid(color),
+                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    corner_radius: 0.0,
+                })).z_order(10);
+                scene.insert_child(root_id, rect);
+            }
+
+            // Min/max labels
+            let fmt = |v: f64| -> String {
+                if (v - v.round()).abs() < 1e-9 { format!("{}", v as i64) } else { format!("{v:.1}") }
+            };
+            let max_label = Node::with_mark(Mark::Text(TextMark {
+                position: [legend_x + bar_w + 5.0, y + theme.legend_font_size * 0.8],
+                text: fmt(grad.v_max),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.legend_font_size,
+                    weight: 400, italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0, anchor: TextAnchor::Start,
+            })).z_order(10);
+            scene.insert_child(root_id, max_label);
+
+            let min_label = Node::with_mark(Mark::Text(TextMark {
+                position: [legend_x + bar_w + 5.0, y + bar_h],
+                text: fmt(grad.v_min),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.legend_font_size,
+                    weight: 400, italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0, anchor: TextAnchor::Start,
+            })).z_order(10);
+            scene.insert_child(root_id, min_label);
+
+            y += bar_h + line_height;
+            continue;
+        }
+
         // Optional title
         if let Some(title) = &legend.title {
             let text = Node::with_mark(Mark::Text(TextMark {
@@ -138,8 +229,13 @@ pub fn generate_legends(
             y += line_height;
         }
 
+        // M9: Compute max entries that fit vertically, truncate with "… +N more"
+        let max_entries = ((plot_h - 10.0) / line_height).floor().max(1.0) as usize;
+        let total_entries = legend.entries.len();
+        let show_count = total_entries.min(max_entries);
+
         // Entries
-        for entry in &legend.entries {
+        for entry in &legend.entries[..show_count] {
             // Color swatch
             let swatch = Node::with_mark(Mark::Rect(RectMark {
                 bounds: BoundingBox::new(legend_x, y, swatch_size, swatch_size),
@@ -170,6 +266,27 @@ pub fn generate_legends(
             .z_order(10);
             scene.insert_child(root_id, text);
 
+            y += line_height;
+        }
+
+        // Show overflow indicator if entries were truncated
+        if total_entries > show_count {
+            let remaining = total_entries - show_count;
+            let overflow_text = Node::with_mark(Mark::Text(TextMark {
+                position: [legend_x, y + theme.legend_font_size * 0.8],
+                text: format!("\u{2026} +{remaining} more"),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.legend_font_size,
+                    weight: 400,
+                    italic: true,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0,
+                anchor: TextAnchor::Start,
+            }))
+            .z_order(10);
+            scene.insert_child(root_id, overflow_text);
             y += line_height;
         }
     }
@@ -236,6 +353,29 @@ mod tests {
         assert_eq!(legends[0].entries.len(), 3);
         assert_eq!(legends[0].entries[0].label, "Series 1");
         assert_eq!(legends[0].entries[2].label, "Series 3");
+    }
+
+    #[test]
+    fn heatmap_generates_gradient_legend() {
+        let theme = NewTheme::default();
+        let mut layer = make_resolved(None, 0);
+        layer.mark = MarkType::Heatmap;
+        layer.heatmap_data = Some(vec![vec![1.0, 5.0], vec![3.0, 9.0]]);
+        let legends = collect_legends(&[layer], &theme);
+        assert_eq!(legends.len(), 1);
+        assert!(legends[0].gradient.is_some());
+        let g = legends[0].gradient.as_ref().unwrap();
+        assert!((g.v_min - 1.0).abs() < 1e-10);
+        assert!((g.v_max - 9.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn single_bar_suppresses_legend() {
+        let theme = NewTheme::default();
+        let mut layer = make_resolved(Some(vec!["A".into(), "B".into()]), 0);
+        layer.mark = MarkType::Bar;
+        let legends = collect_legends(&[layer], &theme);
+        assert!(legends.is_empty(), "single-layer bar should suppress legend");
     }
 
     #[test]

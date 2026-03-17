@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400" role="img">
+  <title>Distribution of Mortgage</title>
+  <rect width="600" height="400" fill="white"/>
+  <rect x="0" y="0" width="600" height="400" fill="rgb(255,255,255)"/>
+  <line x1="57.8" y1="354.1" x2="585" y2="354.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="308.25714" x2="585" y2="308.25714" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="262.41428" x2="585" y2="262.41428" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="216.57143" x2="585" y2="216.57143" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="170.72856" x2="585" y2="170.72856" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="124.8857" x2="585" y2="124.8857" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="79.04286" x2="585" y2="79.04286" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="33.2" x2="585" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="57.959415" y="36.68407" width="15.622692" height="317.41592" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="73.90094" y="354.1" width="15.622692" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="89.84247" y="354.1" width="15.622692" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="105.784" y="344.28964" width="15.622692" height="9.810364" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="121.72551" y="331.91205" width="15.622692" height="22.187958" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="137.66704" y="334.2042" width="15.622692" height="19.895813" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="153.60855" y="338.42175" width="15.622692" height="15.678253" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="169.55008" y="340.43884" width="15.622692" height="13.661163" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="185.49161" y="344.19794" width="15.622692" height="9.902069" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="201.43314" y="345.7566" width="15.622692" height="8.343414" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="217.37466" y="345.38986" width="15.622692" height="8.710144" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="233.3162" y="347.8654" width="15.622692" height="6.234619" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="249.2577" y="349.79077" width="15.622692" height="4.3092346" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="265.19922" y="350.9827" width="15.622692" height="3.1173096" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="281.14075" y="349.88248" width="15.622692" height="4.2175293" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="297.08228" y="351.16608" width="15.622692" height="2.9339294" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="313.0238" y="351.89954" width="15.622692" height="2.20047" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="328.9653" y="352.54135" width="15.622692" height="1.5586548" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="344.90686" y="352.35797" width="15.622692" height="1.7420349" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="360.8484" y="352.8164" width="15.622692" height="1.2835999" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="376.78992" y="352.90808" width="15.622692" height="1.191925" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="392.7314" y="353.27484" width="15.622692" height="0.8251648" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="408.67294" y="353.36652" width="15.622692" height="0.73349" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="424.61447" y="353.82495" width="15.622692" height="0.27505493" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="440.556" y="353.73328" width="15.622692" height="0.36672974" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="456.49753" y="353.73328" width="15.622692" height="0.36672974" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="472.43903" y="353.5499" width="15.622692" height="0.55010986" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="488.38055" y="353.5499" width="15.622692" height="0.55010986" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="504.32208" y="353.91663" width="15.622692" height="0.18338013" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="520.2636" y="353.91663" width="15.622692" height="0.18338013" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <line x1="57.8" y1="33.2" x2="57.8" y2="354.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="57.8" y1="354.1" x2="585" y2="354.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="57.8" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">0</text>
+  <text x="133.11429" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">100</text>
+  <text x="208.42859" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">200</text>
+  <text x="283.74286" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">300</text>
+  <text x="359.05716" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">400</text>
+  <text x="434.37143" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">500</text>
+  <text x="509.68573" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">600</text>
+  <text x="585" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">700</text>
+  <text x="53.84" y="354.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="53.84" y="308.25714" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">500</text>
+  <text x="53.84" y="262.41428" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1000</text>
+  <text x="53.84" y="216.57143" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1500</text>
+  <text x="53.84" y="170.72856" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2000</text>
+  <text x="53.84" y="124.8857" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2500</text>
+  <text x="53.84" y="79.04286" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">3000</text>
+  <text x="53.84" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">3500</text>
+  <text x="321.4" y="388.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Mortgage</text>
+  <text x="33.05" y="193.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,33.05,193.65)">Frequency</text>
+  <text x="300" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Distribution of Mortgage</text>
+</svg>

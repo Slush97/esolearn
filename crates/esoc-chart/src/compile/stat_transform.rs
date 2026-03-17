@@ -194,7 +194,7 @@ fn resolve_smooth(layer: &Layer, layer_idx: usize, bandwidth: f64) -> Result<Res
     let x_data = layer.x_data.as_ref().ok_or(ChartError::EmptyData)?;
     let y_data = layer.y_data.as_ref().ok_or(ChartError::EmptyData)?;
 
-    let (x_smooth, y_smooth) = stat_smooth::compute_loess(x_data, y_data, bandwidth);
+    let (x_smooth, y_smooth) = stat_smooth::compute_loess(x_data, y_data, bandwidth)?;
 
     Ok(ResolvedLayer {
         mark: layer.mark,

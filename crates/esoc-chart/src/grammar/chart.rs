@@ -32,6 +32,8 @@ pub struct Chart {
     pub subtitle: Option<String>,
     /// Caption (below plot).
     pub caption: Option<String>,
+    /// Accessibility description for SVG output.
+    pub description: Option<String>,
     /// Coordinate system.
     pub coord: CoordSystem,
     /// Faceting mode.
@@ -54,6 +56,7 @@ impl Chart {
             annotations: Vec::new(),
             subtitle: None,
             caption: None,
+            description: None,
             coord: CoordSystem::default(),
             facet: Facet::default(),
             facet_scales: FacetScales::default(),
@@ -115,6 +118,12 @@ impl Chart {
         self
     }
 
+    /// Set accessibility description.
+    pub fn description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
     /// Set coordinate system.
     pub fn coord(mut self, coord: CoordSystem) -> Self {
         self.coord = coord;
@@ -141,7 +150,13 @@ impl Chart {
     /// Compile and render to SVG.
     pub fn to_svg(&self) -> Result<String> {
         let scene = self.build()?;
-        let svg = esoc_gfx::scene_svg::render_scene_svg(&scene, self.width, self.height)?;
+        let svg = esoc_gfx::scene_svg::render_scene_svg_with_metadata(
+            &scene,
+            self.width,
+            self.height,
+            self.title.as_deref(),
+            self.description.as_deref(),
+        )?;
         Ok(svg)
     }
 

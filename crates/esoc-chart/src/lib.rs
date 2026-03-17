@@ -65,7 +65,7 @@ pub mod prelude {
 
 /// New API re-exports.
 pub mod v2 {
-    pub use crate::express::{area, bar, boxplot, grouped_bar, histogram, line, pie, scatter, stacked_bar};
+    pub use crate::express::{area, bar, boxplot, grouped_bar, histogram, line, pie, scatter, stacked_bar, treemap};
     pub use crate::grammar::annotation::Annotation;
     pub use crate::grammar::chart::Chart;
     pub use crate::grammar::coord::CoordSystem;

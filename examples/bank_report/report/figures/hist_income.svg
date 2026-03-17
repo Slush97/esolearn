@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400" role="img">
+  <title>Distribution of Income</title>
+  <rect width="600" height="400" fill="white"/>
+  <rect x="0" y="0" width="600" height="400" fill="rgb(255,255,255)"/>
+  <line x1="52.85" y1="354.1" x2="585" y2="354.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="322.01" x2="585" y2="322.01" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="289.92" x2="585" y2="289.92" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="257.83" x2="585" y2="257.83" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="225.73999" x2="585" y2="225.73999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="193.65" x2="585" y2="193.65" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="161.55998" x2="585" y2="161.55998" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="129.47" x2="585" y2="129.47" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="97.37999" x2="585" y2="97.37999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="65.28999" x2="585" y2="65.28999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="52.85" y1="33.2" x2="585" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="70.74797" y="209.69499" width="15.645212" height="144.405" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="86.71248" y="173.1124" width="15.645212" height="180.9876" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="102.67698" y="164.769" width="15.645212" height="189.331" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="118.64148" y="132.679" width="15.645212" height="221.42099" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="134.60599" y="51.1704" width="15.645212" height="302.9296" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="150.57048" y="138.4552" width="15.645212" height="215.64479" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="166.53497" y="179.53038" width="15.645212" height="174.56961" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="182.49948" y="108.2906" width="15.645212" height="245.80939" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="198.46399" y="218.03839" width="15.645212" height="136.0616" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="214.4285" y="193.65" width="15.645212" height="160.45" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="230.39297" y="96.09639" width="15.645212" height="258.0036" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="246.35748" y="208.41139" width="15.645212" height="145.6886" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="262.322" y="282.8602" width="15.645212" height="71.23981" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="278.2865" y="296.338" width="15.645212" height="57.761993" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="294.251" y="241.1432" width="15.645212" height="112.95679" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="310.2155" y="279.6512" width="15.645212" height="74.44879" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="326.18" y="289.2782" width="15.645212" height="64.82181" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="342.1445" y="296.338" width="15.645212" height="57.761993" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="358.10898" y="284.7856" width="15.645212" height="69.31439" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="374.07352" y="309.8158" width="15.645212" height="44.28421" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="390.038" y="295.6962" width="15.645212" height="58.40381" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="406.0025" y="308.5322" width="15.645212" height="45.56781" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="421.96698" y="315.592" width="15.645212" height="38.507996" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="437.93152" y="311.7412" width="15.645212" height="42.358795" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="453.896" y="319.4428" width="15.645212" height="34.657196" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="469.8605" y="308.5322" width="15.645212" height="45.56781" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="485.825" y="343.8312" width="15.645212" height="10.268799" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="501.78952" y="349.6074" width="15.645212" height="4.4926147" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="517.75397" y="354.1" width="15.645212" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="533.7185" y="352.8164" width="15.645212" height="1.2835999" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <line x1="52.85" y1="33.2" x2="52.85" y2="354.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="52.85" y1="354.1" x2="585" y2="354.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="52.85" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">0</text>
+  <text x="163.71458" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">50</text>
+  <text x="274.57916" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">100</text>
+  <text x="385.44376" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">150</text>
+  <text x="496.30835" y="367.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">200</text>
+  <text x="48.89" y="354.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="48.89" y="322.01" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">50</text>
+  <text x="48.89" y="289.92" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">100</text>
+  <text x="48.89" y="257.83" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">150</text>
+  <text x="48.89" y="225.73999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">200</text>
+  <text x="48.89" y="193.65" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">250</text>
+  <text x="48.89" y="161.55998" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">300</text>
+  <text x="48.89" y="129.47" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">350</text>
+  <text x="48.89" y="97.37999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">400</text>
+  <text x="48.89" y="65.28999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">450</text>
+  <text x="48.89" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">500</text>
+  <text x="318.92502" y="388.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Income</text>
+  <text x="28.099998" y="193.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,28.099998,193.65)">Frequency</text>
+  <text x="300" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Distribution of Income</text>
+</svg>

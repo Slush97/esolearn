@@ -186,6 +186,7 @@ pub fn line(x: &[f64], y: &[f64]) -> LineBuilder {
     LineBuilder {
         x: x.to_vec(),
         y: y.to_vec(),
+        categories: None,
         title: None,
         x_label: None,
         y_label: None,
@@ -199,6 +200,7 @@ pub fn line(x: &[f64], y: &[f64]) -> LineBuilder {
 pub struct LineBuilder {
     x: Vec<f64>,
     y: Vec<f64>,
+    categories: Option<Vec<String>>,
     title: Option<String>,
     x_label: Option<String>,
     y_label: Option<String>,
@@ -210,11 +212,20 @@ pub struct LineBuilder {
 impl LineBuilder {
     xy_builder_methods!();
 
+    /// Color lines by category.
+    pub fn color_by(mut self, categories: &[impl ToString]) -> Self {
+        self.categories = Some(categories.iter().map(|c| c.to_string()).collect());
+        self
+    }
+
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let layer = Layer::new(MarkType::Line)
+        let mut layer = Layer::new(MarkType::Line)
             .with_x(self.x)
             .with_y(self.y);
+        if let Some(cats) = self.categories {
+            layer = layer.with_categories(cats);
+        }
         let chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
@@ -373,6 +384,7 @@ pub fn area(x: &[f64], y: &[f64]) -> AreaBuilder {
     AreaBuilder {
         x: x.to_vec(),
         y: y.to_vec(),
+        categories: None,
         title: None,
         x_label: None,
         y_label: None,
@@ -386,6 +398,7 @@ pub fn area(x: &[f64], y: &[f64]) -> AreaBuilder {
 pub struct AreaBuilder {
     x: Vec<f64>,
     y: Vec<f64>,
+    categories: Option<Vec<String>>,
     title: Option<String>,
     x_label: Option<String>,
     y_label: Option<String>,
@@ -397,11 +410,20 @@ pub struct AreaBuilder {
 impl AreaBuilder {
     xy_builder_methods!();
 
+    /// Color areas by category.
+    pub fn color_by(mut self, categories: &[impl ToString]) -> Self {
+        self.categories = Some(categories.iter().map(|c| c.to_string()).collect());
+        self
+    }
+
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let layer = Layer::new(MarkType::Area)
+        let mut layer = Layer::new(MarkType::Area)
             .with_x(self.x)
             .with_y(self.y);
+        if let Some(cats) = self.categories {
+            layer = layer.with_categories(cats);
+        }
         let chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
@@ -451,6 +473,46 @@ impl PieBuilder {
             .with_y(self.values)
             .with_categories(self.labels)
             .with_inner_radius_fraction(self.inner_fraction);
+        let chart = Chart::new()
+            .layer(layer)
+            .size(self.width, self.height)
+            .theme(self.theme);
+        apply_chart_labels!(pie: chart, self)
+    }
+}
+
+// ── Treemap ──────────────────────────────────────────────────────────
+
+/// Create a treemap chart.
+pub fn treemap(labels: &[impl ToString], values: &[f64]) -> TreemapBuilder {
+    TreemapBuilder {
+        labels: labels.iter().map(|l| l.to_string()).collect(),
+        values: values.to_vec(),
+        title: None,
+        theme: NewTheme::default(),
+        width: 600.0,
+        height: 600.0,
+    }
+}
+
+/// Builder for treemap charts.
+pub struct TreemapBuilder {
+    labels: Vec<String>,
+    values: Vec<f64>,
+    title: Option<String>,
+    theme: NewTheme,
+    width: f32,
+    height: f32,
+}
+
+impl TreemapBuilder {
+    pie_builder_methods!();
+
+    /// Build the chart.
+    pub fn build(self) -> Chart {
+        let layer = Layer::new(MarkType::Treemap)
+            .with_y(self.values)
+            .with_categories(self.labels);
         let chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
@@ -526,8 +588,8 @@ pub fn grouped_bar(
 impl MultiBarBuilder {
     xy_builder_methods!();
 
-    /// Build the chart.
-    pub fn build(self) -> Chart {
+    /// Build the chart, returning an error if inputs are invalid.
+    pub fn try_build(self) -> std::result::Result<Chart, String> {
         let config = ChartConfig {
             title: self.title,
             x_label: self.x_label,
@@ -536,7 +598,12 @@ impl MultiBarBuilder {
             width: self.width,
             height: self.height,
         };
-        build_grouped_chart(self.categories, self.groups, self.values, self.position, config)
+        try_build_grouped_chart(self.categories, self.groups, self.values, self.position, config)
+    }
+
+    /// Build the chart. Panics if categories, groups, and values have different lengths.
+    pub fn build(self) -> Chart {
+        self.try_build().expect("MultiBarBuilder::build() failed")
     }
 }
 
@@ -553,14 +620,25 @@ struct ChartConfig {
 }
 
 /// Shared logic for stacked/grouped bar chart construction.
-fn build_grouped_chart(
+/// Returns `Err` if categories, groups, and values have different lengths.
+fn try_build_grouped_chart(
     categories: Vec<String>,
     groups: Vec<String>,
     values: Vec<f64>,
     position: Position,
     config: ChartConfig,
-) -> Chart {
+) -> std::result::Result<Chart, String> {
     use std::collections::HashSet;
+
+    // Validate parallel vector lengths
+    if categories.len() != groups.len() || categories.len() != values.len() {
+        return Err(format!(
+            "categories ({}), groups ({}), and values ({}) must have the same length",
+            categories.len(),
+            groups.len(),
+            values.len(),
+        ));
+    }
 
     let mut unique_cats: Vec<String> = Vec::new();
     let mut seen_cats = HashSet::new();
@@ -597,12 +675,13 @@ fn build_grouped_chart(
                 }
             }
         }
-        let layer = Layer::new(MarkType::Bar)
+        let mut layer = Layer::new(MarkType::Bar)
             .with_x(x_data)
             .with_y(y_data)
-            .with_categories(unique_cats.clone())
             .with_label(group.clone())
             .position(position);
+        // All layers carry category labels (needed for axis label lookup via find_map)
+        layer = layer.with_categories(unique_cats.clone());
         chart = chart.layer(layer);
     }
 
@@ -615,7 +694,7 @@ fn build_grouped_chart(
     if let Some(l) = config.y_label {
         chart = chart.y_label(l);
     }
-    chart
+    Ok(chart)
 }
 
 // ── Heatmap ─────────────────────────────────────────────────────────
@@ -935,6 +1014,86 @@ mod tests {
         let svg = grouped_bar(&cats, &groups, &vals).to_svg().unwrap();
         assert!(svg.contains("Revenue"), "legend should contain group name 'Revenue'");
         assert!(svg.contains("Costs"), "legend should contain group name 'Costs'");
+    }
+
+    #[test]
+    fn grouped_bar_mismatched_lengths_panics() {
+        let result = std::panic::catch_unwind(|| {
+            grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0])
+                .build();
+        });
+        assert!(result.is_err(), "mismatched lengths should panic");
+    }
+
+    #[test]
+    fn grouped_bar_try_build_returns_err() {
+        let result = grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0])
+            .try_build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn line_color_by() {
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let y = vec![10.0, 20.0, 15.0, 25.0];
+        let cats = vec!["A", "B", "A", "B"];
+        let svg = line(&x, &y).color_by(&cats).to_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn area_color_by() {
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let y = vec![10.0, 20.0, 15.0, 25.0];
+        let cats = vec!["A", "B", "A", "B"];
+        let svg = area(&x, &y).color_by(&cats).to_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn svg_contains_title_and_role() {
+        use crate::grammar::chart::Chart;
+        use crate::grammar::layer::{Layer, MarkType};
+        let chart = Chart::new()
+            .layer(Layer::new(MarkType::Point).with_x(vec![1.0]).with_y(vec![1.0]))
+            .title("My Chart")
+            .description("A scatter plot of test data");
+        let svg = chart.to_svg().unwrap();
+        assert!(svg.contains(r#"role="img""#), "SVG should have role=img");
+        assert!(svg.contains("<title>My Chart</title>"), "SVG should contain <title>");
+        assert!(svg.contains("<desc>A scatter plot of test data</desc>"), "SVG should contain <desc>");
+    }
+
+    #[test]
+    fn heatmap_legend_rendered() {
+        let data = vec![vec![1.0, 5.0], vec![3.0, 9.0]];
+        let svg = heatmap(data).title("Heatmap Legend").to_svg().unwrap();
+        // Should have the gradient legend with min/max labels
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn treemap_builds_svg() {
+        let labels = vec!["A", "B", "C", "D"];
+        let values = vec![30.0, 20.0, 15.0, 10.0];
+        let svg = treemap(&labels, &values).title("Treemap").to_svg().unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("<rect"));
+    }
+
+    #[test]
+    fn treemap_single_item() {
+        let svg = treemap(&["Only"], &[100.0]).to_svg().unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("<rect"));
+    }
+
+    #[test]
+    fn treemap_with_zeros() {
+        let labels = vec!["A", "B", "C"];
+        let values = vec![30.0, 0.0, 20.0];
+        let svg = treemap(&labels, &values).to_svg().unwrap();
+        assert!(svg.contains("<svg"));
     }
 
     #[test]

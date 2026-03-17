@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Enhanced theme for the grammar-of-graphics chart API.
 
-use esoc_color::{Color, Palette};
+use esoc_color::{Color, ColorScale, Palette};
 
 /// Theme controlling visual appearance of grammar-based charts.
 #[derive(Clone, Debug)]
@@ -40,6 +40,8 @@ pub struct NewTheme {
     pub line_width: f32,
     /// Default scatter point size (area in px²).
     pub point_size: f32,
+    /// Optional color scale for heatmaps (default: viridis).
+    pub color_scale: Option<ColorScale>,
 }
 
 impl NewTheme {
@@ -64,6 +66,7 @@ impl NewTheme {
             axis_width: 1.0,
             line_width: 2.0,
             point_size: 30.0, // px² area (Vega default)
+            color_scale: None,
         }
     }
 
@@ -88,6 +91,7 @@ impl NewTheme {
             axis_width: 1.0,
             line_width: 2.0,
             point_size: 30.0,
+            color_scale: None,
         }
     }
 
@@ -112,6 +116,7 @@ impl NewTheme {
             axis_width: 1.0,
             line_width: 1.5,
             point_size: 25.0, // slightly smaller for publication
+            color_scale: None,
         }
     }
 }

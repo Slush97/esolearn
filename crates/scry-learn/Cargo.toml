@@ -91,6 +91,10 @@ harness = false
 name = "industry_report"
 
 [[example]]
+name = "universal_bank"
+required-features = ["csv"]
+
+[[example]]
 name = "crosslib_comparison"
 
 [lints.rust]

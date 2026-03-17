@@ -7,6 +7,40 @@ use crate::grammar::position::Position;
 
 /// Apply position adjustments across resolved layers.
 pub fn apply_positions(layers: &mut [ResolvedLayer]) -> Result<()> {
+    use crate::error::ChartError;
+    use crate::grammar::layer::MarkType;
+
+    // Validate position/mark-type compatibility
+    for layer in layers.iter() {
+        match layer.position {
+            Position::Stack | Position::Fill => {
+                if !matches!(layer.mark, MarkType::Bar | MarkType::Area) {
+                    return Err(ChartError::InvalidParameter(format!(
+                        "Stack/Fill position is only valid for Bar and Area marks, got {:?}",
+                        layer.mark
+                    )));
+                }
+            }
+            Position::Dodge => {
+                if !matches!(layer.mark, MarkType::Bar | MarkType::Point) {
+                    return Err(ChartError::InvalidParameter(format!(
+                        "Dodge position is only valid for Bar and Point marks, got {:?}",
+                        layer.mark
+                    )));
+                }
+            }
+            Position::Jitter { .. } => {
+                if !matches!(layer.mark, MarkType::Point | MarkType::Line) {
+                    return Err(ChartError::InvalidParameter(format!(
+                        "Jitter position is only valid for Point and Line marks, got {:?}",
+                        layer.mark
+                    )));
+                }
+            }
+            Position::Identity => {}
+        }
+    }
+
     // Check if any layers need position adjustment
     let positions: Vec<Position> = layers.iter().map(|l| l.position).collect();
 
@@ -37,7 +71,13 @@ pub fn apply_positions(layers: &mut [ResolvedLayer]) -> Result<()> {
 }
 
 /// Stack: for layers with Position::Stack/Fill, accumulate y-values at shared x positions.
+///
+/// Uses key-based alignment: builds a union of all x-values across stackable layers,
+/// then reorders/fills each layer to match the union, ensuring correct stacking
+/// even when layers have sparse or differently-ordered x-values.
 fn apply_stack(layers: &mut [ResolvedLayer]) {
+    use std::collections::HashMap;
+
     let stackable: Vec<usize> = layers
         .iter()
         .enumerate()
@@ -46,37 +86,69 @@ fn apply_stack(layers: &mut [ResolvedLayer]) {
         .collect();
 
     if stackable.len() < 2 {
+        // Still set baseline for single stackable layer
+        if stackable.len() == 1 {
+            let idx = stackable[0];
+            let n = layers[idx].x_data.len().min(layers[idx].y_data.len());
+            layers[idx].y_baseline = Some(vec![0.0; n]);
+        }
         return;
     }
 
-    // For each stackable layer (in order), set baseline to sum of all prior layers
-    // We match by x-value index position
-    for si in 1..stackable.len() {
-        let layer_idx = stackable[si];
-        let n = layers[layer_idx].x_data.len().min(layers[layer_idx].y_data.len());
-        let mut baseline = vec![0.0_f64; n];
-
-        // Sum y-values from all prior stackable layers at each position
-        for &prev_idx in &stackable[..si] {
-            let prev = &layers[prev_idx];
-            let prev_n = prev.x_data.len().min(prev.y_data.len());
-            for (b, &y) in baseline.iter_mut().zip(prev.y_data.iter()).take(n.min(prev_n)) {
-                *b += y;
+    // Build union of all x-values preserving first-seen order
+    // Use bit representation for exact f64 equality (NaN already filtered out upstream)
+    let mut union_x: Vec<f64> = Vec::new();
+    let mut seen_bits: Vec<u64> = Vec::new();
+    for &si in &stackable {
+        let layer = &layers[si];
+        let n = layer.x_data.len().min(layer.y_data.len());
+        for j in 0..n {
+            let bits = layer.x_data[j].to_bits();
+            if !seen_bits.contains(&bits) {
+                seen_bits.push(bits);
+                union_x.push(layer.x_data[j]);
             }
         }
+    }
 
-        let layer = &mut layers[layer_idx];
-        // Adjust y_data to represent the top of this segment
-        for (y, &b) in layer.y_data.iter_mut().zip(baseline.iter()).take(n) {
-            *y += b;
+    // Rewrite each stackable layer to the union x-order, inserting 0.0 for missing keys
+    for &si in &stackable {
+        let layer = &layers[si];
+        let n = layer.x_data.len().min(layer.y_data.len());
+        let mut x_to_y: HashMap<u64, f64> = HashMap::new();
+        for j in 0..n {
+            x_to_y.insert(layer.x_data[j].to_bits(), layer.y_data[j]);
+        }
+        let new_x: Vec<f64> = union_x.clone();
+        let new_y: Vec<f64> = union_x.iter().map(|k| *x_to_y.get(&k.to_bits()).unwrap_or(&0.0)).collect();
+        let layer = &mut layers[si];
+        layer.x_data = new_x;
+        layer.y_data = new_y;
+    }
+
+    let n = union_x.len();
+
+    // Now apply index-based stacking (safe because all layers are aligned)
+    // Maintain diverging baselines: positive values stack up, negative values stack down
+    let mut pos_baseline = vec![0.0_f64; n];
+    let mut neg_baseline = vec![0.0_f64; n];
+
+    for &si in &stackable {
+        let layer = &mut layers[si];
+        let mut baseline = vec![0.0_f64; n];
+        for i in 0..n {
+            if layer.y_data[i] >= 0.0 {
+                baseline[i] = pos_baseline[i];
+                pos_baseline[i] += layer.y_data[i];
+                layer.y_data[i] = pos_baseline[i];
+            } else {
+                baseline[i] = neg_baseline[i];
+                neg_baseline[i] += layer.y_data[i];
+                layer.y_data[i] = neg_baseline[i];
+            }
         }
         layer.y_baseline = Some(baseline);
     }
-
-    // First stackable layer gets zero baseline
-    let first = stackable[0];
-    let n = layers[first].x_data.len().min(layers[first].y_data.len());
-    layers[first].y_baseline = Some(vec![0.0; n]);
 }
 
 /// Fill: normalize stacked columns so each x-position sums to 1.0.
@@ -115,11 +187,20 @@ fn apply_fill_normalize(layers: &mut [ResolvedLayer]) {
     for &li in &fillable {
         let layer = &mut layers[li];
         for i in 0..n.min(layer.y_data.len()) {
-            let total = if totals[i].abs() < 1e-15 { 1.0 } else { totals[i] };
-            layer.y_data[i] /= total;
-            if let Some(ref mut baseline) = layer.y_baseline {
-                if i < baseline.len() {
-                    baseline[i] /= total;
+            if totals[i].abs() < 1e-15 {
+                // Zero-sum column: set to 0 rather than dividing by pseudo-1
+                layer.y_data[i] = 0.0;
+                if let Some(ref mut baseline) = layer.y_baseline {
+                    if i < baseline.len() {
+                        baseline[i] = 0.0;
+                    }
+                }
+            } else {
+                layer.y_data[i] /= totals[i];
+                if let Some(ref mut baseline) = layer.y_baseline {
+                    if i < baseline.len() {
+                        baseline[i] /= totals[i];
+                    }
                 }
             }
         }
@@ -258,7 +339,9 @@ mod tests {
 
     #[test]
     fn jitter_displaces() {
-        let mut layers = vec![make_layer(vec![1.0, 2.0, 3.0], Position::Jitter { x_amount: 0.1, y_amount: 0.1 }, 0)];
+        let mut layer = make_layer(vec![1.0, 2.0, 3.0], Position::Jitter { x_amount: 0.1, y_amount: 0.1 }, 0);
+        layer.mark = MarkType::Point; // Jitter is only valid for Point/Line
+        let mut layers = vec![layer];
         let orig_x = layers[0].x_data.clone();
         apply_positions(&mut layers).unwrap();
 
@@ -277,16 +360,16 @@ mod tests {
         ];
         apply_positions(&mut layers).unwrap();
 
-        // Layer 0: y_data unchanged, baseline = [0, 0]
+        // Layer 0: baseline = [0, 0], y_data = [10, 20]
         assert_eq!(layers[0].y_baseline.as_ref().unwrap(), &vec![0.0, 0.0]);
-        // Layer 1: y_data = [5+10, 10+20] = [15, 30], baseline = [10, 20]
+        assert!((layers[0].y_data[0] - 10.0).abs() < 1e-10);
+        assert!((layers[0].y_data[1] - 20.0).abs() < 1e-10);
+        // Layer 1: baseline = [10, 20], y_data = [15, 30]
         assert!((layers[1].y_data[0] - 15.0).abs() < 1e-10);
         assert!((layers[1].y_data[1] - 30.0).abs() < 1e-10);
-        // Layer 2: baseline = sum of modified layer0 + layer1 y_data
-        // baseline = [10+15, 20+30] = [25, 50]
-        // y_data = [3+25, 7+50] = [28, 57]
-        assert!((layers[2].y_data[0] - 28.0).abs() < 1e-10);
-        assert!((layers[2].y_data[1] - 57.0).abs() < 1e-10);
+        // Layer 2: baseline = [15, 30], y_data = [18, 37]
+        assert!((layers[2].y_data[0] - 18.0).abs() < 1e-10);
+        assert!((layers[2].y_data[1] - 37.0).abs() < 1e-10);
     }
 
     #[test]
@@ -296,6 +379,71 @@ mod tests {
         apply_positions(&mut layers).unwrap();
         // Single dodged layer should not be offset
         assert_eq!(layers[0].x_data, orig_x);
+    }
+
+    #[test]
+    fn stack_sparse_groups() {
+        // Layer 0 has x=[0,1,2], layer 1 has x=[1,2,3] (sparse overlap)
+        let mut l0 = make_layer(vec![10.0, 20.0, 30.0], Position::Stack, 0);
+        l0.x_data = vec![0.0, 1.0, 2.0];
+        let mut l1 = make_layer(vec![5.0, 15.0, 25.0], Position::Stack, 1);
+        l1.x_data = vec![1.0, 2.0, 3.0];
+        let mut layers = vec![l0, l1];
+        apply_positions(&mut layers).unwrap();
+
+        // After key-based alignment, both layers should have x=[0,1,2,3]
+        assert_eq!(layers[0].x_data.len(), 4);
+        assert_eq!(layers[1].x_data.len(), 4);
+        // Layer 0 y at x=3 should be 0 (missing)
+        assert!((layers[0].y_data[3] - 0.0).abs() < 1e-10);
+        // Layer 1 y at x=0 should be 0 (missing), stacked on baseline
+        // Layer 1 baseline at x=0 should be layer 0's value (10)
+        assert!((layers[1].y_baseline.as_ref().unwrap()[0] - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn diverging_stack_mixed_positive_negative() {
+        let mut layers = vec![
+            make_layer(vec![10.0, -5.0], Position::Stack, 0),
+            make_layer(vec![-3.0, 8.0], Position::Stack, 1),
+        ];
+        apply_positions(&mut layers).unwrap();
+
+        // Layer 0: positive 10 stacks up from 0, negative -5 stacks down from 0
+        assert!((layers[0].y_baseline.as_ref().unwrap()[0] - 0.0).abs() < 1e-10);
+        assert!((layers[0].y_data[0] - 10.0).abs() < 1e-10);
+        assert!((layers[0].y_baseline.as_ref().unwrap()[1] - 0.0).abs() < 1e-10);
+        assert!((layers[0].y_data[1] - (-5.0)).abs() < 1e-10);
+
+        // Layer 1: -3 stacks down from neg_baseline[0]=0, 8 stacks up from pos_baseline[1]=0
+        assert!((layers[1].y_baseline.as_ref().unwrap()[0] - 0.0).abs() < 1e-10);
+        assert!((layers[1].y_data[0] - (-3.0)).abs() < 1e-10);
+        assert!((layers[1].y_baseline.as_ref().unwrap()[1] - 0.0).abs() < 1e-10);
+        assert!((layers[1].y_data[1] - 8.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn fill_zero_sum_column() {
+        let mut layers = vec![
+            make_layer(vec![0.0, 10.0], Position::Fill, 0),
+            make_layer(vec![0.0, 20.0], Position::Fill, 1),
+        ];
+        apply_positions(&mut layers).unwrap();
+
+        // Column 0: both zero → should remain 0, not 0.5
+        assert!((layers[0].y_data[0]).abs() < 1e-10);
+        assert!((layers[1].y_data[0]).abs() < 1e-10);
+        // Column 1: should normalize to 1.0
+        assert!((layers[1].y_data[1] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn invalid_position_mark_combo_errors() {
+        // Jitter + Heatmap should error
+        let mut layer = make_layer(vec![1.0], Position::Jitter { x_amount: 0.1, y_amount: 0.1 }, 0);
+        layer.mark = MarkType::Heatmap;
+        let result = apply_positions(&mut [layer]);
+        assert!(result.is_err());
     }
 
     #[test]

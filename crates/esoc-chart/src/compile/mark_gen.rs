@@ -98,8 +98,18 @@ fn generate_layer_marks_inner(
         MarkType::Heatmap => {
             generate_heatmap(scene, plot_id, layer, plot_w, plot_h, theme)?;
         }
-        _ => {
-            // Other mark types (Text, Rule) to be implemented in later sub-phases
+        MarkType::Treemap => {
+            generate_treemap(scene, plot_id, layer, plot_w, plot_h, theme)?;
+        }
+        MarkType::Text => {
+            return Err(ChartError::InvalidParameter(
+                "Text marks are not yet implemented".into(),
+            ));
+        }
+        MarkType::Rule => {
+            return Err(ChartError::InvalidParameter(
+                "Rule marks are not yet implemented".into(),
+            ));
         }
     }
     Ok(())
@@ -165,7 +175,7 @@ fn generate_points(
                 ..Default::default()
             }),
         )
-        .expect("batch validation failed");
+        .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
         let node = Node::with_batch(batch).z_order(2);
         scene.insert_child(plot_id, node);
@@ -187,7 +197,7 @@ fn generate_points(
                 ..Default::default()
             }),
         )
-        .expect("batch validation failed");
+        .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
         let node = Node::with_batch(batch).z_order(2);
         scene.insert_child(plot_id, node);
@@ -302,33 +312,32 @@ fn generate_bars(
         }
     }
 
-    // Per-category coloring: each bar gets a color based on its category.
-    // Skip per-category coloring for dodged (grouped) bars — those use
-    // the layer's series color so each group (e.g. Precision/Recall/F1)
-    // gets a distinct color instead of coloring by category.
-    let fills = if layer.dodge_width.is_none() {
-        if let Some(cats) = &layer.categories {
-            let unique_cats: Vec<String> = {
-                let mut seen = Vec::new();
-                for c in cats {
-                    if !seen.contains(c) {
-                        seen.push(c.clone());
-                    }
+    // Bar coloring logic:
+    // - Multi-series bars (has label): uniform series color per layer
+    // - Dodged (grouped) bars: uniform series color per layer
+    // - Single-layer with categories: per-category coloring
+    let fills = if layer.label.is_some() || layer.dodge_width.is_some() {
+        // Multi-series or dodged: each layer gets its own uniform series color
+        BatchAttr::Uniform(FillStyle::Solid(color))
+    } else if let Some(cats) = &layer.categories {
+        let unique_cats: Vec<String> = {
+            let mut seen = Vec::new();
+            for c in cats {
+                if !seen.contains(c) {
+                    seen.push(c.clone());
                 }
-                seen
-            };
-            BatchAttr::Varying(
-                cats.iter()
-                    .take(n)
-                    .map(|c| {
-                        let idx = unique_cats.iter().position(|u| u == c).unwrap_or(0);
-                        FillStyle::Solid(theme.palette.get(idx))
-                    })
-                    .collect(),
-            )
-        } else {
-            BatchAttr::Uniform(FillStyle::Solid(color))
-        }
+            }
+            seen
+        };
+        BatchAttr::Varying(
+            cats.iter()
+                .take(n)
+                .map(|c| {
+                    let idx = unique_cats.iter().position(|u| u == c).unwrap_or(0);
+                    FillStyle::Solid(theme.palette.get(idx))
+                })
+                .collect(),
+        )
     } else {
         BatchAttr::Uniform(FillStyle::Solid(color))
     };
@@ -344,7 +353,7 @@ fn generate_bars(
     };
 
     let batch = MarkBatch::rects(rects, fills, BatchAttr::Uniform(stroke), 0.0)
-        .expect("batch validation failed");
+        .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
     let node = Node::with_batch(batch).z_order(2);
     scene.insert_child(plot_id, node);
@@ -359,7 +368,7 @@ fn generate_area(
     x_scale: &Scale,
     y_scale: &Scale,
     color: esoc_color::Color,
-    _theme: &NewTheme,
+    theme: &NewTheme,
 ) -> Result<(), ChartError> {
     if layer.x_data.is_empty() || layer.y_data.is_empty() {
         return Ok(());
@@ -388,15 +397,37 @@ fn generate_area(
             .collect()
     };
 
+    // M5: Validate upper/lower path lengths match
+    if upper.len() != lower.len() {
+        return Err(ChartError::InvalidData {
+            layer: layer.layer_idx,
+            detail: format!(
+                "area upper ({}) and lower ({}) paths have different lengths",
+                upper.len(),
+                lower.len()
+            ),
+        });
+    }
+
     let mark = Mark::Area(AreaMark {
-        upper,
+        upper: upper.clone(),
         lower,
         fill: FillStyle::Solid(color.with_alpha(0.3)),
-        stroke: StrokeStyle::solid(color, 1.5),
+        stroke: StrokeStyle { width: 0.0, ..Default::default() },
     });
 
     let node = Node::with_mark(mark).z_order(1);
     scene.insert_child(plot_id, node);
+
+    // Bold top line along the upper boundary
+    let line_mark = Mark::Line(LineMark {
+        points: upper,
+        stroke: StrokeStyle::solid(color, theme.line_width),
+        interpolation: Interpolation::Linear,
+    });
+    let line_node = Node::with_mark(line_mark).z_order(2);
+    scene.insert_child(plot_id, line_node);
+
     Ok(())
 }
 
@@ -422,12 +453,19 @@ fn generate_arcs(
     let outer_radius = plot_w.min(plot_h) * 0.4;
     let inner_radius = outer_radius * layer.inner_radius_fraction;
 
-    let mut start_angle = -std::f32::consts::FRAC_PI_2; // Start from top (12 o'clock)
+    let start_initial = -std::f32::consts::FRAC_PI_2; // Start from top (12 o'clock)
+    let mut start_angle = start_initial;
+    let n = layer.y_data.len();
 
     for (i, &value) in layer.y_data.iter().enumerate() {
         let fraction = value / total;
         let sweep = (fraction * std::f64::consts::TAU) as f32;
-        let end_angle = start_angle + sweep;
+        // L5: Force last arc to close exactly at start + TAU to avoid floating-point gap
+        let end_angle = if i == n - 1 {
+            start_initial + std::f32::consts::TAU
+        } else {
+            start_angle + sweep
+        };
 
         let color = theme.palette.get(i);
 
@@ -535,7 +573,7 @@ fn generate_boxplot(
                     ..Default::default()
                 }),
             )
-            .expect("batch validation failed");
+            .map_err(|e| ChartError::InvalidData { layer: 0, detail: e })?;
             let node = Node::with_batch(batch).z_order(3);
             scene.insert_child(plot_id, node);
         }
@@ -575,7 +613,7 @@ fn generate_heatmap(
     }
     let v_range = if (v_max - v_min).abs() < 1e-12 { 1.0 } else { v_max - v_min };
 
-    let color_scale = esoc_color::ColorScale::viridis();
+    let color_scale = theme.color_scale.clone().unwrap_or_else(esoc_color::ColorScale::viridis);
 
     let cell_w = plot_w / cols as f32;
     let cell_h = plot_h / rows as f32;
@@ -604,12 +642,12 @@ fn generate_heatmap(
         }),
         0.0,
     )
-    .expect("batch validation failed");
+    .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
     let node = Node::with_batch(batch).z_order(2);
     scene.insert_child(plot_id, node);
 
-    // Cell annotations
+    // Cell value annotations
     if layer.annotate_cells {
         let font_size = (cell_h * 0.35).min(cell_w * 0.35).max(8.0);
         for (r, row) in data.iter().enumerate() {
@@ -647,6 +685,136 @@ fn generate_heatmap(
                 .z_order(3);
                 scene.insert_child(plot_id, text_node);
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Modern system font stack for treemap labels.
+const TREEMAP_FONT: &str =
+    "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif";
+
+/// Generate treemap marks: colored rectangles with top-left labels + values.
+fn generate_treemap(
+    scene: &mut SceneGraph,
+    plot_id: NodeId,
+    layer: &ResolvedLayer,
+    plot_w: f32,
+    plot_h: f32,
+    theme: &NewTheme,
+) -> Result<(), ChartError> {
+    if layer.y_data.is_empty() {
+        return Ok(());
+    }
+
+    // Inset cells by a gap so the background peeks through as separators
+    let gap = 2.0_f32;
+    let container = BoundingBox::new(0.0, 0.0, plot_w, plot_h);
+    let cells = crate::compile::layout_treemap::squarified_layout(&layer.y_data, container);
+
+    if cells.is_empty() {
+        return Ok(());
+    }
+
+    // Draw each cell as an individual rect (inset by gap) for rounded corners
+    for cell in &cells {
+        let color = theme.palette.get(cell.index);
+        let inset = BoundingBox::new(
+            cell.bounds.x + gap * 0.5,
+            cell.bounds.y + gap * 0.5,
+            (cell.bounds.w - gap).max(0.0),
+            (cell.bounds.h - gap).max(0.0),
+        );
+        let rect = Node::with_mark(Mark::Rect(esoc_scene::mark::RectMark {
+            bounds: inset,
+            fill: FillStyle::Solid(color),
+            stroke: StrokeStyle { width: 0.0, ..Default::default() },
+            corner_radius: 4.0,
+        }))
+        .z_order(2);
+        scene.insert_child(plot_id, rect);
+    }
+
+    // Labels: top-left anchored with padding, category name + value
+    let pad = 8.0_f32;
+    let categories = layer.categories.as_deref();
+    let total: f64 = layer.y_data.iter().sum();
+
+    for cell in &cells {
+        let w = cell.bounds.w - gap;
+        let h = cell.bounds.h - gap;
+
+        // Need enough room for at least the label
+        if w < 32.0 || h < 22.0 {
+            continue;
+        }
+
+        let label = categories
+            .and_then(|cats| cats.get(cell.index))
+            .cloned()
+            .unwrap_or_default();
+
+        if label.is_empty() {
+            continue;
+        }
+
+        let bg = theme.palette.get(cell.index);
+        let text_color = esoc_color::contrast::text_color_on(bg);
+        let text_color_muted = text_color.with_alpha(0.7);
+
+        // Adaptive font sizing based on cell area
+        let label_size = (w * 0.09)
+            .min(h * 0.22)
+            .clamp(9.0, theme.base_font_size * 1.4);
+        let value_size = (label_size * 0.78).max(8.0);
+
+        let x = cell.bounds.x + gap * 0.5 + pad;
+        let y_label = cell.bounds.y + gap * 0.5 + pad + label_size;
+
+        // Category name (bold, top-left)
+        let label_node = Node::with_mark(Mark::Text(TextMark {
+            position: [x, y_label],
+            text: label,
+            font: FontStyle {
+                family: TREEMAP_FONT.into(),
+                size: label_size,
+                weight: 600,
+                italic: false,
+            },
+            fill: FillStyle::Solid(text_color),
+            angle: 0.0,
+            anchor: TextAnchor::Start,
+        }))
+        .z_order(3);
+        scene.insert_child(plot_id, label_node);
+
+        // Value line underneath (lighter weight) — only if cell is tall enough
+        if h > label_size + value_size + pad * 2.0 + 4.0 {
+            let value = layer.y_data.get(cell.index).copied().unwrap_or(0.0);
+            let pct = if total > 0.0 { value / total * 100.0 } else { 0.0 };
+            let value_text = if value == value.round() {
+                format!("{} ({:.1}%)", value as i64, pct)
+            } else {
+                format!("{value:.1} ({pct:.1}%)")
+            };
+            let y_value = y_label + value_size + 3.0;
+
+            let value_node = Node::with_mark(Mark::Text(TextMark {
+                position: [x, y_value],
+                text: value_text,
+                font: FontStyle {
+                    family: TREEMAP_FONT.into(),
+                    size: value_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(text_color_muted),
+                angle: 0.0,
+                anchor: TextAnchor::Start,
+            }))
+            .z_order(3);
+            scene.insert_child(plot_id, value_node);
         }
     }
 
@@ -771,6 +939,32 @@ mod tests {
         generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 200.0, 200.0, &theme).unwrap();
         // Should have rects batch + 4 text marks
         assert!(count_non_container(&scene) >= 5);
+    }
+
+    #[test]
+    fn treemap_marks_generated() {
+        let mut scene = SceneGraph::with_root();
+        let root = scene.root().unwrap();
+        let plot_id = scene.insert_child(root, Node::container());
+        let mut layer = make_resolved(MarkType::Treemap, vec![], vec![30.0, 20.0, 10.0], 0);
+        layer.categories = Some(vec!["A".into(), "B".into(), "C".into()]);
+        let bounds = DataBounds::new(0.0, 1.0, 0.0, 1.0);
+        let theme = NewTheme::default();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        // Should have rect batch + text labels
+        assert!(count_non_container(&scene) >= 1);
+    }
+
+    #[test]
+    fn treemap_empty_data() {
+        let mut scene = SceneGraph::with_root();
+        let root = scene.root().unwrap();
+        let plot_id = scene.insert_child(root, Node::container());
+        let layer = make_resolved(MarkType::Treemap, vec![], vec![], 0);
+        let bounds = DataBounds::new(0.0, 1.0, 0.0, 1.0);
+        let theme = NewTheme::default();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        assert_eq!(count_non_container(&scene), 0);
     }
 
     #[test]

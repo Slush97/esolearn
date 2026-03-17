@@ -9,6 +9,8 @@ pub enum CoordSystem {
     Cartesian,
     /// Flipped: x and y axes swapped (horizontal bars).
     Flipped,
-    /// Polar coordinates (r, θ).
+    /// Polar coordinates (r, θ) — **not yet implemented**.
+    /// Selecting this will produce a compile-time error.
+    #[doc(hidden)]
     Polar,
 }

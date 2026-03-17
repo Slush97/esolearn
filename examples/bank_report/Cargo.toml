@@ -1,0 +1,9 @@
+[package]
+name = "bank-report"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+scry-learn = { path = "../../crates/scry-learn", features = ["csv"] }
+esoc-chart = { path = "../../crates/esoc-chart", features = ["scry-learn", "png"] }

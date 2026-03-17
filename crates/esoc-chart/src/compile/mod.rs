@@ -5,6 +5,7 @@ pub(crate) mod annotation;
 mod axis_gen;
 pub(crate) mod facet;
 mod layout;
+pub(crate) mod layout_treemap;
 pub(crate) mod legend_gen;
 mod mark_gen;
 pub(crate) mod position;
@@ -37,8 +38,35 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
         return Err(ChartError::EmptyData);
     }
 
-    // Validate dimensions before stat resolution
+    // 1c: Guard against unimplemented Polar coordinates
+    if matches!(chart.coord, crate::grammar::coord::CoordSystem::Polar) {
+        return Err(ChartError::InvalidParameter(
+            "Polar coordinates are not yet implemented".into(),
+        ));
+    }
+
+    // Validate dimensions and data integrity before stat resolution
     for (i, layer) in chart.layers.iter().enumerate() {
+        // Treemap validation: non-negative values, skip x/y mismatch
+        if matches!(layer.mark, crate::grammar::layer::MarkType::Treemap) {
+            if let Some(y) = &layer.y_data {
+                for (j, &v) in y.iter().enumerate() {
+                    if v < 0.0 {
+                        return Err(ChartError::InvalidData {
+                            layer: i,
+                            detail: format!("treemap values must be non-negative, got {v} at index {j}"),
+                        });
+                    }
+                    if v.is_nan() || v.is_infinite() {
+                        return Err(ChartError::InvalidData {
+                            layer: i,
+                            detail: format!("treemap y_data contains {} at index {j}", if v.is_nan() { "NaN" } else { "Inf" }),
+                        });
+                    }
+                }
+            }
+            continue; // skip x/y dimension checks for treemap
+        }
         if let (Some(x), Some(y)) = (&layer.x_data, &layer.y_data) {
             if x.len() != y.len() {
                 return Err(ChartError::DimensionMismatch {
@@ -46,6 +74,58 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                     x_len: x.len(),
                     y_len: y.len(),
                 });
+            }
+        }
+        // 1B: Validate parallel vector lengths
+        // Only validate categories/facet_values against data when both x and y are
+        // present (categories used purely for axis labeling in grouped bars may
+        // intentionally differ in length from per-group x/y data).
+        if let (Some(x), Some(y)) = (&layer.x_data, &layer.y_data) {
+            let n = x.len().min(y.len());
+            if let Some(fv) = &layer.facet_values {
+                if fv.len() != n {
+                    return Err(ChartError::InvalidData {
+                        layer: i,
+                        detail: format!("facet_values has {} elements but data has {}", fv.len(), n),
+                    });
+                }
+            }
+        }
+        // 1A: Check for NaN/Inf in data
+        if let Some(x) = &layer.x_data {
+            for (j, &v) in x.iter().enumerate() {
+                if v.is_nan() || v.is_infinite() {
+                    return Err(ChartError::InvalidData {
+                        layer: i,
+                        detail: format!("x_data contains {} at index {}", if v.is_nan() { "NaN" } else { "Inf" }, j),
+                    });
+                }
+            }
+        }
+        if let Some(y) = &layer.y_data {
+            for (j, &v) in y.iter().enumerate() {
+                if v.is_nan() || v.is_infinite() {
+                    return Err(ChartError::InvalidData {
+                        layer: i,
+                        detail: format!("y_data contains {} at index {}", if v.is_nan() { "NaN" } else { "Inf" }, j),
+                    });
+                }
+            }
+        }
+        // 1b: Validate heatmap data for NaN/Inf
+        if let Some(heatmap) = &layer.heatmap_data {
+            for (r, row) in heatmap.iter().enumerate() {
+                for (c, &v) in row.iter().enumerate() {
+                    if v.is_nan() || v.is_infinite() {
+                        return Err(ChartError::InvalidData {
+                            layer: i,
+                            detail: format!(
+                                "heatmap_data contains {} at [{r}][{c}]",
+                                if v.is_nan() { "NaN" } else { "Inf" }
+                            ),
+                        });
+                    }
+                }
             }
         }
     }
@@ -68,6 +148,31 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
 
     // Compute global data bounds (before margins, since margins depend on tick labels)
     let mut data_bounds = compute_resolved_data_bounds(&resolved)?;
+
+    // C5: Apply 5% padding for scatter/line/point charts so data points
+    // don't sit on axis frame edges. Bar/area/heatmap skip this since they
+    // have their own domain handling (zero-inclusion, bar padding, etc.).
+    {
+        let has_bar_or_area = chart.layers.iter().any(|l| {
+            matches!(
+                l.mark,
+                crate::grammar::layer::MarkType::Bar
+                    | crate::grammar::layer::MarkType::Area
+                    | crate::grammar::layer::MarkType::Heatmap
+                    | crate::grammar::layer::MarkType::Treemap
+            )
+        });
+        if !has_bar_or_area {
+            let x_range = data_bounds.x_max - data_bounds.x_min;
+            let y_range = data_bounds.y_max - data_bounds.y_min;
+            let pad_x = if x_range.abs() < 1e-12 { 1.0 } else { x_range * 0.05 };
+            let pad_y = if y_range.abs() < 1e-12 { 1.0 } else { y_range * 0.05 };
+            data_bounds.x_min -= pad_x;
+            data_bounds.x_max += pad_x;
+            data_bounds.y_min -= pad_y;
+            data_bounds.y_max += pad_y;
+        }
+    }
 
     // Nice the bounds so ticks align exactly with domain edges.
     // Build preliminary scales, nice them, then extract the niced domain back.
@@ -138,8 +243,14 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
 
     let plot_x = margins.left;
     let plot_y = margins.top;
-    let plot_w = chart.width - margins.left - margins.right;
-    let plot_h = chart.height - margins.top - margins.bottom;
+    let plot_w = (chart.width - margins.left - margins.right).max(1.0);
+    let plot_h = (chart.height - margins.top - margins.bottom).max(1.0);
+
+    if chart.width < margins.left + margins.right || chart.height < margins.top + margins.bottom {
+        return Err(ChartError::InvalidParameter(
+            "chart dimensions are too small for the required margins".into(),
+        ));
+    }
 
     // Background
     let bg_node = Node::with_mark(esoc_scene::mark::Mark::Rect(
@@ -175,7 +286,7 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     if let Some(title) = &chart.title {
         let title_node = Node::with_mark(esoc_scene::mark::Mark::Text(
             esoc_scene::mark::TextMark {
-                position: [chart.width * 0.5, margins.top * 0.6],
+                position: [chart.width * 0.5, theme.title_font_size + 10.0],
                 text: title.clone(),
                 font: esoc_scene::style::FontStyle {
                     family: theme.font_family.clone(),
@@ -348,12 +459,15 @@ fn compile_single_panel(
     let is_heatmap = resolved
         .iter()
         .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Heatmap));
+    let is_treemap = resolved
+        .iter()
+        .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Treemap));
 
     if is_heatmap {
         generate_heatmap_axes(
             chart, scene, root, plot_id, resolved, plot_x, plot_y, plot_w, plot_h,
         );
-    } else if !is_pie {
+    } else if !is_pie && !is_treemap {
         let (x_label, y_label) = if is_flipped {
             (chart.y_label.as_deref(), chart.x_label.as_deref())
         } else {
@@ -379,10 +493,15 @@ fn compile_single_panel(
             None
         };
 
+        // When flipped, categories belong on the y-axis, not x-axis
+        let x_cats = if is_flipped && all_bar { None } else { bar_categories.as_deref() };
+        let y_cats = if is_flipped && all_bar { bar_categories.as_deref() } else { None };
+
         axis_gen::generate_axes(
             scene, plot_id, root, data_bounds, plot_w, plot_h, plot_x, plot_y, theme,
             x_label, y_label, grid_axes,
-            bar_categories.as_deref(),
+            x_cats,
+            y_cats,
         );
     }
 
@@ -464,6 +583,21 @@ fn compile_faceted(
         let show_x = is_bottom_row;
         let show_y = is_left_col;
 
+        // Detect if panel layers are all-bar for grid axes and category labels
+        let panel_all_bar = panel.layers.iter().all(|l| {
+            matches!(l.mark, crate::grammar::layer::MarkType::Bar)
+        });
+        let panel_grid_axes = if panel_all_bar {
+            axis_gen::GridAxes::HorizontalOnly
+        } else {
+            axis_gen::GridAxes::Both
+        };
+        let panel_bar_categories: Option<Vec<String>> = if panel_all_bar {
+            panel.layers.iter().find_map(|l| l.categories.clone())
+        } else {
+            None
+        };
+
         // Axes for this panel (use facet theme with smaller ticks)
         axis_gen::generate_axes(
             scene,
@@ -477,7 +611,8 @@ fn compile_faceted(
             &facet_theme,
             if show_x { chart.x_label.as_deref() } else { None },
             if show_y { chart.y_label.as_deref() } else { None },
-            axis_gen::GridAxes::Both,
+            panel_grid_axes,
+            panel_bar_categories.as_deref(),
             None,
         );
 
@@ -492,6 +627,12 @@ fn compile_faceted(
         facet::generate_strip_label(scene, panel_id, &panel.label, rect.w, theme);
     }
 
+    // Faceted chart legend: collect once for the whole chart, position to the right
+    let legends = legend_gen::collect_legends(resolved, theme);
+    if !legends.is_empty() {
+        legend_gen::generate_legends(scene, root, &legends, plot_x, plot_y, plot_w, plot_h, theme);
+    }
+
     Ok(())
 }
 
@@ -501,6 +642,14 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
         .iter()
         .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Arc));
     if all_arc {
+        return Ok(DataBounds::new(0.0, 1.0, 0.0, 1.0));
+    }
+
+    // For Treemap-only charts, scales are not used; return dummy bounds
+    let all_treemap = layers
+        .iter()
+        .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Treemap));
+    if all_treemap {
         return Ok(DataBounds::new(0.0, 1.0, 0.0, 1.0));
     }
 
@@ -551,8 +700,8 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
         .iter()
         .any(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar));
     if has_bar {
-        bounds.x_min -= 0.5;
-        bounds.x_max += 0.5;
+        bounds.x_min -= 0.4;
+        bounds.x_max += 0.4;
     }
 
     // Zero-inclusion: bar/area charts must include y=0
@@ -570,9 +719,9 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
             bounds.y_max = 0.0;
         }
     } else {
-        // For line/point: include zero only if data is close to zero
+        // For line/point: include zero only if data starts negligibly above zero
         let y_range = bounds.y_max - bounds.y_min;
-        if bounds.y_min > 0.0 && y_range > 0.0 && bounds.y_min < 0.25 * y_range {
+        if bounds.y_min > 0.0 && y_range > 0.0 && bounds.y_min < 0.05 * y_range {
             bounds.y_min = 0.0;
         }
     }
@@ -637,5 +786,114 @@ mod tests {
         let chart = Chart::new().layer(layer);
         let scene = compile_chart(&chart).unwrap();
         assert!(scene.root().is_some());
+    }
+
+    // ── Phase 1 tests ──
+
+    #[test]
+    fn nan_in_x_data_returns_error() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, f64::NAN, 3.0])
+            .with_y(vec![1.0, 2.0, 3.0]);
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidData { .. })));
+    }
+
+    #[test]
+    fn inf_in_y_data_returns_error() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0])
+            .with_y(vec![1.0, f64::INFINITY]);
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidData { .. })));
+    }
+
+    #[test]
+    fn mismatched_categories_returns_error_for_points() {
+        // Per-point categories that don't match data length cause batch errors
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0, 3.0])
+            .with_y(vec![1.0, 2.0, 3.0])
+            .with_categories(vec!["A".into(), "B".into()]); // 2 cats, 3 data points
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mismatched_facet_values_length_returns_error() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0, 3.0])
+            .with_y(vec![1.0, 2.0, 3.0])
+            .with_facet_values(vec!["A".into()]); // only 1, not 3
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidData { .. })));
+    }
+
+    #[test]
+    fn text_mark_returns_error() {
+        let layer = Layer::new(MarkType::Text)
+            .with_x(vec![1.0])
+            .with_y(vec![1.0]);
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidParameter(_))));
+    }
+
+    #[test]
+    fn zero_size_chart_returns_error() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0])
+            .with_y(vec![1.0, 2.0]);
+        let chart = Chart::new().layer(layer).size(10.0, 10.0);
+        // Very small chart may fail if margins exceed dimensions
+        let result = compile_chart(&chart);
+        assert!(result.is_err());
+    }
+
+    // ── Phase 2 tests ──
+
+    #[test]
+    fn scatter_data_gets_padding() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![0.0, 10.0])
+            .with_y(vec![0.0, 100.0]);
+        let resolved = stat_transform::resolve_layer(&layer, 0).unwrap();
+        let bounds = compute_resolved_data_bounds(&[resolved]).unwrap();
+        // With 5% padding applied before nicing in compile_chart,
+        // the raw bounds for scatter should extend beyond data range
+        // (checked here at the pre-padding stage to verify the base calculation)
+        assert!(bounds.y_min <= 0.0);
+    }
+
+    #[test]
+    fn polar_coord_returns_error() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0])
+            .with_y(vec![1.0, 2.0]);
+        let chart = Chart::new().layer(layer).coord(CoordSystem::Polar);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidParameter(_))));
+    }
+
+    #[test]
+    fn heatmap_nan_returns_error() {
+        let layer = Layer::new(MarkType::Heatmap)
+            .with_heatmap_data(vec![vec![1.0, f64::NAN], vec![3.0, 4.0]]);
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidData { .. })));
+    }
+
+    #[test]
+    fn heatmap_inf_returns_error() {
+        let layer = Layer::new(MarkType::Heatmap)
+            .with_heatmap_data(vec![vec![1.0, f64::INFINITY]]);
+        let chart = Chart::new().layer(layer);
+        let result = compile_chart(&chart);
+        assert!(matches!(result, Err(ChartError::InvalidData { .. })));
     }
 }

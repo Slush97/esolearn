@@ -18,6 +18,14 @@ pub enum ChartError {
         got: usize,
     },
 
+    /// Layer contains invalid data (NaN, Inf, etc.).
+    InvalidData {
+        /// Layer index.
+        layer: usize,
+        /// Description of the problem.
+        detail: String,
+    },
+
     /// X and Y data have different lengths in a layer.
     DimensionMismatch {
         /// Layer index.
@@ -44,6 +52,9 @@ impl fmt::Display for ChartError {
             Self::EmptyData => f.write_str("no data provided"),
             Self::LengthMismatch { expected, got } => {
                 write!(f, "length mismatch: expected {expected}, got {got}")
+            }
+            Self::InvalidData { layer, detail } => {
+                write!(f, "layer {layer}: {detail}")
             }
             Self::DimensionMismatch { layer, x_len, y_len } => {
                 write!(f, "layer {layer}: x has {x_len} elements but y has {y_len}")

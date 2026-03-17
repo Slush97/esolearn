@@ -6,9 +6,23 @@ use crate::grammar::chart::Chart;
 use esoc_scene::bounds::DataBounds;
 use esoc_scene::scale::Scale;
 
-/// Estimate rendered text width (sans-serif, ~0.6 char width factor).
+/// Per-character width factor for common ASCII glyphs (sans-serif approximation).
+/// Narrow chars ~0.3, average ~0.5, wide chars ~0.7.
+fn char_width_factor(c: char) -> f32 {
+    match c {
+        'i' | 'j' | 'l' | '!' | '|' | '.' | ',' | ':' | ';' | '\'' => 0.3,
+        'f' | 'r' | 't' | '(' | ')' | '[' | ']' | '{' | '}' | ' ' | '1' => 0.35,
+        'm' | 'w' | 'M' | 'W' => 0.7,
+        'A'..='Z' => 0.6,
+        _ => 0.5,
+    }
+}
+
+/// Estimate rendered text width using per-character width factors (sans-serif).
 pub fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    text.len() as f32 * font_size * 0.6
+    text.chars()
+        .map(|c| char_width_factor(c) * font_size)
+        .sum()
 }
 
 /// Compute adaptive tick count from axis pixel length.
@@ -19,6 +33,14 @@ pub fn target_tick_count(axis_length_px: f32, min_spacing: f32) -> usize {
 
 /// Compute margins based on chart properties and actual data bounds.
 pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
+    // Treemap: minimal margins (no axes), only title/legend
+    let is_treemap = chart.layers.iter().all(|l| {
+        matches!(l.mark, crate::grammar::layer::MarkType::Treemap)
+    }) && !chart.layers.is_empty();
+    if is_treemap {
+        return compute_treemap_margins(chart);
+    }
+
     let has_title = chart.title.is_some();
     let has_x_label = chart.x_label.is_some();
     let has_y_label = chart.y_label.is_some();
@@ -51,8 +73,8 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
                 // Labels will be rotated — add extra bottom space
                 let max_label_len = cats.iter().map(|c| c.len()).max().unwrap_or(0);
                 let max_w = max_label_len as f32 * chart.theme.tick_font_size * 0.6;
-                let rotated_h = max_w * 0.71;
-                (rotated_h - chart.theme.tick_font_size).max(0.0)
+                let rotated_h = max_w * 0.71 * 1.5; // 1.5× for descenders + baseline
+                (rotated_h - chart.theme.tick_font_size).max(0.0) + 10.0
             } else {
                 0.0
             }
@@ -87,12 +109,23 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     let tick_label_pad = 2.0;
     let axis_title_pad = if has_y_label { 4.0 } else { 0.0 };
     let axis_title_height = if has_y_label { chart.theme.label_font_size } else { 0.0 };
-    let left = tick_mark_size + tick_label_pad + max_y_label_width + axis_title_pad + axis_title_height + 5.0;
+    let label_extra = if has_y_label { chart.theme.label_font_size } else { 0.0 };
+    let left = tick_mark_size + tick_label_pad + max_y_label_width + axis_title_pad + axis_title_height + label_extra + 5.0;
 
     // ── Right margin — measure legend labels ──
-    let has_legend = chart.layers.iter().any(|l| l.categories.is_some())
-        || chart.layers.len() > 1;
-    let right = if has_legend {
+    // Match the suppression condition in legend_gen: single-layer bar charts suppress legends
+    let has_legend = (chart.layers.iter().any(|l| l.categories.is_some())
+        || chart.layers.len() > 1)
+        && !(chart.layers.len() == 1 && matches!(chart.layers[0].mark, crate::grammar::layer::MarkType::Bar));
+    // Heatmap gradient legend needs right margin even when has_legend is false
+    let is_heatmap = chart.layers.iter().all(|l| {
+        matches!(l.mark, crate::grammar::layer::MarkType::Heatmap) && l.heatmap_data.is_some()
+    }) && !chart.layers.is_empty();
+
+    let right = if is_heatmap {
+        // Gradient bar (15px) + label gap (5px) + label width (~40px)
+        60.0
+    } else if has_legend {
         // Collect unique legend labels from categories and layer labels
         let mut all_labels: Vec<String> = Vec::new();
         let has_layer_labels = chart.layers.iter().any(|l| l.label.is_some());
@@ -135,6 +168,58 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         right,
         bottom,
         left,
+    }
+}
+
+/// Compute margins for treemap charts (minimal: title + legend, no axes).
+fn compute_treemap_margins(chart: &Chart) -> Margins {
+    let top = if chart.title.is_some() && chart.subtitle.is_some() {
+        chart.theme.title_font_size + chart.theme.subtitle_font_size + 35.0
+    } else if chart.title.is_some() {
+        chart.theme.title_font_size + 20.0
+    } else {
+        10.0
+    };
+
+    let bottom = if chart.caption.is_some() {
+        chart.theme.tick_font_size + 15.0
+    } else {
+        10.0
+    };
+
+    // Right margin for legend (treemap always has categories → legend)
+    let has_legend = chart.layers.iter().any(|l| l.categories.is_some());
+    let right = if has_legend {
+        let mut all_labels: Vec<String> = Vec::new();
+        for layer in &chart.layers {
+            if let Some(cats) = &layer.categories {
+                for c in cats {
+                    if !all_labels.contains(c) {
+                        all_labels.push(c.clone());
+                    }
+                }
+            }
+        }
+        if all_labels.is_empty() {
+            15.0
+        } else {
+            let max_label_width = all_labels
+                .iter()
+                .map(|c| estimate_text_width(c, chart.theme.legend_font_size))
+                .fold(0.0_f32, f32::max);
+            let swatch = 12.0;
+            let gaps = 20.0;
+            (swatch + gaps + max_label_width).max(80.0)
+        }
+    } else {
+        15.0
+    };
+
+    Margins {
+        top,
+        right,
+        bottom,
+        left: 10.0,
     }
 }
 

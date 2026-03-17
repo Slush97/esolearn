@@ -290,8 +290,8 @@ impl Scale {
     /// Extend the domain to nice round boundaries so ticks align with domain edges.
     ///
     /// For Linear scales, this expands the domain outward to the nearest nice
-    /// tick boundaries (using the Heckbert algorithm). After nicing, `ticks()`
-    /// will never produce values outside the domain.
+    /// tick boundaries using D3-style tick step computation. After nicing,
+    /// `ticks()` will never produce values outside the domain.
     pub fn nice(&self, target_count: usize) -> Self {
         match self {
             Self::Linear { domain, range } => {
@@ -299,9 +299,7 @@ impl Scale {
                 if (max - min).abs() < 1e-15 {
                     return self.clone();
                 }
-                let target = target_count.max(2) as f64;
-                let r = nice_num(max - min, false);
-                let step = nice_num(r / (target - 1.0), true);
+                let step = tick_step(min, max, target_count);
                 let nice_min = (min / step).floor() * step;
                 let nice_max = (max / step).ceil() * step;
                 Self::Linear {
@@ -326,15 +324,13 @@ impl Scale {
     }
 }
 
-/// Generate nice linear tick positions (Heckbert algorithm).
+/// Generate nice linear tick positions using D3-style tick step.
 fn nice_ticks_linear(min: f64, max: f64, target_count: usize) -> Vec<f64> {
     if (max - min).abs() < 1e-15 {
         return vec![min];
     }
 
-    let target = target_count.max(2) as f64;
-    let range = nice_num(max - min, false);
-    let step = nice_num(range / (target - 1.0), true);
+    let step = tick_step(min, max, target_count);
 
     let graph_min = (min / step).floor() * step;
     let graph_max = (max / step).ceil() * step;
@@ -356,7 +352,31 @@ fn nice_ticks_log(min: f64, max: f64, base: f64) -> Vec<f64> {
     (log_min..=log_max).map(|e| base.powi(e)).collect()
 }
 
+/// Compute a tick step size for a domain `[start, stop]` aiming for `count` ticks.
+///
+/// Uses D3-style algorithm: divides the raw range by count to get a candidate
+/// step, then rounds to the nearest 1/2/5/10 multiple. This avoids the
+/// Heckbert overshoot where rounding the range itself before dividing
+/// inflates the step.
+fn tick_step(start: f64, stop: f64, count: usize) -> f64 {
+    let step0 = (stop - start).abs() / count.max(1) as f64;
+    let mut step1 = 10.0_f64.powf(step0.log10().floor());
+    let error = step0 / step1;
+    if error >= 50.0_f64.sqrt() {
+        // ~7.07
+        step1 *= 10.0;
+    } else if error >= 10.0_f64.sqrt() {
+        // ~3.16
+        step1 *= 5.0;
+    } else if error >= 2.0_f64.sqrt() {
+        // ~1.41
+        step1 *= 2.0;
+    }
+    step1
+}
+
 /// Compute a "nice" number approximately equal to `x`.
+#[allow(dead_code)]
 fn nice_num(x: f64, round: bool) -> f64 {
     let exp = x.abs().log10().floor();
     let frac = x / 10.0_f64.powf(exp);

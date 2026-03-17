@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500" role="img">
+  <title>Personal Loan — Class Distribution</title>
+  <rect width="500" height="500" fill="white"/>
+  <rect x="0" y="0" width="500" height="500" fill="rgb(255,255,255)"/>
+  <path d="M226.6425,96.96399 A154.686,154.686 0 1 1 138.89389,124.261055 L226.6425,251.65 Z" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M138.89389,124.261055 A154.686,154.686 0 0 1 226.6425,96.96399 L226.6425,251.65 Z" fill="rgb(255,127,14)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <rect x="435" y="38.2" width="12" height="12" fill="rgb(31,119,180)" rx="2"/>
+  <text x="452" y="48.4" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">Declined</text>
+  <rect x="435" y="53.05" width="12" height="12" fill="rgb(255,127,14)" rx="2"/>
+  <text x="452" y="63.25" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">Accepted</text>
+  <text x="250" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Personal Loan — Class Distribution</text>
+</svg>

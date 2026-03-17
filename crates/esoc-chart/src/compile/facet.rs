@@ -51,6 +51,9 @@ pub fn compute_panels(
         }
     }
 
+    // Sort facet values for deterministic panel ordering
+    unique_facets.sort();
+
     if unique_facets.is_empty() {
         // No faceting: single panel with all data
         return vec![FacetPanel {
@@ -201,7 +204,11 @@ pub fn compute_panel_bounds(
             if bounds.x_min > bounds.x_max {
                 *global_bounds
             } else {
-                bounds.pad(0.05)
+                // Only pad the free (X) axis, preserve shared Y axis
+                let dx = (bounds.x_max - bounds.x_min) * 0.05;
+                bounds.x_min -= dx;
+                bounds.x_max += dx;
+                bounds
             }
         }
         FacetScales::FreeY => {
@@ -224,7 +231,11 @@ pub fn compute_panel_bounds(
             if bounds.y_min > bounds.y_max {
                 *global_bounds
             } else {
-                bounds.pad(0.05)
+                // Only pad the free (Y) axis, preserve shared X axis
+                let dy = (bounds.y_max - bounds.y_min) * 0.05;
+                bounds.y_min -= dy;
+                bounds.y_max += dy;
+                bounds
             }
         }
     }
@@ -362,6 +373,36 @@ mod tests {
 
         let panels = compute_panels(&Facet::None, &[layer]);
         assert_eq!(panels.len(), 1);
+    }
+
+    #[test]
+    fn free_x_preserves_shared_y() {
+        let layer = make_layer_with_facets(vec!["A".into(), "B".into()]);
+        let panels = compute_panels(&Facet::Wrap { ncol: 2 }, &[layer]);
+        let global = DataBounds::new(0.0, 10.0, 0.0, 100.0);
+        let bounds_a = compute_panel_bounds(&panels[0], FacetScales::FreeX, &global);
+        // Y axis should remain shared (global bounds)
+        assert!((bounds_a.y_min - global.y_min).abs() < 1e-10);
+        assert!((bounds_a.y_max - global.y_max).abs() < 1e-10);
+    }
+
+    #[test]
+    fn free_y_preserves_shared_x() {
+        let layer = make_layer_with_facets(vec!["A".into(), "B".into()]);
+        let panels = compute_panels(&Facet::Wrap { ncol: 2 }, &[layer]);
+        let global = DataBounds::new(0.0, 10.0, 0.0, 100.0);
+        let bounds_a = compute_panel_bounds(&panels[0], FacetScales::FreeY, &global);
+        // X axis should remain shared (global bounds)
+        assert!((bounds_a.x_min - global.x_min).abs() < 1e-10);
+        assert!((bounds_a.x_max - global.x_max).abs() < 1e-10);
+    }
+
+    #[test]
+    fn facet_values_sorted() {
+        let layer = make_layer_with_facets(vec!["C".into(), "A".into(), "B".into()]);
+        let panels = compute_panels(&Facet::Wrap { ncol: 3 }, &[layer]);
+        let labels: Vec<&str> = panels.iter().map(|p| p.label.as_str()).collect();
+        assert_eq!(labels, vec!["A", "B", "C"]);
     }
 
     #[test]

@@ -4,7 +4,9 @@
 use crate::grammar::annotation::Annotation;
 use crate::new_theme::NewTheme;
 use esoc_scene::bounds::DataBounds;
-use esoc_scene::mark::{AreaMark, Mark, RuleMark, TextAnchor, TextMark};
+use crate::compile::layout;
+use esoc_scene::bounds::BoundingBox;
+use esoc_scene::mark::{AreaMark, Mark, RectMark, RuleMark, TextAnchor, TextMark};
 use esoc_scene::node::{Node, NodeId};
 use esoc_scene::scale::Scale;
 use esoc_scene::style::{FillStyle, FontStyle, StrokeStyle};
@@ -53,7 +55,7 @@ pub fn generate_annotations(
                     segments: vec![([0.0, y_px], [plot_w, y_px])],
                     stroke,
                 }))
-                .z_order(1);
+                .z_order(3);
                 scene.insert_child(plot_id, rule);
 
                 if let Some(label_text) = label {
@@ -70,7 +72,7 @@ pub fn generate_annotations(
                         angle: 0.0,
                         anchor: TextAnchor::Start,
                     }))
-                    .z_order(5);
+                    .z_order(4);
                     scene.insert_child(root_id, text);
                 }
             }
@@ -92,7 +94,7 @@ pub fn generate_annotations(
                     segments: vec![([x_px, 0.0], [x_px, plot_h])],
                     stroke,
                 }))
-                .z_order(1);
+                .z_order(3);
                 scene.insert_child(plot_id, rule);
 
                 if let Some(label_text) = label {
@@ -109,7 +111,7 @@ pub fn generate_annotations(
                         angle: 0.0,
                         anchor: TextAnchor::Middle,
                     }))
-                    .z_order(5);
+                    .z_order(4);
                     scene.insert_child(root_id, text);
                 }
             }
@@ -117,6 +119,7 @@ pub fn generate_annotations(
                 y_min,
                 y_max,
                 color,
+                label,
             } => {
                 let y_top = y_scale.map(*y_max);
                 let y_bot = y_scale.map(*y_min);
@@ -133,6 +136,25 @@ pub fn generate_annotations(
                 }))
                 .z_order(0);
                 scene.insert_child(plot_id, area);
+
+                if let Some(label_text) = label {
+                    let mid_y = (y_top + y_bot) * 0.5;
+                    let text = Node::with_mark(Mark::Text(TextMark {
+                        position: [plot_x + plot_w - 5.0, plot_y + mid_y],
+                        text: label_text.clone(),
+                        font: FontStyle {
+                            family: theme.font_family.clone(),
+                            size: theme.tick_font_size,
+                            weight: 400,
+                            italic: true,
+                        },
+                        fill: FillStyle::Solid(theme.foreground),
+                        angle: 0.0,
+                        anchor: TextAnchor::End,
+                    }))
+                    .z_order(4);
+                    scene.insert_child(root_id, text);
+                }
             }
             Annotation::Text {
                 x,
@@ -143,6 +165,23 @@ pub fn generate_annotations(
             } => {
                 let x_px = x_scale.map(*x);
                 let y_px = y_scale.map(*y);
+
+                // Semi-transparent background for readability over data
+                let text_w = layout::estimate_text_width(text, *font_size);
+                let bg = Node::with_mark(Mark::Rect(RectMark {
+                    bounds: BoundingBox::new(
+                        x_px - 2.0,
+                        y_px - font_size * 0.8,
+                        text_w + 4.0,
+                        font_size * 1.2,
+                    ),
+                    fill: FillStyle::Solid(theme.background.with_alpha(0.8)),
+                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    corner_radius: 2.0,
+                }))
+                .z_order(3);
+                scene.insert_child(plot_id, bg);
+
                 let text_node = Node::with_mark(Mark::Text(TextMark {
                     position: [x_px, y_px],
                     text: text.clone(),
@@ -156,7 +195,7 @@ pub fn generate_annotations(
                     angle: 0.0,
                     anchor: TextAnchor::Start,
                 }))
-                .z_order(3);
+                .z_order(4);
                 scene.insert_child(plot_id, text_node);
             }
         }
@@ -175,8 +214,8 @@ pub fn generate_subtitle(
     // Position subtitle below title with proper spacing.
     // Title is rendered at margins.top * 0.6 ≈ title_font_size * 0.6 + 12.
     // Place subtitle one full line below that.
-    let title_y = title_font_size + 12.0;
-    let y = title_y + theme.subtitle_font_size + 4.0;
+    let title_y = title_font_size + 10.0;
+    let y = title_y + title_font_size + 6.0;
     let text = Node::with_mark(Mark::Text(TextMark {
         position: [chart_width * 0.5, y],
         text: subtitle.to_string(),
