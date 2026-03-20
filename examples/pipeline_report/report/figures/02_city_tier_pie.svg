@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600" role="img">
+  <title>Conference City Tier Distribution</title>
+  <rect width="600" height="600" fill="white"/>
+  <rect x="0" y="0" width="600" height="600" fill="rgb(255,255,255)"/>
+  <path d="M273.665,109.34599 A192.304,192.304 0 1 1 257.66895,493.28754 L273.665,301.65 Z" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M257.66895,493.28754 A192.304,192.304 0 0 1 86.45633,257.6757 L273.665,301.65 Z" fill="rgb(255,127,14)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M86.45633,257.6757 A192.304,192.304 0 0 1 261.58035,109.726074 L273.665,301.65 Z" fill="rgb(44,160,44)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M261.58035,109.726074 A192.304,192.304 0 0 1 273.665,109.34599 L273.665,301.65 Z" fill="rgb(214,39,40)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <rect x="529.045" y="38.2" width="12" height="12" fill="rgb(31,119,180)" rx="2"/>
+  <text x="546.045" y="48.4" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">major</text>
+  <rect x="529.045" y="53.05" width="12" height="12" fill="rgb(255,127,14)" rx="2"/>
+  <text x="546.045" y="63.25" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">international</text>
+  <rect x="529.045" y="67.9" width="12" height="12" fill="rgb(44,160,44)" rx="2"/>
+  <text x="546.045" y="78.100006" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">minor</text>
+  <rect x="529.045" y="82.75" width="12" height="12" fill="rgb(214,39,40)" rx="2"/>
+  <text x="546.045" y="92.95" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">virtual</text>
+  <text x="300" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Conference City Tier Distribution</text>
+</svg>

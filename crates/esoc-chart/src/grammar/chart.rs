@@ -40,6 +40,10 @@ pub struct Chart {
     pub facet: Facet,
     /// Facet scale sharing.
     pub facet_scales: FacetScales,
+    /// Explicit x-axis domain override (min, max).
+    pub x_domain: Option<(f64, f64)>,
+    /// Explicit y-axis domain override (min, max).
+    pub y_domain: Option<(f64, f64)>,
 }
 
 impl Chart {
@@ -60,6 +64,8 @@ impl Chart {
             coord: CoordSystem::default(),
             facet: Facet::default(),
             facet_scales: FacetScales::default(),
+            x_domain: None,
+            y_domain: None,
         }
     }
 
@@ -139,6 +145,18 @@ impl Chart {
     /// Set facet scale sharing.
     pub fn facet_scales(mut self, scales: FacetScales) -> Self {
         self.facet_scales = scales;
+        self
+    }
+
+    /// Set explicit x-axis domain (overrides auto-computed bounds).
+    pub fn x_domain(mut self, min: f64, max: f64) -> Self {
+        self.x_domain = Some((min, max));
+        self
+    }
+
+    /// Set explicit y-axis domain (overrides auto-computed bounds).
+    pub fn y_domain(mut self, min: f64, max: f64) -> Self {
+        self.y_domain = Some((min, max));
         self
     }
 

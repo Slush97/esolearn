@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>Leads Found per Year</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="56.315" y1="454.1" x2="885" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="421.72308" x2="885" y2="421.72308" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="389.34616" x2="885" y2="389.34616" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="356.96924" x2="885" y2="356.96924" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="324.59232" x2="885" y2="324.59232" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="292.2154" x2="885" y2="292.2154" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="259.83847" x2="885" y2="259.83847" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="227.46152" x2="885" y2="227.46152" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="195.08461" x2="885" y2="195.08461" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="162.70769" x2="885" y2="162.70769" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="130.33076" x2="885" y2="130.33076" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="97.95384" x2="885" y2="97.95384" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="65.57692" x2="885" y2="65.57692" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="33.2" x2="885" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="94.562" y="396.14532" width="50.996002" height="57.95468" fill="rgb(31,119,180)"/>
+  <rect x="158.307" y="251.09668" width="50.996002" height="203.00331" fill="rgb(255,127,14)"/>
+  <rect x="222.052" y="287.35886" width="50.996002" height="166.74115" fill="rgb(44,160,44)"/>
+  <rect x="285.797" y="52.302387" width="50.996002" height="401.7976" fill="rgb(214,39,40)"/>
+  <rect x="349.542" y="163.35521" width="50.996002" height="290.74478" fill="rgb(148,103,189)"/>
+  <rect x="413.287" y="175.98222" width="50.996002" height="278.11777" fill="rgb(140,86,75)"/>
+  <rect x="477.03204" y="76.90883" width="50.996002" height="377.19116" fill="rgb(227,119,194)"/>
+  <rect x="540.77704" y="239.76476" width="50.996002" height="214.33524" fill="rgb(127,127,127)"/>
+  <rect x="604.52203" y="81.11784" width="50.996002" height="372.98215" fill="rgb(188,189,34)"/>
+  <rect x="668.267" y="209.65422" width="50.996002" height="244.44577" fill="rgb(23,190,207)"/>
+  <rect x="732.012" y="334.62915" width="50.996002" height="119.470856" fill="rgb(31,119,180)"/>
+  <rect x="795.757" y="417.1903" width="50.996002" height="36.9097" fill="rgb(255,127,14)"/>
+  <line x1="56.315" y1="33.2" x2="56.315" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="56.315" y1="454.1" x2="885" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="120.06" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2015</text>
+  <text x="183.80501" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2016</text>
+  <text x="247.55" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2017</text>
+  <text x="311.295" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2018</text>
+  <text x="375.04" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2019</text>
+  <text x="438.785" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2020</text>
+  <text x="502.53003" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2021</text>
+  <text x="566.275" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2022</text>
+  <text x="630.02" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2023</text>
+  <text x="693.765" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2024</text>
+  <text x="757.51" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2025</text>
+  <text x="821.255" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2026</text>
+  <text x="52.355" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="52.355" y="421.72308" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">100</text>
+  <text x="52.355" y="389.34616" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">200</text>
+  <text x="52.355" y="356.96924" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">300</text>
+  <text x="52.355" y="324.59232" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">400</text>
+  <text x="52.355" y="292.2154" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">500</text>
+  <text x="52.355" y="259.83847" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">600</text>
+  <text x="52.355" y="227.46152" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">700</text>
+  <text x="52.355" y="195.08461" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">800</text>
+  <text x="52.355" y="162.70769" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">900</text>
+  <text x="52.355" y="130.33076" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1000</text>
+  <text x="52.355" y="97.95384" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1100</text>
+  <text x="52.355" y="65.57692" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1200</text>
+  <text x="52.355" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1300</text>
+  <text x="470.6575" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Year</text>
+  <text x="31.564999" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,31.564999,243.65)">Number of Leads</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Leads Found per Year</text>
+</svg>

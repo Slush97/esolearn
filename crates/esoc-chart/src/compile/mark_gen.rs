@@ -352,11 +352,61 @@ fn generate_bars(
         }
     };
 
-    let batch = MarkBatch::rects(rects, fills, BatchAttr::Uniform(stroke), 0.0)
+    let batch = MarkBatch::rects(rects.clone(), fills, BatchAttr::Uniform(stroke), 0.0)
         .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
     let node = Node::with_batch(batch).z_order(2);
     scene.insert_child(plot_id, node);
+
+    // Error bars (whiskers with caps)
+    if let Some(errors) = &layer.error_bars {
+        let whisker_stroke = StrokeStyle::solid(theme.foreground, 1.5);
+        let mut segments = Vec::new();
+
+        for (i, &err) in errors.iter().enumerate().take(n) {
+            if err <= 0.0 {
+                continue;
+            }
+            let y_val = layer.y_data[i];
+            if is_flipped {
+                // Horizontal bars: error whiskers go left/right
+                let cy = y_scale.map(layer.y_data[i]);
+                let x_lo = x_scale.map(y_val - err);
+                let x_hi = x_scale.map(y_val + err);
+                let bar_h = rects[i].h;
+                let cap_half = bar_h * 0.3;
+                // Horizontal whisker line
+                segments.push(([x_lo, cy], [x_hi, cy]));
+                // Left cap
+                segments.push(([x_lo, cy - cap_half], [x_lo, cy + cap_half]));
+                // Right cap
+                segments.push(([x_hi, cy - cap_half], [x_hi, cy + cap_half]));
+            } else {
+                // Vertical bars: error whiskers go up/down
+                let cx = x_scale.map(layer.x_data[i]);
+                let y_lo = y_scale.map(y_val - err);
+                let y_hi = y_scale.map(y_val + err);
+                let bar_w = rects[i].w;
+                let cap_half = bar_w * 0.3;
+                // Vertical whisker line
+                segments.push(([cx, y_lo], [cx, y_hi]));
+                // Bottom cap
+                segments.push(([cx - cap_half, y_lo], [cx + cap_half, y_lo]));
+                // Top cap
+                segments.push(([cx - cap_half, y_hi], [cx + cap_half, y_hi]));
+            }
+        }
+
+        if !segments.is_empty() {
+            let whiskers = Node::with_mark(Mark::Rule(RuleMark {
+                segments,
+                stroke: whisker_stroke,
+            }))
+            .z_order(3);
+            scene.insert_child(plot_id, whiskers);
+        }
+    }
+
     Ok(())
 }
 
@@ -847,6 +897,7 @@ mod tests {
             annotate_cells: false,
             label: None,
             dodge_width: None,
+            error_bars: None,
         }
     }
 

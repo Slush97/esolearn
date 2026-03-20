@@ -3,15 +3,23 @@
 
 use crate::express::heatmap;
 use crate::grammar::chart::Chart;
+use crate::new_theme::NewTheme;
 
 /// Extension trait for creating confusion matrix figures.
 pub trait ConfusionMatrixExt {
     /// Create a heatmap chart from this confusion matrix.
     fn figure(&self) -> Chart;
+
+    /// Create a heatmap chart from this confusion matrix with a custom theme.
+    fn figure_with_theme(&self, theme: NewTheme) -> Chart;
 }
 
 impl ConfusionMatrixExt for scry_learn::metrics::ConfusionMatrix {
     fn figure(&self) -> Chart {
+        self.figure_with_theme(NewTheme::default())
+    }
+
+    fn figure_with_theme(&self, theme: NewTheme) -> Chart {
         let data: Vec<Vec<f64>> = self
             .matrix
             .iter()
@@ -25,6 +33,7 @@ impl ConfusionMatrixExt for scry_learn::metrics::ConfusionMatrix {
             .title("Confusion Matrix")
             .x_label("Predicted")
             .y_label("True")
+            .theme(theme)
             .size(600.0, 600.0)
             .build()
     }

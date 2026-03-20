@@ -318,6 +318,7 @@ mod tests {
             annotate_cells: false,
             label: None,
             dodge_width: None,
+            error_bars: None,
         }
     }
 

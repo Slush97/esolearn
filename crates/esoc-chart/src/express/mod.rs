@@ -243,6 +243,7 @@ pub fn bar(categories: &[impl ToString], values: &[f64]) -> BarBuilder {
         x,
         y: values.to_vec(),
         labels: categories.iter().map(|c| c.to_string()).collect(),
+        error_bars: None,
         title: None,
         x_label: None,
         y_label: None,
@@ -257,6 +258,7 @@ pub struct BarBuilder {
     x: Vec<f64>,
     y: Vec<f64>,
     labels: Vec<String>,
+    error_bars: Option<Vec<f64>>,
     title: Option<String>,
     x_label: Option<String>,
     y_label: Option<String>,
@@ -268,12 +270,21 @@ pub struct BarBuilder {
 impl BarBuilder {
     xy_builder_methods!();
 
+    /// Set symmetric error bar values (±err per bar).
+    pub fn error_bars(mut self, errors: &[f64]) -> Self {
+        self.error_bars = Some(errors.to_vec());
+        self
+    }
+
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let layer = Layer::new(MarkType::Bar)
+        let mut layer = Layer::new(MarkType::Bar)
             .with_x(self.x)
             .with_y(self.y)
             .with_categories(self.labels);
+        if let Some(eb) = self.error_bars {
+            layer = layer.with_error_bars(eb);
+        }
         let chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
@@ -1094,6 +1105,20 @@ mod tests {
         let values = vec![30.0, 0.0, 20.0];
         let svg = treemap(&labels, &values).to_svg().unwrap();
         assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn bar_with_error_bars_builds_svg() {
+        let cats = vec!["A", "B", "C"];
+        let vals = vec![10.0, 25.0, 15.0];
+        let errs = vec![1.5, 2.0, 1.0];
+        let svg = bar(&cats, &vals)
+            .error_bars(&errs)
+            .title("Bar with Error Bars")
+            .to_svg()
+            .unwrap();
+        assert!(svg.contains("<rect"));
+        assert!(svg.contains("<line"), "should have whisker lines");
     }
 
     #[test]

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>Bids Placed by Year</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="47.9" y1="454.1" x2="885" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="393.97144" x2="885" y2="393.97144" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="333.84286" x2="885" y2="333.84286" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="273.7143" x2="885" y2="273.7143" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="213.5857" x2="885" y2="213.5857" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="153.45714" x2="885" y2="153.45714" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="93.32857" x2="885" y2="93.32857" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="47.9" y1="33.2" x2="885" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="86.535385" y="442.07428" width="51.51385" height="12.025726" fill="rgb(31,119,180)"/>
+  <rect x="150.9277" y="393.97144" width="51.51385" height="60.12857" fill="rgb(255,127,14)"/>
+  <rect x="215.32" y="369.92" width="51.51385" height="84.17999" fill="rgb(44,160,44)"/>
+  <rect x="279.7123" y="249.66286" width="51.51385" height="204.43713" fill="rgb(214,39,40)"/>
+  <rect x="344.1046" y="345.8686" width="51.51385" height="108.231415" fill="rgb(148,103,189)"/>
+  <rect x="408.49692" y="297.76572" width="51.51385" height="156.33429" fill="rgb(140,86,75)"/>
+  <rect x="472.88922" y="45.225727" width="51.51385" height="408.87427" fill="rgb(227,119,194)"/>
+  <rect x="537.28156" y="189.53426" width="51.51385" height="264.56573" fill="rgb(127,127,127)"/>
+  <rect x="601.6739" y="69.277145" width="51.51385" height="384.82285" fill="rgb(188,189,34)"/>
+  <rect x="666.0662" y="321.81714" width="51.51385" height="132.28287" fill="rgb(23,190,207)"/>
+  <rect x="730.4585" y="454.1" width="51.51385" height="0" fill="rgb(31,119,180)"/>
+  <rect x="794.8508" y="454.1" width="51.51385" height="0" fill="rgb(255,127,14)"/>
+  <line x1="47.9" y1="33.2" x2="47.9" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="47.9" y1="454.1" x2="885" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="112.29231" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2015</text>
+  <text x="176.68463" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2016</text>
+  <text x="241.07693" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2017</text>
+  <text x="305.46924" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2018</text>
+  <text x="369.86154" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2019</text>
+  <text x="434.25385" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2020</text>
+  <text x="498.64615" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2021</text>
+  <text x="563.0385" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2022</text>
+  <text x="627.4308" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2023</text>
+  <text x="691.8231" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2024</text>
+  <text x="756.2154" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2025</text>
+  <text x="820.6077" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2026</text>
+  <text x="43.940002" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="43.940002" y="393.97144" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">5</text>
+  <text x="43.940002" y="333.84286" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">10</text>
+  <text x="43.940002" y="273.7143" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">15</text>
+  <text x="43.940002" y="213.5857" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">20</text>
+  <text x="43.940002" y="153.45714" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">25</text>
+  <text x="43.940002" y="93.32857" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">30</text>
+  <text x="43.940002" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">35</text>
+  <text x="466.44998" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Year</text>
+  <text x="23.150002" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,23.150002,243.65)">Number of Bids</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Bids Placed by Year</text>
+</svg>

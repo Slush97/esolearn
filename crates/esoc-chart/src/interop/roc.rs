@@ -3,15 +3,23 @@
 
 use crate::grammar::chart::Chart;
 use crate::grammar::layer::{Layer, MarkType};
+use crate::new_theme::NewTheme;
 
 /// Extension trait for creating ROC curve figures.
 pub trait RocCurveExt {
     /// Create a chart showing this ROC curve.
     fn roc_figure(&self) -> Chart;
+
+    /// Create a chart showing this ROC curve with a custom theme.
+    fn roc_figure_with_theme(&self, theme: NewTheme) -> Chart;
 }
 
 impl RocCurveExt for scry_learn::metrics::RocCurve {
     fn roc_figure(&self) -> Chart {
+        self.roc_figure_with_theme(NewTheme::default())
+    }
+
+    fn roc_figure_with_theme(&self, theme: NewTheme) -> Chart {
         let auc_label = if self.auc.is_nan() {
             "ROC (AUC = N/A)".to_string()
         } else {
@@ -36,6 +44,9 @@ impl RocCurveExt for scry_learn::metrics::RocCurve {
             .title(auc_label)
             .x_label("False Positive Rate")
             .y_label("True Positive Rate")
+            .x_domain(0.0, 1.0)
+            .y_domain(0.0, 1.0)
+            .theme(theme)
             .size(600.0, 600.0)
     }
 }

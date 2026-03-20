@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use esoc_chart::prelude::*;
-use esoc_chart::v2::{self, bar, histogram, pie, NewTheme};
+use esoc_chart::v2::{self, bar, boxplot, histogram, pie, NewTheme};
+use esoc_chart::grammar::coord::CoordSystem;
 
 use scry_learn::dataset::Dataset;
 use scry_learn::explain::permutation_importance;
@@ -119,6 +120,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &["Declined", "Accepted"],
     )
     .title("Personal Loan — Class Distribution")
+    .theme(theme.clone())
     .size(500.0, 500.0)
     .build()
     .save_svg(fig_dir.join("class_distribution.svg").to_str().unwrap())?;
@@ -184,20 +186,28 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .save_svg(fig_dir.join("scatter_income_ccavg.svg").to_str().unwrap())?;
     }
 
-    // Income vs Education
+    // Income distribution by Education Level (boxplot)
     if let (Some(inc_idx), Some(edu_idx)) = (
         data.feature_names.iter().position(|n| n == "Income"),
         data.feature_names.iter().position(|n| n == "Education"),
     ) {
-        v2::scatter(&data.features[inc_idx], &data.features[edu_idx])
-            .color_by(&class_labels)
-            .title("Income vs Education Level")
-            .x_label("Income ($K)")
-            .y_label("Education")
+        let edu_labels: Vec<String> = data.features[edu_idx]
+            .iter()
+            .map(|&v| match v as i64 {
+                1 => "Undergraduate".to_string(),
+                2 => "Graduate".to_string(),
+                3 => "Advanced/Professional".to_string(),
+                other => format!("Level {other}"),
+            })
+            .collect();
+        boxplot(&edu_labels, &data.features[inc_idx])
+            .title("Income Distribution by Education Level")
+            .x_label("Education Level")
+            .y_label("Income ($K)")
             .theme(theme.clone())
             .size(700.0, 500.0)
             .build()
-            .save_svg(fig_dir.join("scatter_income_education.svg").to_str().unwrap())?;
+            .save_svg(fig_dir.join("boxplot_income_education.svg").to_str().unwrap())?;
     }
 
     // Age vs Income
@@ -268,7 +278,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Model comparison bar chart
     let model_names: Vec<&str> = results.iter().map(|r| r.name).collect();
     let model_accs: Vec<f64> = results.iter().map(|r| r.mean).collect();
+    let model_stds: Vec<f64> = results.iter().map(|r| r.std).collect();
     bar(&model_names, &model_accs)
+        .error_bars(&model_stds)
         .title("5-Fold CV Accuracy by Model")
         .x_label("Model")
         .y_label("Mean Accuracy")
@@ -343,8 +355,9 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("  {:20} {:.4}", name, imp);
     }
 
-    let fi_names: Vec<&str> = feat_imp.iter().map(|(n, _)| n.as_str()).collect();
-    let fi_vals: Vec<f64> = feat_imp.iter().map(|(_, v)| *v).collect();
+    // Reverse so highest importance is at top when rendered as horizontal bars
+    let fi_names: Vec<&str> = feat_imp.iter().rev().map(|(n, _)| n.as_str()).collect();
+    let fi_vals: Vec<f64> = feat_imp.iter().rev().map(|(_, v)| *v).collect();
     bar(&fi_names, &fi_vals)
         .title("Permutation Feature Importance (Random Forest)")
         .x_label("Feature")
@@ -352,6 +365,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .theme(theme.clone())
         .size(900.0, 500.0)
         .build()
+        .coord(CoordSystem::Flipped)
         .save_svg(fig_dir.join("feature_importance.svg").to_str().unwrap())?;
 
     // ═══════════════════════════════════════════════════════════════

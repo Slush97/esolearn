@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600" viewBox="0 0 1100 600" role="img">
+  <title>Feature Importance — What Predicts Engagement (ICP)</title>
+  <rect width="1100" height="600" fill="white"/>
+  <rect x="0" y="0" width="1100" height="600" fill="rgb(255,255,255)"/>
+  <line x1="70.67" y1="408.4997" x2="1085" y2="408.4997" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="370.96973" x2="1085" y2="370.96973" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="333.43976" x2="1085" y2="333.43976" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="295.9098" x2="1085" y2="295.9098" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="258.37982" x2="1085" y2="258.37982" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="220.84984" x2="1085" y2="220.84984" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="183.31985" x2="1085" y2="183.31985" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="145.7899" x2="1085" y2="145.7899" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="108.25993" x2="1085" y2="108.25993" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="70.729965" x2="1085" y2="70.729965" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="70.67" y1="33.2" x2="1085" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="144.43945" y="39.352436" width="36.884724" height="369.14725" fill="rgb(31,119,180)"/>
+  <rect x="190.54535" y="166.79613" width="36.884724" height="241.70355" fill="rgb(255,127,14)"/>
+  <rect x="236.65126" y="241.5045" width="36.884724" height="166.99518" fill="rgb(44,160,44)"/>
+  <rect x="282.75717" y="285.45062" width="36.884724" height="123.04907" fill="rgb(214,39,40)"/>
+  <rect x="328.8631" y="344.77786" width="36.884724" height="63.721832" fill="rgb(148,103,189)"/>
+  <rect x="374.969" y="349.17245" width="36.884724" height="59.32724" fill="rgb(140,86,75)"/>
+  <rect x="421.0749" y="375.54013" width="36.884724" height="32.959564" fill="rgb(227,119,194)"/>
+  <rect x="467.1808" y="382.13205" width="36.884724" height="26.367645" fill="rgb(127,127,127)"/>
+  <rect x="513.28674" y="384.32935" width="36.884724" height="24.17035" fill="rgb(188,189,34)"/>
+  <rect x="559.39264" y="390.92126" width="36.884724" height="17.57843" fill="rgb(23,190,207)"/>
+  <rect x="605.4985" y="393.11856" width="36.884724" height="15.381134" fill="rgb(31,119,180)"/>
+  <rect x="651.6044" y="395.31586" width="36.884724" height="13.183838" fill="rgb(255,127,14)"/>
+  <rect x="697.71027" y="397.51318" width="36.884724" height="10.986511" fill="rgb(44,160,44)"/>
+  <rect x="743.8162" y="401.90778" width="36.884724" height="6.591919" fill="rgb(214,39,40)"/>
+  <rect x="789.9221" y="404.10507" width="36.884724" height="4.394623" fill="rgb(148,103,189)"/>
+  <rect x="836.028" y="404.10507" width="36.884724" height="4.394623" fill="rgb(140,86,75)"/>
+  <rect x="882.1339" y="404.10507" width="36.884724" height="4.394623" fill="rgb(227,119,194)"/>
+  <rect x="928.23987" y="406.3024" width="36.884724" height="2.1972961" fill="rgb(127,127,127)"/>
+  <rect x="974.34576" y="406.3024" width="36.884724" height="2.1972961" fill="rgb(188,189,34)"/>
+  <rect x="1020.45166" y="406.3024" width="36.884724" height="2.1972961" fill="rgb(23,190,207)"/>
+  <line x1="70.67" y1="33.2" x2="70.67" y2="408.4997" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="70.67" y1="408.4997" x2="1085" y2="408.4997" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="162.8818" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,162.8818,426.3197)">has_filter_tag</text>
+  <text x="208.98772" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,208.98772,426.3197)">days_to_conference</text>
+  <text x="255.09363" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,255.09363,426.3197)">days_since_found</text>
+  <text x="301.19952" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,301.19952,426.3197)">has_contact_email</text>
+  <text x="347.30542" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,347.30542,426.3197)">researcher_shem</text>
+  <text x="393.41132" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,393.41132,426.3197)">num_contacts</text>
+  <text x="439.51727" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,439.51727,426.3197)">month_aug</text>
+  <text x="485.62317" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,485.62317,426.3197)">src_url_on_sheet</text>
+  <text x="531.72906" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,531.72906,426.3197)">researcher_vincent</text>
+  <text x="577.83496" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,577.83496,426.3197)">researcher_prosper</text>
+  <text x="623.94086" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,623.94086,426.3197)">src_hotel_search</text>
+  <text x="670.04675" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,670.04675,426.3197)">detail_not_in_conf_city</text>
+  <text x="716.15265" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,716.15265,426.3197)">researcher_jr</text>
+  <text x="762.2586" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,762.2586,426.3197)">researcher_shiloh</text>
+  <text x="808.3645" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,808.3645,426.3197)">tier_minor</text>
+  <text x="854.4704" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,854.4704,426.3197)">src_linkedin</text>
+  <text x="900.5763" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,900.5763,426.3197)">month_oct</text>
+  <text x="946.68225" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,946.68225,426.3197)">src_other</text>
+  <text x="992.78815" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,992.78815,426.3197)">researcher_sarah</text>
+  <text x="1038.894" y="426.3197" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end" transform="rotate(-90,1038.894,426.3197)">status_flagged</text>
+  <text x="66.71" y="408.4997" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="66.71" y="370.96973" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.00200</text>
+  <text x="66.71" y="333.43976" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.00400</text>
+  <text x="66.71" y="295.9098" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.00600</text>
+  <text x="66.71" y="258.37982" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.00800</text>
+  <text x="66.71" y="220.84984" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.01</text>
+  <text x="66.71" y="183.31985" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.01</text>
+  <text x="66.71" y="145.7899" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.01</text>
+  <text x="66.71" y="108.25993" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.02</text>
+  <text x="66.71" y="70.729965" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.02</text>
+  <text x="66.71" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.02</text>
+  <text x="577.83496" y="538.1904" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Feature</text>
+  <text x="45.92" y="220.84984" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,45.92,220.84984)">Mean Accuracy Decrease</text>
+  <text x="550" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Feature Importance — What Predicts Engagement (ICP)</text>
+</svg>

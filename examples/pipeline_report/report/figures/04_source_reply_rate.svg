@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>Reply Rate by Source (%)</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="46.415" y1="454.1" x2="885" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="401.48752" x2="885" y2="401.48752" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="348.875" x2="885" y2="348.875" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="296.2625" x2="885" y2="296.2625" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="243.65" x2="885" y2="243.65" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="191.03749" x2="885" y2="191.03749" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="138.425" x2="885" y2="138.425" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="85.812485" x2="885" y2="85.812485" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="33.2" x2="885" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="96.7301" y="120.29857" width="67.08681" height="333.80142" fill="rgb(31,119,180)"/>
+  <rect x="180.58862" y="146.47069" width="67.08681" height="307.6293" fill="rgb(255,127,14)"/>
+  <rect x="264.4471" y="167.4293" width="67.08681" height="286.6707" fill="rgb(44,160,44)"/>
+  <rect x="348.30563" y="423.44003" width="67.08681" height="30.659973" fill="rgb(214,39,40)"/>
+  <rect x="432.16412" y="68.03557" width="67.08681" height="386.06442" fill="rgb(148,103,189)"/>
+  <rect x="516.02264" y="257.15482" width="67.08681" height="196.94518" fill="rgb(140,86,75)"/>
+  <rect x="599.8811" y="195.87914" width="67.08681" height="258.22086" fill="rgb(227,119,194)"/>
+  <rect x="683.7396" y="171.47084" width="67.08681" height="282.62915" fill="rgb(127,127,127)"/>
+  <rect x="767.5981" y="212.51198" width="67.08681" height="241.58801" fill="rgb(188,189,34)"/>
+  <line x1="46.415" y1="33.2" x2="46.415" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="46.415" y1="454.1" x2="885" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="130.2735" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">google_search</text>
+  <text x="214.13202" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">url_on_sheet</text>
+  <text x="297.9905" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">other</text>
+  <text x="381.84903" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">linksheets</text>
+  <text x="465.70752" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">cvent</text>
+  <text x="549.56604" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">hotel_search</text>
+  <text x="633.4245" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">linkedin</text>
+  <text x="717.283" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">10times</text>
+  <text x="801.1415" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">city_type_in</text>
+  <text x="42.455" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="42.455" y="401.48752" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2</text>
+  <text x="42.455" y="348.875" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">4</text>
+  <text x="42.455" y="296.2625" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">6</text>
+  <text x="42.455" y="243.65" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">8</text>
+  <text x="42.455" y="191.03749" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">10</text>
+  <text x="42.455" y="138.425" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">12</text>
+  <text x="42.455" y="85.812485" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">14</text>
+  <text x="42.455" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">16</text>
+  <text x="465.70752" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Source</text>
+  <text x="21.665" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,21.665,243.65)">Reply Rate (%)</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Reply Rate by Source (%)</text>
+</svg>

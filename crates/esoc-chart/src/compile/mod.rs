@@ -91,6 +91,15 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                 }
             }
         }
+        // Validate error bar length matches y_data
+        if let (Some(eb), Some(y)) = (&layer.error_bars, &layer.y_data) {
+            if eb.len() != y.len() {
+                return Err(ChartError::InvalidData {
+                    layer: i,
+                    detail: format!("error_bars has {} elements but y_data has {}", eb.len(), y.len()),
+                });
+            }
+        }
         // 1A: Check for NaN/Inf in data
         if let Some(x) = &layer.x_data {
             for (j, &v) in x.iter().enumerate() {
@@ -222,6 +231,16 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
         if actual_min >= 0.0 || (range > 0.0 && actual_min.abs() < 0.02 * range) {
             data_bounds.y_min = 0.0;
         }
+    }
+
+    // Apply explicit domain overrides (after nicing so user intent wins)
+    if let Some((lo, hi)) = chart.x_domain {
+        data_bounds.x_min = lo;
+        data_bounds.x_max = hi;
+    }
+    if let Some((lo, hi)) = chart.y_domain {
+        data_bounds.y_min = lo;
+        data_bounds.y_max = hi;
     }
 
     // For Flipped coordinate system, swap x/y bounds
@@ -671,9 +690,16 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
     let mut has_data = false;
 
     for layer in layers {
-        for (&x, &y) in layer.x_data.iter().zip(layer.y_data.iter()) {
+        for (i, (&x, &y)) in layer.x_data.iter().zip(layer.y_data.iter()).enumerate() {
             bounds.include_point(x, y);
             has_data = true;
+            // Extend bounds to include error bar extent
+            if let Some(errors) = &layer.error_bars {
+                if let Some(&err) = errors.get(i) {
+                    bounds.include_point(x, y - err);
+                    bounds.include_point(x, y + err);
+                }
+            }
         }
         if let Some(summaries) = &layer.boxplot {
             for s in summaries {
@@ -895,5 +921,63 @@ mod tests {
         let chart = Chart::new().layer(layer);
         let result = compile_chart(&chart);
         assert!(matches!(result, Err(ChartError::InvalidData { .. })));
+    }
+
+    // ── Domain override tests ──
+
+    #[test]
+    fn explicit_domain_overrides_auto_bounds() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0, 3.0])
+            .with_y(vec![10.0, 20.0, 30.0]);
+        let chart = Chart::new()
+            .layer(layer)
+            .x_domain(0.0, 5.0)
+            .y_domain(0.0, 50.0);
+        // Should compile without error
+        let scene = compile_chart(&chart).unwrap();
+        assert!(scene.root().is_some());
+    }
+
+    #[test]
+    fn domain_with_flipped_coords() {
+        let layer = Layer::new(MarkType::Bar)
+            .with_x(vec![0.0, 1.0, 2.0])
+            .with_y(vec![10.0, 20.0, 30.0]);
+        let chart = Chart::new()
+            .layer(layer)
+            .x_domain(0.0, 5.0)
+            .y_domain(0.0, 50.0)
+            .coord(CoordSystem::Flipped);
+        let scene = compile_chart(&chart).unwrap();
+        assert!(scene.root().is_some());
+    }
+
+    #[test]
+    fn error_bars_extend_bounds() {
+        let layer = Layer::new(MarkType::Bar)
+            .with_x(vec![0.0, 1.0])
+            .with_y(vec![10.0, 20.0])
+            .with_error_bars(vec![5.0, 3.0]);
+        let resolved = stat_transform::resolve_layer(&layer, 0).unwrap();
+        let bounds = compute_resolved_data_bounds(&[resolved]).unwrap();
+        // y_max should be at least 20+3=23
+        assert!(bounds.y_max >= 23.0, "bounds should include error bar extent, got y_max={}", bounds.y_max);
+        // y_min should be at most 10-5=5 (but bar chart zero-includes to 0)
+        assert!(bounds.y_min <= 5.0, "bounds should include error bar extent, got y_min={}", bounds.y_min);
+    }
+
+    #[test]
+    fn domain_smaller_than_data_compiles() {
+        let layer = Layer::new(MarkType::Point)
+            .with_x(vec![1.0, 2.0, 3.0])
+            .with_y(vec![10.0, 20.0, 30.0]);
+        // Domain is smaller than data range — should still compile
+        let chart = Chart::new()
+            .layer(layer)
+            .x_domain(1.5, 2.5)
+            .y_domain(15.0, 25.0);
+        let scene = compile_chart(&chart).unwrap();
+        assert!(scene.root().is_some());
     }
 }

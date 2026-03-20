@@ -47,6 +47,8 @@ pub struct ResolvedLayer {
     pub label: Option<String>,
     /// Bar width in data units, set by dodge position adjustment.
     pub dodge_width: Option<f64>,
+    /// Symmetric error bar values (±err per data point).
+    pub error_bars: Option<Vec<f64>>,
 }
 
 /// Resolve a grammar Layer by applying its stat transform.
@@ -79,6 +81,7 @@ fn resolve_identity(layer: &Layer, layer_idx: usize) -> Result<ResolvedLayer> {
         annotate_cells: layer.annotate_cells,
         label: layer.label.clone(),
         dodge_width: None,
+        error_bars: layer.error_bars.clone(),
     })
 }
 
@@ -111,6 +114,7 @@ fn resolve_bin(layer: &Layer, layer_idx: usize, bins: usize) -> Result<ResolvedL
         annotate_cells: false,
         label: layer.label.clone(),
         dodge_width: None,
+        error_bars: None,
     })
 }
 
@@ -153,6 +157,7 @@ fn resolve_boxplot(layer: &Layer, layer_idx: usize) -> Result<ResolvedLayer> {
         annotate_cells: false,
         label: layer.label.clone(),
         dodge_width: None,
+        error_bars: None,
     })
 }
 
@@ -187,6 +192,7 @@ fn resolve_aggregate(
         annotate_cells: false,
         label: layer.label.clone(),
         dodge_width: None,
+        error_bars: None,
     })
 }
 
@@ -214,6 +220,7 @@ fn resolve_smooth(layer: &Layer, layer_idx: usize, bandwidth: f64) -> Result<Res
         annotate_cells: false,
         label: layer.label.clone(),
         dodge_width: None,
+        error_bars: None,
     })
 }
 

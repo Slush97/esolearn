@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>5-Fold CV Accuracy by Model</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="55.82" y1="454.1" x2="885" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="407.33334" x2="885" y2="407.33334" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="360.56668" x2="885" y2="360.56668" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="313.8" x2="885" y2="313.8" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="267.03333" x2="885" y2="267.03333" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="220.26665" x2="885" y2="220.26665" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="173.49998" x2="885" y2="173.49998" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="126.73332" x2="885" y2="126.73332" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="79.96666" x2="885" y2="79.96666" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="55.82" y1="33.2" x2="885" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="76.54949" y="41.585438" width="165.83601" height="412.51456" fill="rgb(31,119,180)"/>
+  <rect x="283.8445" y="37.368336" width="165.83601" height="416.73166" fill="rgb(255,127,14)"/>
+  <rect x="491.1395" y="39.339314" width="165.83601" height="414.76068" fill="rgb(44,160,44)"/>
+  <rect x="698.43445" y="41.47475" width="165.83601" height="412.62524" fill="rgb(214,39,40)"/>
+  <line x1="55.82" y1="33.2" x2="55.82" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="55.82" y1="454.1" x2="885" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="159.4675" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">Decision Tree</text>
+  <text x="366.7625" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">Random Forest</text>
+  <text x="574.0575" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">Gradient Boosting</text>
+  <text x="781.3525" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">Logistic Regression</text>
+  <text x="51.86" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="51.86" y="407.33334" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.10</text>
+  <text x="51.86" y="360.56668" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.20</text>
+  <text x="51.86" y="313.8" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.30</text>
+  <text x="51.86" y="267.03333" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.40</text>
+  <text x="51.86" y="220.26665" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.50</text>
+  <text x="51.86" y="173.49998" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.60</text>
+  <text x="51.86" y="126.73332" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.70</text>
+  <text x="51.86" y="79.96666" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.80</text>
+  <text x="51.86" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0.90</text>
+  <text x="470.41" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Model</text>
+  <text x="31.07" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,31.07,243.65)">Mean Accuracy</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">5-Fold CV Accuracy by Model</text>
+</svg>

@@ -3,15 +3,23 @@
 
 use crate::express::grouped_bar;
 use crate::grammar::chart::Chart;
+use crate::new_theme::NewTheme;
 
 /// Extension trait for creating classification report figures.
 pub trait ClassificationReportExt {
     /// Create a grouped bar chart from this classification report.
     fn figure(&self) -> Chart;
+
+    /// Create a grouped bar chart from this classification report with a custom theme.
+    fn figure_with_theme(&self, theme: NewTheme) -> Chart;
 }
 
 impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
     fn figure(&self) -> Chart {
+        self.figure_with_theme(NewTheme::default())
+    }
+
+    fn figure_with_theme(&self, theme: NewTheme) -> Chart {
         let labels: Vec<String> = self
             .per_class
             .iter()
@@ -50,6 +58,7 @@ impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
             .title(format!("Classification Report (accuracy: {:.3})", self.accuracy))
             .x_label("Class")
             .y_label("Score")
+            .theme(theme)
             .size(800.0, 500.0)
             .build()
     }

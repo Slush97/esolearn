@@ -59,6 +59,8 @@ pub struct Layer {
     pub annotate_cells: bool,
     /// Human-readable label for this layer (used in legends).
     pub label: Option<String>,
+    /// Symmetric error bar values (±err per data point).
+    pub error_bars: Option<Vec<f64>>,
 }
 
 impl Layer {
@@ -79,6 +81,7 @@ impl Layer {
             col_labels: None,
             annotate_cells: false,
             label: None,
+            error_bars: None,
         }
     }
 
@@ -183,6 +186,12 @@ impl Layer {
     /// Enable cell value annotations for heatmap.
     pub fn annotate_cells(mut self) -> Self {
         self.annotate_cells = true;
+        self
+    }
+
+    /// Set symmetric error bar values (±err per data point).
+    pub fn with_error_bars(mut self, errors: Vec<f64>) -> Self {
+        self.error_bars = Some(errors);
         self
     }
 }

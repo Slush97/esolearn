@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>Reply Rate by Year Found (%)</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="46.415" y1="454.1" x2="885" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="401.48752" x2="885" y2="401.48752" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="348.875" x2="885" y2="348.875" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="296.2625" x2="885" y2="296.2625" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="243.65" x2="885" y2="243.65" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="191.03749" x2="885" y2="191.03749" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="138.425" x2="885" y2="138.425" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="85.812485" x2="885" y2="85.812485" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="46.415" y1="33.2" x2="885" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="85.11893" y="86.69429" width="51.605236" height="367.4057" fill="rgb(31,119,180)"/>
+  <rect x="149.62547" y="172.99654" width="51.605236" height="281.10345" fill="rgb(255,127,14)"/>
+  <rect x="214.13202" y="214.02353" width="51.605236" height="240.07646" fill="rgb(44,160,44)"/>
+  <rect x="278.63858" y="174.29137" width="51.605236" height="279.80862" fill="rgb(214,39,40)"/>
+  <rect x="343.1451" y="146.51021" width="51.605236" height="307.58978" fill="rgb(148,103,189)"/>
+  <rect x="407.65164" y="132.54515" width="51.605236" height="321.55484" fill="rgb(140,86,75)"/>
+  <rect x="472.1582" y="162.8119" width="51.605236" height="291.2881" fill="rgb(227,119,194)"/>
+  <rect x="536.66473" y="68.64589" width="51.605236" height="385.4541" fill="rgb(127,127,127)"/>
+  <rect x="601.17126" y="70.46718" width="51.605236" height="383.6328" fill="rgb(188,189,34)"/>
+  <rect x="665.6778" y="182.3268" width="51.605236" height="271.7732" fill="rgb(23,190,207)"/>
+  <rect x="730.1843" y="389.93842" width="51.605236" height="64.16159" fill="rgb(31,119,180)"/>
+  <rect x="794.69086" y="454.1" width="51.605236" height="0" fill="rgb(255,127,14)"/>
+  <line x1="46.415" y1="33.2" x2="46.415" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="46.415" y1="454.1" x2="885" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="110.92155" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2015</text>
+  <text x="175.4281" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2016</text>
+  <text x="239.93463" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2017</text>
+  <text x="304.4412" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2018</text>
+  <text x="368.94772" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2019</text>
+  <text x="433.45425" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2020</text>
+  <text x="497.96082" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2021</text>
+  <text x="562.46735" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2022</text>
+  <text x="626.9739" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2023</text>
+  <text x="691.4804" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2024</text>
+  <text x="755.98694" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2025</text>
+  <text x="820.49347" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2026</text>
+  <text x="42.455" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="42.455" y="401.48752" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2</text>
+  <text x="42.455" y="348.875" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">4</text>
+  <text x="42.455" y="296.2625" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">6</text>
+  <text x="42.455" y="243.65" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">8</text>
+  <text x="42.455" y="191.03749" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">10</text>
+  <text x="42.455" y="138.425" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">12</text>
+  <text x="42.455" y="85.812485" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">14</text>
+  <text x="42.455" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">16</text>
+  <text x="465.70752" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Year</text>
+  <text x="21.665" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,21.665,243.65)">Reply Rate (%)</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Reply Rate by Year Found (%)</text>
+</svg>

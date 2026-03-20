@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img">
+  <title>Conferences by Target Year (Replied vs No Reply)</title>
+  <rect width="900" height="500" fill="white"/>
+  <rect x="0" y="0" width="900" height="500" fill="rgb(255,255,255)"/>
+  <line x1="57.8" y1="454.1" x2="820" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="412.01" x2="820" y2="412.01" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="369.92" x2="820" y2="369.92" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="327.83002" x2="820" y2="327.83002" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="285.74" x2="820" y2="285.74" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="243.65" x2="820" y2="243.65" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="201.55998" x2="820" y2="201.55998" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="159.46999" x2="820" y2="159.46999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="117.37999" x2="820" y2="117.37999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="75.28999" x2="820" y2="75.28999" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="57.8" y1="33.2" x2="820" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="70.503334" y="453.76328" width="101.62667" height="0.33673096" fill="rgb(31,119,180)"/>
+  <rect x="197.53667" y="452.58478" width="101.62667" height="1.5152283" fill="rgb(31,119,180)"/>
+  <rect x="324.57" y="447.19724" width="101.62667" height="6.902771" fill="rgb(31,119,180)"/>
+  <rect x="451.60333" y="412.34674" width="101.62667" height="41.753265" fill="rgb(31,119,180)"/>
+  <rect x="578.63666" y="424.97372" width="101.62667" height="29.126282" fill="rgb(31,119,180)"/>
+  <rect x="705.67" y="454.1" width="101.62667" height="0" fill="rgb(31,119,180)"/>
+  <rect x="70.503334" y="443.83005" width="101.62667" height="9.933228" fill="rgb(255,127,14)"/>
+  <rect x="197.53667" y="423.54266" width="101.62667" height="29.042114" fill="rgb(255,127,14)"/>
+  <rect x="324.57" y="369.66748" width="101.62667" height="77.529755" fill="rgb(255,127,14)"/>
+  <rect x="451.60333" y="67.62962" width="101.62667" height="344.7171" fill="rgb(255,127,14)"/>
+  <rect x="578.63666" y="262.92722" width="101.62667" height="162.0465" fill="rgb(255,127,14)"/>
+  <rect x="705.67" y="454.1" width="101.62667" height="0" fill="rgb(255,127,14)"/>
+  <line x1="57.8" y1="33.2" x2="57.8" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="57.8" y1="454.1" x2="820" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="121.316666" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2022</text>
+  <text x="248.35" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2023</text>
+  <text x="375.38333" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2024</text>
+  <text x="502.41666" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2025</text>
+  <text x="629.45" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2026</text>
+  <text x="756.48334" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2027</text>
+  <text x="53.84" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="53.84" y="412.01" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">500</text>
+  <text x="53.84" y="369.92" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1000</text>
+  <text x="53.84" y="327.83002" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1500</text>
+  <text x="53.84" y="285.74" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2000</text>
+  <text x="53.84" y="243.65" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">2500</text>
+  <text x="53.84" y="201.55998" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">3000</text>
+  <text x="53.84" y="159.46999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">3500</text>
+  <text x="53.84" y="117.37999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">4000</text>
+  <text x="53.84" y="75.28999" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">4500</text>
+  <text x="53.84" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">5000</text>
+  <text x="438.9" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Conference Year</text>
+  <text x="33.05" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,33.05,243.65)">Count</text>
+  <rect x="835" y="38.2" width="12" height="12" fill="rgb(31,119,180)" rx="2"/>
+  <text x="852" y="48.4" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">Replied</text>
+  <rect x="835" y="53.05" width="12" height="12" fill="rgb(255,127,14)" rx="2"/>
+  <text x="852" y="63.25" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">No Reply</text>
+  <text x="450" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Conferences by Target Year (Replied vs No Reply)</text>
+</svg>

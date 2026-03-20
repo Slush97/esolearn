@@ -312,6 +312,7 @@ mod tests {
             annotate_cells: false,
             label: None,
             dodge_width: None,
+            error_bars: None,
         }
     }
 
@@ -369,6 +370,7 @@ mod tests {
             annotate_cells: false,
             label: None,
             dodge_width: None,
+            error_bars: None,
         };
 
         let panels = compute_panels(&Facet::None, &[layer]);

@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="500" viewBox="0 0 1100 500" role="img">
+  <title>Lead Source Mix by Year</title>
+  <rect width="1100" height="500" fill="white"/>
+  <rect x="0" y="0" width="1100" height="500" fill="rgb(255,255,255)"/>
+  <line x1="56.315" y1="454.1" x2="1007.11505" y2="454.1" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="415.83636" x2="1007.11505" y2="415.83636" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="377.57272" x2="1007.11505" y2="377.57272" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="339.30908" x2="1007.11505" y2="339.30908" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="301.04547" x2="1007.11505" y2="301.04547" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="262.7818" x2="1007.11505" y2="262.7818" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="224.51817" x2="1007.11505" y2="224.51817" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="186.25453" x2="1007.11505" y2="186.25453" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="147.99089" x2="1007.11505" y2="147.99089" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="109.72728" x2="1007.11505" y2="109.72728" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="71.46361" x2="1007.11505" y2="71.46361" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <line x1="56.315" y1="33.2" x2="1007.11505" y2="33.2" stroke="rgb(241,241,241)" stroke-width="0.5"/>
+  <rect x="100.198074" y="454.1" width="58.510773" height="0" fill="rgb(31,119,180)"/>
+  <rect x="173.33655" y="454.1" width="58.510773" height="0" fill="rgb(31,119,180)"/>
+  <rect x="246.475" y="454.1" width="58.510773" height="0" fill="rgb(31,119,180)"/>
+  <rect x="319.61346" y="235.99727" width="58.510773" height="218.10272" fill="rgb(31,119,180)"/>
+  <rect x="392.75195" y="194.2899" width="58.510773" height="259.8101" fill="rgb(31,119,180)"/>
+  <rect x="465.89038" y="319.41202" width="58.510773" height="134.68799" fill="rgb(31,119,180)"/>
+  <rect x="539.0289" y="159.08736" width="58.510773" height="295.01263" fill="rgb(31,119,180)"/>
+  <rect x="612.16736" y="228.34453" width="58.510773" height="225.75546" fill="rgb(31,119,180)"/>
+  <rect x="685.30585" y="130.77226" width="58.510773" height="323.32773" fill="rgb(31,119,180)"/>
+  <rect x="758.4443" y="418.1322" width="58.510773" height="35.967804" fill="rgb(31,119,180)"/>
+  <rect x="831.58276" y="454.1" width="58.510773" height="0" fill="rgb(31,119,180)"/>
+  <rect x="904.7212" y="454.1" width="58.510773" height="0" fill="rgb(31,119,180)"/>
+  <rect x="100.198074" y="454.1" width="58.510773" height="0" fill="rgb(255,127,14)"/>
+  <rect x="173.33655" y="454.1" width="58.510773" height="0" fill="rgb(255,127,14)"/>
+  <rect x="246.475" y="453.71738" width="58.510773" height="0.3826294" fill="rgb(255,127,14)"/>
+  <rect x="319.61346" y="235.99727" width="58.510773" height="0" fill="rgb(255,127,14)"/>
+  <rect x="392.75195" y="194.2899" width="58.510773" height="0" fill="rgb(255,127,14)"/>
+  <rect x="465.89038" y="141.10344" width="58.510773" height="178.30856" fill="rgb(255,127,14)"/>
+  <rect x="539.0289" y="58.07137" width="58.510773" height="101.01599" fill="rgb(255,127,14)"/>
+  <rect x="612.16736" y="205.76901" width="58.510773" height="22.575516" fill="rgb(255,127,14)"/>
+  <rect x="685.30585" y="47.357563" width="58.510773" height="83.4147" fill="rgb(255,127,14)"/>
+  <rect x="758.4443" y="314.0551" width="58.510773" height="104.07709" fill="rgb(255,127,14)"/>
+  <rect x="831.58276" y="434.2029" width="58.510773" height="19.897095" fill="rgb(255,127,14)"/>
+  <rect x="904.7212" y="454.1" width="58.510773" height="0" fill="rgb(255,127,14)"/>
+  <rect x="100.198074" y="454.1" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="173.33655" y="454.1" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="246.475" y="453.71738" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="319.61346" y="235.99727" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="392.75195" y="194.2899" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="465.89038" y="141.10344" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="539.0289" y="58.07137" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="612.16736" y="205.76901" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="685.30585" y="47.357563" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="758.4443" y="314.0551" width="58.510773" height="0" fill="rgb(44,160,44)"/>
+  <rect x="831.58276" y="313.67245" width="58.510773" height="120.53046" fill="rgb(44,160,44)"/>
+  <rect x="904.7212" y="410.47946" width="58.510773" height="43.620544" fill="rgb(44,160,44)"/>
+  <rect x="100.198074" y="454.1" width="58.510773" height="0" fill="rgb(214,39,40)"/>
+  <rect x="173.33655" y="453.71738" width="58.510773" height="0.3826294" fill="rgb(214,39,40)"/>
+  <rect x="246.475" y="451.8042" width="58.510773" height="1.9131775" fill="rgb(214,39,40)"/>
+  <rect x="319.61346" y="166.35744" width="58.510773" height="69.63983" fill="rgb(214,39,40)"/>
+  <rect x="392.75195" y="155.261" width="58.510773" height="39.0289" fill="rgb(214,39,40)"/>
+  <rect x="465.89038" y="141.10344" width="58.510773" height="0" fill="rgb(214,39,40)"/>
+  <rect x="539.0289" y="57.68874" width="58.510773" height="0.3826294" fill="rgb(214,39,40)"/>
+  <rect x="612.16736" y="205.38637" width="58.510773" height="0.38264465" fill="rgb(214,39,40)"/>
+  <rect x="685.30585" y="46.974934" width="58.510773" height="0.3826294" fill="rgb(214,39,40)"/>
+  <rect x="758.4443" y="314.0551" width="58.510773" height="0" fill="rgb(214,39,40)"/>
+  <rect x="831.58276" y="313.67245" width="58.510773" height="0" fill="rgb(214,39,40)"/>
+  <rect x="904.7212" y="410.47946" width="58.510773" height="0" fill="rgb(214,39,40)"/>
+  <rect x="100.198074" y="454.1" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="173.33655" y="453.71738" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="246.475" y="451.8042" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="319.61346" y="153.73045" width="58.510773" height="12.626984" fill="rgb(148,103,189)"/>
+  <rect x="392.75195" y="118.91054" width="58.510773" height="36.350464" fill="rgb(148,103,189)"/>
+  <rect x="465.89038" y="130.007" width="58.510773" height="11.096436" fill="rgb(148,103,189)"/>
+  <rect x="539.0289" y="57.68874" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="612.16736" y="205.38637" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="685.30585" y="44.679066" width="58.510773" height="2.295868" fill="rgb(148,103,189)"/>
+  <rect x="758.4443" y="314.0551" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="831.58276" y="313.67245" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <rect x="904.7212" y="410.47946" width="58.510773" height="0" fill="rgb(148,103,189)"/>
+  <line x1="56.315" y1="33.2" x2="56.315" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <line x1="56.315" y1="454.1" x2="1007.11505" y2="454.1" stroke="rgb(0,0,0)" stroke-width="1"/>
+  <text x="129.45346" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2015</text>
+  <text x="202.59193" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2016</text>
+  <text x="275.73038" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2017</text>
+  <text x="348.86887" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2018</text>
+  <text x="422.00732" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2019</text>
+  <text x="495.14578" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2020</text>
+  <text x="568.28424" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2021</text>
+  <text x="641.4227" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2022</text>
+  <text x="714.5612" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2023</text>
+  <text x="787.69965" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2024</text>
+  <text x="860.83813" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2025</text>
+  <text x="933.97656" y="467.96" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="middle">2026</text>
+  <text x="52.355" y="454.1" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">0</text>
+  <text x="52.355" y="415.83636" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">100</text>
+  <text x="52.355" y="377.57272" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">200</text>
+  <text x="52.355" y="339.30908" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">300</text>
+  <text x="52.355" y="301.04547" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">400</text>
+  <text x="52.355" y="262.7818" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">500</text>
+  <text x="52.355" y="224.51817" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">600</text>
+  <text x="52.355" y="186.25453" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">700</text>
+  <text x="52.355" y="147.99089" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">800</text>
+  <text x="52.355" y="109.72728" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">900</text>
+  <text x="52.355" y="71.46361" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1000</text>
+  <text x="52.355" y="33.2" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)" text-anchor="end">1100</text>
+  <text x="531.715" y="488.2" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle">Year</text>
+  <text x="31.564999" y="243.65" font-family="sans-serif" font-size="11" fill="rgb(0,0,0)" text-anchor="middle" transform="rotate(-90,31.564999,243.65)">Number of Leads</text>
+  <rect x="1022.11505" y="38.2" width="12" height="12" fill="rgb(31,119,180)" rx="2"/>
+  <text x="1039.115" y="48.4" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">google_search</text>
+  <rect x="1022.11505" y="53.05" width="12" height="12" fill="rgb(255,127,14)" rx="2"/>
+  <text x="1039.115" y="63.25" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">url_on_sheet</text>
+  <rect x="1022.11505" y="67.9" width="12" height="12" fill="rgb(44,160,44)" rx="2"/>
+  <text x="1039.115" y="78.100006" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">linksheets</text>
+  <rect x="1022.11505" y="82.75" width="12" height="12" fill="rgb(214,39,40)" rx="2"/>
+  <text x="1039.115" y="92.95" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">cvent</text>
+  <rect x="1022.11505" y="97.6" width="12" height="12" fill="rgb(148,103,189)" rx="2"/>
+  <text x="1039.115" y="107.8" font-family="sans-serif" font-size="9.9" fill="rgb(0,0,0)">linkedin</text>
+  <text x="550" y="23.2" font-family="sans-serif" font-size="13.200001" fill="rgb(0,0,0)" font-weight="bold" text-anchor="middle">Lead Source Mix by Year</text>
+</svg>

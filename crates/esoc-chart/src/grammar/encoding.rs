@@ -59,6 +59,7 @@ pub enum FieldAccessor {
 }
 
 /// Convenience constructors.
+#[deprecated(note = "Defaults channel to X which is misleading; use Encoding struct directly")]
 pub fn quantitative(index: usize) -> Encoding {
     Encoding {
         channel: Channel::X,
@@ -69,6 +70,7 @@ pub fn quantitative(index: usize) -> Encoding {
 }
 
 /// Create a nominal encoding.
+#[deprecated(note = "Defaults channel to X which is misleading; use Encoding struct directly")]
 pub fn nominal(index: usize) -> Encoding {
     Encoding {
         channel: Channel::X,
