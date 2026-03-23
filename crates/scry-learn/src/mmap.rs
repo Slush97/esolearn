@@ -318,7 +318,10 @@ impl MmapDataset {
         target_col: &str,
         output_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let dataset = Dataset::from_csv(csv_path.as_ref().to_str().unwrap_or(""), target_col)?;
+        let path_str = csv_path.as_ref().to_str().ok_or_else(|| {
+            ScryLearnError::InvalidParameter("CSV path contains invalid UTF-8".into())
+        })?;
+        let dataset = Dataset::from_csv(path_str, target_col)?;
         save_scry(&dataset, &output_path)?;
         Self::open(output_path)
     }

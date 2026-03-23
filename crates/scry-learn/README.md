@@ -2,8 +2,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/scry-learn.svg)](https://crates.io/crates/scry-learn)
 [![docs.rs](https://img.shields.io/docsrs/scry-learn)](https://docs.rs/scry-learn)
-[![License](https://img.shields.io/crates/l/scry-learn.svg)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/Slush97/scry/ci.yml?label=tests)](https://github.com/Slush97/scry)
+[![License](https://img.shields.io/crates/l/scry-learn.svg)](https://github.com/Slush97/esolearn/blob/main/LICENSE-MIT)
+[![CI](https://img.shields.io/github/actions/workflow/status/Slush97/esolearn/ci.yml?label=tests)](https://github.com/Slush97/esolearn)
 
 **Production-grade machine learning in pure Rust.**
 
