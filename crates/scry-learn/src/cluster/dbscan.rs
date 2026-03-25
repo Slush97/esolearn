@@ -102,7 +102,7 @@ impl Dbscan {
 
         let rows = data.feature_matrix();
         let n_features = data.n_features();
-        let eps_sq = self.eps * self.eps;
+        let threshold = self.eps_threshold();
 
         let use_kdtree =
             matches!(self.metric, DistanceMetric::Euclidean) && n_features <= KDTREE_MAX_DIM;
@@ -122,7 +122,7 @@ impl Dbscan {
             }
 
             // Find neighbors of point i.
-            let neighbors = self.find_neighbors(i, &rows, eps_sq, kdtree.as_ref());
+            let neighbors = self.find_neighbors(i, &rows, threshold, kdtree.as_ref());
 
             if neighbors.len() < self.min_samples {
                 continue; // noise point, may be reassigned later
@@ -145,7 +145,7 @@ impl Dbscan {
                 }
 
                 // Check if j is a core point.
-                let j_neighbors = self.find_neighbors(j, &rows, eps_sq, kdtree.as_ref());
+                let j_neighbors = self.find_neighbors(j, &rows, threshold, kdtree.as_ref());
 
                 if j_neighbors.len() >= self.min_samples {
                     for k in j_neighbors {
@@ -165,7 +165,7 @@ impl Dbscan {
         let mut core_labels = Vec::new();
         for i in 0..n {
             if labels[i] >= 0 {
-                let neighbors = self.find_neighbors(i, &rows, eps_sq, kdtree.as_ref());
+                let neighbors = self.find_neighbors(i, &rows, threshold, kdtree.as_ref());
                 if neighbors.len() >= self.min_samples {
                     core_features.push(rows[i].clone());
                     core_labels.push(labels[i]);
@@ -181,12 +181,12 @@ impl Dbscan {
         Ok(())
     }
 
-    /// Find all neighbors of point `idx` within `eps_sq` distance.
+    /// Find all neighbors of point `idx` within `threshold` distance.
     fn find_neighbors(
         &self,
         idx: usize,
         rows: &[Vec<f64>],
-        eps_sq: f64,
+        threshold: f64,
         kdtree: Option<&KdTree>,
     ) -> Vec<usize> {
         kdtree.map_or_else(
@@ -194,33 +194,38 @@ impl Dbscan {
                 // Brute-force path (any metric).
                 let n = rows.len();
                 (0..n)
-                    .filter(|&j| self.distance_sq(&rows[idx], &rows[j]) <= eps_sq)
+                    .filter(|&j| self.distance(&rows[idx], &rows[j]) <= threshold)
                     .collect()
             },
             |tree| {
-                // KD-tree path (Euclidean only).
-                tree.query_radius(&rows[idx], eps_sq, rows)
+                // KD-tree path (Euclidean only, threshold is eps²).
+                tree.query_radius(&rows[idx], threshold, rows)
             },
         )
     }
 
-    /// Compute squared distance according to the configured metric.
+    /// Compute distance according to the configured metric.
     ///
-    /// For Euclidean, returns squared distance directly.
-    /// For Manhattan and Cosine, returns the *squared* actual distance
-    /// to keep the eps_sq threshold logic consistent.
+    /// For Euclidean, returns *squared* distance (avoids sqrt).
+    /// For Manhattan and Cosine, returns the raw distance.
     #[inline]
-    fn distance_sq(&self, a: &[f64], b: &[f64]) -> f64 {
+    fn distance(&self, a: &[f64], b: &[f64]) -> f64 {
         match self.metric {
             DistanceMetric::Euclidean => euclidean_sq(a, b),
-            DistanceMetric::Manhattan => {
-                let d = manhattan(a, b);
-                d * d
-            }
-            DistanceMetric::Cosine => {
-                let d = cosine_distance(a, b);
-                d * d
-            }
+            DistanceMetric::Manhattan => manhattan(a, b),
+            DistanceMetric::Cosine => cosine_distance(a, b),
+        }
+    }
+
+    /// Epsilon threshold matching [`distance()`](Self::distance).
+    ///
+    /// For Euclidean (squared distance), returns `eps²`.
+    /// For Manhattan/Cosine (raw distance), returns `eps`.
+    #[inline]
+    fn eps_threshold(&self) -> f64 {
+        match self.metric {
+            DistanceMetric::Euclidean => self.eps * self.eps,
+            DistanceMetric::Manhattan | DistanceMetric::Cosine => self.eps,
         }
     }
 
@@ -255,7 +260,7 @@ impl Dbscan {
             return Err(ScryLearnError::NotFitted);
         }
 
-        let eps_sq = self.eps * self.eps;
+        let threshold = self.eps_threshold();
 
         Ok(features
             .iter()
@@ -264,8 +269,8 @@ impl Dbscan {
                 let mut best_label = -1i32;
 
                 for (i, core_pt) in self.core_features.iter().enumerate() {
-                    let d = self.distance_sq(query, core_pt);
-                    if d <= eps_sq && d < best_dist {
+                    let d = self.distance(query, core_pt);
+                    if d <= threshold && d < best_dist {
                         best_dist = d;
                         best_label = self.core_labels[i];
                     }

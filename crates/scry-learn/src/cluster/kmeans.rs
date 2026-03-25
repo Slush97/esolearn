@@ -212,11 +212,34 @@ impl KMeans {
                 }
             }
 
+            // Normalize non-empty centroids.
             for c in 0..self.k {
                 if counts[c] > 0 {
                     for val in &mut new_centroids[c] {
                         *val /= counts[c] as f64;
                     }
+                }
+            }
+
+            // Reinitialize empty centroids: pick the data point farthest
+            // from its nearest occupied centroid (sklearn's approach).
+            for c in 0..self.k {
+                if counts[c] == 0 {
+                    let mut max_dist = f64::NEG_INFINITY;
+                    let mut best_idx = 0;
+                    for (i, row) in rows.iter().enumerate() {
+                        let min_dist = new_centroids
+                            .iter()
+                            .enumerate()
+                            .filter(|&(ci, _)| ci != c && (counts[ci] > 0 || ci < c))
+                            .map(|(_, cen)| euclidean_sq(row, cen))
+                            .fold(f64::INFINITY, f64::min);
+                        if min_dist > max_dist {
+                            max_dist = min_dist;
+                            best_idx = i;
+                        }
+                    }
+                    new_centroids[c] = rows[best_idx].clone();
                 }
             }
 
@@ -450,6 +473,39 @@ mod tests {
             inertia10 <= inertia1 + 1e-6,
             "n_init=10 inertia ({inertia10:.4}) should be ≤ n_init=1 ({inertia1:.4})"
         );
+    }
+
+    #[test]
+    fn test_kmeans_empty_cluster_reinit() {
+        // Pathological case: 3 clusters requested but data has 2 clear blobs.
+        // With bad initialization, one centroid can get zero assigned points.
+        // After fix, empty centroids should be reinitialized, not left at [0,0].
+        let mut f1 = Vec::new();
+        let mut f2 = Vec::new();
+        for _ in 0..50 {
+            f1.push(0.0);
+            f2.push(0.0);
+        }
+        for _ in 0..50 {
+            f1.push(100.0);
+            f2.push(100.0);
+        }
+        let data = Dataset::new(vec![f1, f2], vec![0.0; 100], vec!["x".into(), "y".into()], "l");
+
+        let mut km = KMeans::new(3).seed(42).n_init(1);
+        km.fit(&data).unwrap();
+
+        // No centroid should be at the origin [0,0] unless a cluster actually lives there.
+        // At least one centroid should be near (100,100) and at least one near (0,0).
+        let centroids = km.centroids();
+        assert_eq!(centroids.len(), 3);
+        let has_near_origin = centroids.iter().any(|c| c[0] < 50.0 && c[1] < 50.0);
+        let has_near_far = centroids.iter().any(|c| c[0] > 50.0 && c[1] > 50.0);
+        assert!(has_near_origin, "should have centroid near (0,0)");
+        assert!(has_near_far, "should have centroid near (100,100)");
+
+        // All 100 points should be assigned to some cluster.
+        assert_eq!(km.labels().len(), 100);
     }
 
     #[test]

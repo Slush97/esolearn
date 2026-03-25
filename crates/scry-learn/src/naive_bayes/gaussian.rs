@@ -135,7 +135,7 @@ impl GaussianNb {
             .flat_map(|cv| cv.iter())
             .copied()
             .fold(0.0_f64, f64::max);
-        let epsilon = self.var_smoothing * max_var.max(1e-300);
+        let epsilon = self.var_smoothing * max_var.max(1e-12);
 
         // Add scaled smoothing to all variances.
         for c_var in &mut self.variances {
@@ -260,7 +260,7 @@ impl GaussianNb {
             .flat_map(|cv| cv.iter())
             .copied()
             .fold(0.0_f64, f64::max);
-        let epsilon = self.var_smoothing * max_var.max(1e-300);
+        let epsilon = self.var_smoothing * max_var.max(1e-12);
         for c_var in &mut self.variances {
             for vj in c_var.iter_mut() {
                 *vj += epsilon;
@@ -486,7 +486,7 @@ impl PartialFit for GaussianNb {
             .flat_map(|cv| cv.iter())
             .copied()
             .fold(0.0_f64, f64::max);
-        let epsilon = self.var_smoothing * max_var.max(1e-300);
+        let epsilon = self.var_smoothing * max_var.max(1e-12);
         for c_var in &mut self.variances {
             for vj in c_var.iter_mut() {
                 *vj += epsilon;
@@ -654,6 +654,38 @@ mod tests {
         let preds = nb.predict(&[vec![1.0, 1.0], vec![9.0, 9.0]]).unwrap();
         assert!((preds[0] - 0.0).abs() < 1e-6, "x=1 should be class 0");
         assert!((preds[1] - 1.0).abs() < 1e-6, "x=9 should be class 1");
+    }
+
+    #[test]
+    fn test_zero_variance_features() {
+        // All features constant across all classes — max_var == 0.
+        // With the old floor (1e-300), epsilon ≈ 1e-309 (subnormal territory).
+        // With max(1e-12), epsilon = 1e-21 — small but well within normal range.
+        let features = vec![
+            vec![5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+            vec![5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+        ];
+        let target = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let data = Dataset::new(features, target, vec!["x".into(), "y".into()], "class");
+
+        let mut nb = GaussianNb::new();
+        nb.fit(&data).unwrap();
+
+        // Smoothed variances must be non-zero and not subnormal.
+        for c_var in nb.class_variances() {
+            for &v in c_var {
+                assert!(v > 1e-300, "variance {v} is subnormal — smoothing failed");
+                assert!(v.is_normal(), "variance must be a normal float");
+            }
+        }
+
+        // Should predict without NaN/Inf issues.
+        let preds = nb.predict(&[vec![5.0, 5.0]]).unwrap();
+        assert!(preds[0].is_finite(), "prediction should be finite");
+
+        // Predict on a point away from the constant feature value.
+        let preds2 = nb.predict(&[vec![10.0, 10.0]]).unwrap();
+        assert!(preds2[0].is_finite(), "off-center prediction should be finite");
     }
 
     #[test]
