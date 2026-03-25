@@ -40,219 +40,199 @@ pub trait Tunable {
 }
 
 // ---------------------------------------------------------------------------
-// Tunable impls for existing models
+// impl_tunable! macro — generates the boilerplate for the common case:
+//   - clone + builder for each parameter
+//   - clone_box via self.clone()
+//   - fit delegates to self.fit(data)
+//   - predict delegates to self.predict(features)
+//
+// For models that need custom fit/predict (KMeans, IsolationForest),
+// keep a manual impl below the macro invocation.
 // ---------------------------------------------------------------------------
 
-impl Tunable for crate::tree::DecisionTreeClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
+macro_rules! impl_tunable {
+    (
+        $(
+            $(#[$meta:meta])*
+            $Model:ty {
+                $( $param:ident : $kind:ident ),* $(,)?
+            }
+        );* $(;)?
+    ) => {
+        $(
+            $(#[$meta])*
+            impl Tunable for $Model {
+                fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
+                    match name {
+                        $(
+                            stringify!($param) => {
+                                impl_tunable!(@extract value, $kind, $param, self)
+                            }
+                        )*
+                        _ => Err(ScryLearnError::InvalidParameter(format!(
+                            "unknown parameter: {name}"
+                        ))),
+                    }
+                }
+
+                fn clone_box(&self) -> Box<dyn Tunable> {
+                    Box::new(self.clone())
+                }
+
+                fn fit(&mut self, data: &Dataset) -> Result<()> {
+                    self.fit(data)
+                }
+
+                fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
+                    self.predict(features)
                 }
             }
-            "min_samples_split" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_split(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_split expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
+        )*
+    };
+
+    // Internal: extract Int parameter.
+    (@extract $value:ident, Int, $param:ident, $self:ident) => {
+        if let ParamValue::Int(v) = $value {
+            *$self = $self.clone().$param(v);
+            Ok(())
+        } else {
+            Err(ScryLearnError::InvalidParameter(format!(
+                concat!(stringify!($param), " expects Int, got {}"), $value
+            )))
         }
-    }
+    };
 
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
+    // Internal: extract Float parameter.
+    (@extract $value:ident, Float, $param:ident, $self:ident) => {
+        if let ParamValue::Float(v) = $value {
+            *$self = $self.clone().$param(v);
+            Ok(())
+        } else {
+            Err(ScryLearnError::InvalidParameter(format!(
+                concat!(stringify!($param), " expects Float, got {}"), $value
+            )))
+        }
+    };
 }
 
-impl Tunable for crate::tree::RandomForestClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "n_estimators" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().n_estimators(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "n_estimators expects Int, got {value}"
-                    )))
-                }
-            }
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
+// ---------------------------------------------------------------------------
+// Standard impls via macro
+// ---------------------------------------------------------------------------
 
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
+impl_tunable! {
+    crate::tree::DecisionTreeClassifier {
+        max_depth: Int,
+        min_samples_split: Int,
+        min_samples_leaf: Int,
+    };
+    crate::tree::DecisionTreeRegressor {
+        max_depth: Int,
+        min_samples_split: Int,
+        min_samples_leaf: Int,
+    };
+    crate::tree::RandomForestClassifier {
+        n_estimators: Int,
+        max_depth: Int,
+    };
+    crate::linear::LogisticRegression {
+        learning_rate: Float,
+        max_iter: Int,
+        alpha: Float,
+        tolerance: Float,
+    };
+    crate::neighbors::KnnClassifier {
+        k: Int,
+    };
+    crate::neighbors::KnnRegressor {
+        k: Int,
+    };
+    crate::tree::GradientBoostingRegressor {
+        n_estimators: Int,
+        learning_rate: Float,
+        max_depth: Int,
+        min_samples_split: Int,
+        min_samples_leaf: Int,
+    };
+    crate::tree::GradientBoostingClassifier {
+        n_estimators: Int,
+        learning_rate: Float,
+        max_depth: Int,
+        min_samples_split: Int,
+        min_samples_leaf: Int,
+    };
+    crate::svm::LinearSVC {
+        c: Float,
+        max_iter: Int,
+        tol: Float,
+    };
+    crate::svm::LinearSVR {
+        c: Float,
+        epsilon: Float,
+        max_iter: Int,
+        tol: Float,
+    };
+    #[cfg(feature = "experimental")]
+    crate::svm::KernelSVC {
+        c: Float,
+        tol: Float,
+        max_iter: Int,
+    };
+    #[cfg(feature = "experimental")]
+    crate::svm::KernelSVR {
+        c: Float,
+        epsilon: Float,
+        tol: Float,
+        max_iter: Int,
+    };
+    crate::naive_bayes::GaussianNb {};
+    crate::naive_bayes::BernoulliNB {
+        alpha: Float,
+    };
+    crate::naive_bayes::MultinomialNB {
+        alpha: Float,
+    };
+    crate::linear::LassoRegression {
+        alpha: Float,
+        max_iter: Int,
+        tol: Float,
+    };
+    crate::linear::ElasticNet {
+        alpha: Float,
+        l1_ratio: Float,
+        max_iter: Int,
+        tol: Float,
+    };
+    crate::tree::HistGradientBoostingRegressor {
+        n_estimators: Int,
+        learning_rate: Float,
+        max_leaf_nodes: Int,
+        max_depth: Int,
+        min_samples_leaf: Int,
+    };
+    crate::tree::HistGradientBoostingClassifier {
+        n_estimators: Int,
+        learning_rate: Float,
+        max_leaf_nodes: Int,
+        max_depth: Int,
+        min_samples_leaf: Int,
+    };
+    crate::neural::MLPClassifier {
+        learning_rate: Float,
+        alpha: Float,
+        max_iter: Int,
+        batch_size: Int,
+    };
+    crate::neural::MLPRegressor {
+        learning_rate: Float,
+        alpha: Float,
+        max_iter: Int,
+        batch_size: Int,
+    };
 }
 
-impl Tunable for crate::linear::LogisticRegression {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            "tolerance" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tolerance(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tolerance expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::neighbors::KnnClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "k" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().k(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "k expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::neighbors::KnnRegressor {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "k" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().k(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "k expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
+// ---------------------------------------------------------------------------
+// Manual impls for models with custom fit/predict
+// ---------------------------------------------------------------------------
 
 impl Tunable for crate::cluster::KMeans {
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
@@ -304,732 +284,6 @@ impl Tunable for crate::cluster::KMeans {
     }
 }
 
-impl Tunable for crate::tree::GradientBoostingRegressor {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "n_estimators" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().n_estimators(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "n_estimators expects Int, got {value}"
-                    )))
-                }
-            }
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_split" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_split(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_split expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::tree::GradientBoostingClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "n_estimators" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().n_estimators(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "n_estimators expects Int, got {value}"
-                    )))
-                }
-            }
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_split" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_split(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_split expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::svm::LinearSVC {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "c" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().c(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "c expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::svm::LinearSVR {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "c" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().c(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "c expects Float, got {value}"
-                    )))
-                }
-            }
-            "epsilon" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().epsilon(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "epsilon expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-#[cfg(feature = "experimental")]
-impl Tunable for crate::svm::KernelSVC {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "c" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().c(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "c expects Float, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-#[cfg(feature = "experimental")]
-impl Tunable for crate::svm::KernelSVR {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "c" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().c(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "c expects Float, got {value}"
-                    )))
-                }
-            }
-            "epsilon" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().epsilon(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "epsilon expects Float, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::naive_bayes::GaussianNb {
-    fn set_param(&mut self, name: &str, _value: ParamValue) -> Result<()> {
-        Err(ScryLearnError::InvalidParameter(format!(
-            "unknown parameter: {name}"
-        )))
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::naive_bayes::BernoulliNB {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::naive_bayes::MultinomialNB {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::linear::LassoRegression {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::linear::ElasticNet {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            "l1_ratio" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().l1_ratio(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "l1_ratio expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "tol" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().tol(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "tol expects Float, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::tree::HistGradientBoostingRegressor {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "n_estimators" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().n_estimators(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "n_estimators expects Int, got {value}"
-                    )))
-                }
-            }
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_leaf_nodes" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_leaf_nodes(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_leaf_nodes expects Int, got {value}"
-                    )))
-                }
-            }
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::tree::HistGradientBoostingClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "n_estimators" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().n_estimators(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "n_estimators expects Int, got {value}"
-                    )))
-                }
-            }
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_leaf_nodes" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_leaf_nodes(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_leaf_nodes expects Int, got {value}"
-                    )))
-                }
-            }
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::tree::DecisionTreeRegressor {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "max_depth" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_depth(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_depth expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_split" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_split(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_split expects Int, got {value}"
-                    )))
-                }
-            }
-            "min_samples_leaf" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().min_samples_leaf(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "min_samples_leaf expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
 impl Tunable for crate::anomaly::IsolationForest {
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
         match name {
@@ -1077,123 +331,5 @@ impl Tunable for crate::anomaly::IsolationForest {
     }
     fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         Ok(self.predict(features))
-    }
-}
-
-impl Tunable for crate::neural::MLPClassifier {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "batch_size" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().batch_size(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "batch_size expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
-    }
-}
-
-impl Tunable for crate::neural::MLPRegressor {
-    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
-        match name {
-            "learning_rate" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().learning_rate(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "learning_rate expects Float, got {value}"
-                    )))
-                }
-            }
-            "alpha" => {
-                if let ParamValue::Float(v) = value {
-                    *self = self.clone().alpha(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "alpha expects Float, got {value}"
-                    )))
-                }
-            }
-            "max_iter" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().max_iter(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "max_iter expects Int, got {value}"
-                    )))
-                }
-            }
-            "batch_size" => {
-                if let ParamValue::Int(v) = value {
-                    *self = self.clone().batch_size(v);
-                    Ok(())
-                } else {
-                    Err(ScryLearnError::InvalidParameter(format!(
-                        "batch_size expects Int, got {value}"
-                    )))
-                }
-            }
-            _ => Err(ScryLearnError::InvalidParameter(format!(
-                "unknown parameter: {name}"
-            ))),
-        }
-    }
-    fn clone_box(&self) -> Box<dyn Tunable> {
-        Box::new(self.clone())
-    }
-    fn fit(&mut self, data: &Dataset) -> Result<()> {
-        self.fit(data)
-    }
-    fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
-        self.predict(features)
     }
 }
