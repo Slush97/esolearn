@@ -62,11 +62,11 @@ macro_rules! impl_tunable {
         $(
             $(#[$meta])*
             impl Tunable for $Model {
-                fn set_param(&mut self, name: &str, value: ParamValue) -> Result<()> {
+                fn set_param(&mut self, name: &str, _value: ParamValue) -> Result<()> {
                     match name {
                         $(
                             stringify!($param) => {
-                                impl_tunable!(@extract value, $kind, $param, self)
+                                impl_tunable!(@extract _value, $kind, $param, self)
                             }
                         )*
                         _ => Err(ScryLearnError::InvalidParameter(format!(

@@ -43,12 +43,15 @@
 pub mod activation;
 pub mod callback;
 pub mod classifier;
+#[cfg(feature = "experimental")]
 pub mod conv;
 pub mod dropout;
+#[cfg(feature = "experimental")]
 pub mod flatten;
 pub(crate) mod layer;
 pub(crate) mod network;
 pub(crate) mod optimizer;
+#[cfg(feature = "experimental")]
 pub mod pool;
 pub mod regressor;
 pub mod traits;
@@ -56,10 +59,13 @@ pub mod traits;
 pub use activation::Activation;
 pub use callback::{CallbackAction, EpochMetrics, TrainingCallback, TrainingHistory};
 pub use classifier::MLPClassifier;
+#[cfg(feature = "experimental")]
 pub use conv::Conv2D;
 pub use dropout::DropoutLayer;
+#[cfg(feature = "experimental")]
 pub use flatten::Flatten;
 pub use optimizer::{LearningRateSchedule, OptimizerKind};
+#[cfg(feature = "experimental")]
 pub use pool::MaxPool2D;
 pub use regressor::MLPRegressor;
 pub use traits::{BackwardOutput, Layer};

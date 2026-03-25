@@ -63,6 +63,7 @@ impl Network {
     /// Build a network from a heterogeneous stack of layers.
     ///
     /// Use this for CNN/mixed architectures.
+    #[cfg(feature = "experimental")]
     #[allow(dead_code)]
     pub fn from_layers(layers: Vec<Box<dyn Layer>>) -> Self {
         Self {
@@ -564,6 +565,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "experimental")]
     fn generic_network_forward() {
         use crate::neural::conv::Conv2D;
         use crate::neural::flatten::Flatten;

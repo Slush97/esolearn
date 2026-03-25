@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! # scry-learn
 //!
-//! Production-grade machine learning toolkit in pure Rust.
+//! Machine learning toolkit in pure Rust.
 //!
 //! ## Quick Start
 //!
@@ -75,6 +75,8 @@ pub mod tree;
 pub(crate) mod version;
 pub mod weights;
 
+#[cfg(feature = "experimental")]
+pub mod onnx;
 #[cfg(feature = "mmap")]
 pub mod mmap;
 #[cfg(feature = "polars")]
@@ -112,9 +114,11 @@ pub mod prelude {
     pub use crate::neighbors::{
         Algorithm, DistanceMetric, KdTree, KnnClassifier, KnnRegressor, WeightFunction,
     };
+    #[cfg(feature = "experimental")]
+    pub use crate::neural::{Conv2D, Flatten, MaxPool2D};
     pub use crate::neural::{
-        Activation, BackwardOutput, CallbackAction, Conv2D, Flatten, Layer, MLPClassifier,
-        MLPRegressor, MaxPool2D, OptimizerKind, TrainingCallback,
+        Activation, BackwardOutput, CallbackAction, Layer, MLPClassifier, MLPRegressor,
+        OptimizerKind, TrainingCallback,
     };
     pub use crate::partial_fit::PartialFit;
     pub use crate::pipeline::Pipeline;
