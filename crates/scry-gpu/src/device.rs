@@ -1,9 +1,10 @@
 //! Device acquisition and the primary user-facing API.
 
-use crate::backend::{Backend, BackendBuffer};
+use crate::backend::{Backend, BackendBuffer, BackendKernel};
 use crate::buffer::{Buffer, GpuBuf};
 use crate::dispatch::{self, DispatchConfig};
 use crate::error::{GpuError, Result};
+use crate::kernel::Kernel;
 use crate::shader;
 
 /// A GPU compute device.
@@ -164,6 +165,86 @@ impl Device {
         )
     }
 
+    /// Compile a WGSL compute shader into a reusable [`Kernel`].
+    ///
+    /// The returned kernel holds all GPU objects (pipeline, layouts,
+    /// shader module) and can be dispatched many times via [`Device::run`].
+    ///
+    /// Uses `"main"` as the entry point. See [`Device::compile_named`]
+    /// for a custom entry point.
+    pub fn compile(&self, shader_src: &str) -> Result<Kernel> {
+        self.compile_named(shader_src, "main")
+    }
+
+    /// Compile a WGSL shader with a specific entry point name.
+    pub fn compile_named(&self, shader_src: &str, entry_point: &str) -> Result<Kernel> {
+        let compiled = shader::compile_wgsl(shader_src, entry_point)?;
+        let binding_count = shader::binding_count(&compiled.module);
+        let workgroup_size = dispatch::extract_workgroup_size(&compiled.module, entry_point);
+        let push_constant_size = if shader::uses_push_constants(&compiled.module) {
+            128
+        } else {
+            0
+        };
+
+        let inner = self.create_pipeline(
+            &compiled.spirv,
+            entry_point,
+            binding_count,
+            push_constant_size,
+        )?;
+
+        Ok(Kernel {
+            inner,
+            binding_count,
+            workgroup_size,
+            entry_point: entry_point.to_string(),
+        })
+    }
+
+    /// Dispatch a precompiled kernel.
+    ///
+    /// Buffers are bound in order to `@binding(0)`, `@binding(1)`, etc.
+    /// Workgroup dispatch dimensions are auto-calculated from `invocations`
+    /// and the kernel's compiled `@workgroup_size`.
+    pub fn run(
+        &self,
+        kernel: &Kernel,
+        buffers: &[&dyn GpuBuf],
+        invocations: u32,
+    ) -> Result<()> {
+        let backend_bufs: Vec<&BackendBuffer> = buffers.iter().map(|b| b.raw()).collect();
+        if kernel.binding_count != backend_bufs.len() {
+            return Err(GpuError::BindingMismatch {
+                expected: kernel.binding_count,
+                got: backend_bufs.len(),
+            });
+        }
+
+        let workgroups = dispatch::calc_dispatch(invocations, kernel.workgroup_size);
+        self.run_pipeline(kernel, &backend_bufs, workgroups, None)
+    }
+
+    /// Dispatch a precompiled kernel with push constants.
+    pub fn run_with_push_constants(
+        &self,
+        kernel: &Kernel,
+        buffers: &[&dyn GpuBuf],
+        invocations: u32,
+        push_constants: &[u8],
+    ) -> Result<()> {
+        let backend_bufs: Vec<&BackendBuffer> = buffers.iter().map(|b| b.raw()).collect();
+        if kernel.binding_count != backend_bufs.len() {
+            return Err(GpuError::BindingMismatch {
+                expected: kernel.binding_count,
+                got: backend_bufs.len(),
+            });
+        }
+
+        let workgroups = dispatch::calc_dispatch(invocations, kernel.workgroup_size);
+        self.run_pipeline(kernel, &backend_bufs, workgroups, Some(push_constants))
+    }
+
     /// Device name (for diagnostics / logging).
     pub fn name(&self) -> &str {
         match &self.inner {
@@ -220,6 +301,49 @@ impl Device {
                     })
                     .collect();
                 b.dispatch(spirv, entry_point, &vk_bufs, workgroups, push_constants)
+            }
+        }
+    }
+
+    fn create_pipeline(
+        &self,
+        spirv: &[u32],
+        entry_point: &str,
+        binding_count: usize,
+        push_constant_size: u32,
+    ) -> Result<BackendKernel> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let kernel = b.create_pipeline(
+                    spirv,
+                    entry_point,
+                    binding_count,
+                    push_constant_size,
+                )?;
+                Ok(BackendKernel::Vulkan(kernel))
+            }
+        }
+    }
+
+    fn run_pipeline(
+        &self,
+        kernel: &Kernel,
+        buffers: &[&BackendBuffer],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let BackendKernel::Vulkan(vk_kernel) = &kernel.inner;
+                let vk_bufs: Vec<&crate::backend::vulkan::VulkanBuffer> = buffers
+                    .iter()
+                    .map(|buf| match buf {
+                        BackendBuffer::Vulkan(vb) => vb,
+                    })
+                    .collect();
+                b.dispatch_pipeline(vk_kernel, &vk_bufs, workgroups, push_constants)
             }
         }
     }

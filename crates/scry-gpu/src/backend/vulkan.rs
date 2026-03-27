@@ -122,10 +122,39 @@ impl Drop for VulkanBuffer {
     }
 }
 
+/// A compiled Vulkan compute pipeline, reusable across dispatches.
+pub struct VulkanKernel {
+    shader_module: vk::ShaderModule,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    pipeline_layout: vk::PipelineLayout,
+    pipeline: vk::Pipeline,
+    binding_count: usize,
+    state: Arc<SharedState>,
+}
+
+impl Drop for VulkanKernel {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = self.state.device.device_wait_idle();
+            self.state.device.destroy_pipeline(self.pipeline, None);
+            self.state
+                .device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.state
+                .device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.state
+                .device
+                .destroy_shader_module(self.shader_module, None);
+        }
+    }
+}
+
 // ── Backend trait impl ──
 
 impl Backend for VulkanBackend {
     type Buffer = VulkanBuffer;
+    type Pipeline = VulkanKernel;
 
     fn create() -> Result<Self> {
         unsafe { Self::init() }
@@ -346,6 +375,208 @@ impl Backend for VulkanBackend {
             device.destroy_descriptor_pool(desc_pool, None);
             device.destroy_descriptor_set_layout(desc_layout, None);
             device.destroy_shader_module(shader_module, None);
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn create_pipeline(
+        &self,
+        spirv: &[u32],
+        entry_point: &str,
+        binding_count: usize,
+        push_constant_size: u32,
+    ) -> Result<VulkanKernel> {
+        let device = &self.state.device;
+
+        unsafe {
+            // Shader module
+            let shader_module = device
+                .create_shader_module(
+                    &vk::ShaderModuleCreateInfo::default().code(spirv),
+                    None,
+                )
+                .map_err(|e| GpuError::Backend(format!("shader module: {e}")))?;
+
+            // Descriptor set layout: N storage buffers
+            let bindings: Vec<vk::DescriptorSetLayoutBinding> = (0..binding_count)
+                .map(|i| {
+                    vk::DescriptorSetLayoutBinding::default()
+                        .binding(i as u32)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .descriptor_count(1)
+                        .stage_flags(vk::ShaderStageFlags::COMPUTE)
+                })
+                .collect();
+
+            let descriptor_set_layout = device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
+                    None,
+                )
+                .map_err(|e| {
+                    device.destroy_shader_module(shader_module, None);
+                    GpuError::Backend(format!("desc set layout: {e}"))
+                })?;
+
+            // Pipeline layout (with optional push constant range)
+            let pc_ranges = if push_constant_size > 0 {
+                vec![vk::PushConstantRange {
+                    stage_flags: vk::ShaderStageFlags::COMPUTE,
+                    offset: 0,
+                    size: push_constant_size,
+                }]
+            } else {
+                vec![]
+            };
+
+            let mut layout_info = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(std::slice::from_ref(&descriptor_set_layout));
+
+            if !pc_ranges.is_empty() {
+                layout_info = layout_info.push_constant_ranges(&pc_ranges);
+            }
+
+            let pipeline_layout = device
+                .create_pipeline_layout(&layout_info, None)
+                .map_err(|e| {
+                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    device.destroy_shader_module(shader_module, None);
+                    GpuError::Backend(format!("pipeline layout: {e}"))
+                })?;
+
+            // Compute pipeline
+            let entry_name = std::ffi::CString::new(entry_point).map_err(|e| {
+                device.destroy_pipeline_layout(pipeline_layout, None);
+                device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                device.destroy_shader_module(shader_module, None);
+                GpuError::Backend(format!("entry point name: {e}"))
+            })?;
+
+            let pipeline_info = vk::ComputePipelineCreateInfo::default()
+                .layout(pipeline_layout)
+                .stage(
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::COMPUTE)
+                        .module(shader_module)
+                        .name(&entry_name),
+                );
+
+            let pipeline = device
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[pipeline_info],
+                    None,
+                )
+                .map_err(|(_, e)| {
+                    device.destroy_pipeline_layout(pipeline_layout, None);
+                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                    device.destroy_shader_module(shader_module, None);
+                    GpuError::Backend(format!("compute pipeline: {e}"))
+                })?[0];
+
+            Ok(VulkanKernel {
+                shader_module,
+                descriptor_set_layout,
+                pipeline_layout,
+                pipeline,
+                binding_count,
+                state: Arc::clone(&self.state),
+            })
+        }
+    }
+
+    fn dispatch_pipeline(
+        &self,
+        kernel: &VulkanKernel,
+        buffers: &[&Self::Buffer],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        let device = &self.state.device;
+
+        unsafe {
+            // Ephemeral descriptor pool + set
+            let desc_pool = device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(1)
+                        .pool_sizes(&[vk::DescriptorPoolSize {
+                            ty: vk::DescriptorType::STORAGE_BUFFER,
+                            descriptor_count: kernel.binding_count.max(1) as u32,
+                        }]),
+                    None,
+                )
+                .map_err(|e| GpuError::Backend(format!("desc pool: {e}")))?;
+
+            let desc_set = device
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::default()
+                        .descriptor_pool(desc_pool)
+                        .set_layouts(std::slice::from_ref(
+                            &kernel.descriptor_set_layout,
+                        )),
+                )
+                .map_err(|e| {
+                    device.destroy_descriptor_pool(desc_pool, None);
+                    GpuError::Backend(format!("alloc desc set: {e}"))
+                })?[0];
+
+            // Write buffer bindings
+            let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
+                .iter()
+                .map(|b| vk::DescriptorBufferInfo {
+                    buffer: b.buffer,
+                    offset: 0,
+                    range: vk::WHOLE_SIZE,
+                })
+                .collect();
+
+            let writes: Vec<vk::WriteDescriptorSet> = buf_infos
+                .iter()
+                .enumerate()
+                .map(|(i, info)| {
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(desc_set)
+                        .dst_binding(i as u32)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(std::slice::from_ref(info))
+                })
+                .collect();
+
+            device.update_descriptor_sets(&writes, &[]);
+
+            // Record + submit
+            let pl = kernel.pipeline_layout;
+            let pipe = kernel.pipeline;
+            self.state.one_shot_submit(|cmd| {
+                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, pipe);
+
+                device.cmd_bind_descriptor_sets(
+                    cmd,
+                    vk::PipelineBindPoint::COMPUTE,
+                    pl,
+                    0,
+                    &[desc_set],
+                    &[],
+                );
+
+                if let Some(pc) = push_constants {
+                    device.cmd_push_constants(
+                        cmd,
+                        pl,
+                        vk::ShaderStageFlags::COMPUTE,
+                        0,
+                        pc,
+                    );
+                }
+
+                device.cmd_dispatch(cmd, workgroups[0], workgroups[1], workgroups[2]);
+            })?;
+
+            // Cleanup ephemeral descriptor pool (destroys its sets too)
+            device.destroy_descriptor_pool(desc_pool, None);
         }
 
         Ok(())

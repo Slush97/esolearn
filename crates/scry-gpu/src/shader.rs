@@ -55,6 +55,14 @@ pub fn compile_wgsl(source: &str, entry_point: &str) -> Result<CompiledShader> {
     })
 }
 
+/// Returns `true` if the shader declares any push constant variables.
+pub fn uses_push_constants(module: &naga::Module) -> bool {
+    module
+        .global_variables
+        .iter()
+        .any(|(_, var)| var.space == naga::AddressSpace::PushConstant)
+}
+
 /// Reflect binding info from a compiled shader.
 ///
 /// Returns the number of storage buffer bindings declared in bind group 0.

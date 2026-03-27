@@ -13,6 +13,9 @@ pub trait Backend: Sized {
     /// Backend-specific buffer handle.
     type Buffer: BackendBufferOps;
 
+    /// Backend-specific compiled pipeline handle.
+    type Pipeline;
+
     /// Create a backend, selecting the best available device.
     fn create() -> Result<Self>;
 
@@ -27,6 +30,24 @@ pub trait Backend: Sized {
         &self,
         spirv: &[u32],
         entry_point: &str,
+        buffers: &[&Self::Buffer],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()>;
+
+    /// Compile a SPIR-V shader into a reusable pipeline.
+    fn create_pipeline(
+        &self,
+        spirv: &[u32],
+        entry_point: &str,
+        binding_count: usize,
+        push_constant_size: u32,
+    ) -> Result<Self::Pipeline>;
+
+    /// Dispatch a precompiled pipeline.
+    fn dispatch_pipeline(
+        &self,
+        pipeline: &Self::Pipeline,
         buffers: &[&Self::Buffer],
         workgroups: [u32; 3],
         push_constants: Option<&[u8]>,
@@ -55,6 +76,12 @@ pub trait BackendBufferOps {
 pub enum BackendBuffer {
     #[cfg(feature = "vulkan")]
     Vulkan(vulkan::VulkanBuffer),
+}
+
+/// Type-erased pipeline handle used by [`Kernel`](crate::Kernel).
+pub enum BackendKernel {
+    #[cfg(feature = "vulkan")]
+    Vulkan(vulkan::VulkanKernel),
 }
 
 impl BackendBufferOps for BackendBuffer {
