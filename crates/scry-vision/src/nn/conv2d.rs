@@ -31,10 +31,10 @@ pub struct Conv2d<B: MathBackend> {
     pub padding: usize,
     /// Reusable workspace to avoid per-forward allocation.
     pub workspace: RefCell<Vec<f32>>,
-    /// Cached Winograd F(2×2, 3×3) transformed filter weights.
-    /// Layout: `[16, out_channels, in_channels]` (position-major).
+    /// Cached Winograd F(2×2, 3×3) transformed filter weights as backend storage.
+    /// 16 elements, each a `[C_out, C_in]` matrix in `B::Storage` form.
     /// Lazily computed on first forward pass for eligible convolutions.
-    pub winograd_weight: RefCell<Option<Vec<f32>>>,
+    pub winograd_weight: RefCell<Option<Vec<B::Storage>>>,
 }
 
 /// Precompute Winograd F(2×2, 3×3) transformed filter weights.
@@ -217,7 +217,7 @@ impl<B: MathBackend> Conv2d<B> {
     /// Winograd F(2×2, 3×3) convolution for 3×3 stride-1 padding-1 kernels.
     ///
     /// Reduces arithmetic cost by ~2.25× through domain transforms:
-    ///   1. Transform 3×3 filters to 4×4: U = G · g · Gᵀ  (cached)
+    ///   1. Transform 3×3 filters to 4×4: U = G · g · Gᵀ  (cached as `B::Storage`)
     ///   2. Extract 4×4 input tiles and transform: V = Bᵀ · d · B
     ///   3. Batched matmul per transform position: M_p = U_p · V_p
     ///   4. Inverse-transform to 2×2 output tiles: Y = Aᵀ · M · A
@@ -225,6 +225,7 @@ impl<B: MathBackend> Conv2d<B> {
         let dims = input.shape.dims();
         let (c_in, h_in, w_in) = (dims[0], dims[1], dims[2]);
         debug_assert_eq!(c_in, self.in_channels);
+        let c_out = self.out_channels;
 
         // stride=1, pad=1, kernel=3 → output = input size
         let h_out = h_in;
@@ -232,18 +233,28 @@ impl<B: MathBackend> Conv2d<B> {
         let tiles_h = (h_out + 1) / 2;
         let tiles_w = (w_out + 1) / 2;
         let num_tiles = tiles_h * tiles_w;
-        let oc_ic = self.out_channels * self.in_channels;
 
-        // ── Filter transform (cached) ──
-        let mut wino_cache = self.winograd_weight.borrow_mut();
-        if wino_cache.is_none() {
-            *wino_cache = Some(precompute_winograd_weights(
-                &self.weight.to_vec(),
-                self.out_channels,
-                self.in_channels,
-            ));
+        // ── Filter transform (cached as B::Storage, computed once) ──
+        {
+            let mut cache = self.winograd_weight.borrow_mut();
+            if cache.is_none() {
+                let u_flat = precompute_winograd_weights(
+                    &self.weight.to_vec(),
+                    c_out,
+                    c_in,
+                );
+                let oc_ic = c_out * c_in;
+                let u_shape = Shape::new(&[c_out, c_in]);
+                let storages: Vec<B::Storage> = (0..16)
+                    .map(|p| {
+                        B::from_vec(u_flat[p * oc_ic..(p + 1) * oc_ic].to_vec(), &u_shape)
+                    })
+                    .collect();
+                *cache = Some(storages);
+            }
         }
-        let u = wino_cache.as_ref().unwrap();
+        let cache = self.winograd_weight.borrow();
+        let u_storages = cache.as_ref().unwrap();
 
         // ── Padded input ──
         let input_vec = input.to_vec();
@@ -261,9 +272,9 @@ impl<B: MathBackend> Conv2d<B> {
             }
         }
 
-        // ── Input tile transform → V[pos, ic, tile] ──
+        // ── Input tile transform → 16 separate V buffers (zero-copy into BLAS) ──
         let ic_tiles = c_in * num_tiles;
-        let mut v = vec![0.0f32; 16 * ic_tiles];
+        let mut v_bufs: Vec<Vec<f32>> = (0..16).map(|_| vec![0.0f32; ic_tiles]).collect();
 
         for ic in 0..c_in {
             let ch_base = ic * pad_h * pad_w;
@@ -292,54 +303,44 @@ impl<B: MathBackend> Conv2d<B> {
                         tmp[i * 4 + 3] = d1 - d3;
                     }
 
-                    // V = Bᵀ · tmp  →  scatter to [pos][ic * num_tiles + tile]
+                    // V = Bᵀ · tmp  →  scatter to v_bufs[pos][ic * num_tiles + tile]
                     let v_base = ic * num_tiles + tile_idx;
                     for j in 0..4 {
                         let (t0, t1, t2, t3) =
                             (tmp[j], tmp[4 + j], tmp[8 + j], tmp[12 + j]);
-                        v[(0 * 4 + j) * ic_tiles + v_base] = t0 - t2;
-                        v[(1 * 4 + j) * ic_tiles + v_base] = t1 + t2;
-                        v[(2 * 4 + j) * ic_tiles + v_base] = t2 - t1;
-                        v[(3 * 4 + j) * ic_tiles + v_base] = t1 - t3;
+                        v_bufs[0 * 4 + j][v_base] = t0 - t2;
+                        v_bufs[1 * 4 + j][v_base] = t1 + t2;
+                        v_bufs[2 * 4 + j][v_base] = t2 - t1;
+                        v_bufs[3 * 4 + j][v_base] = t1 - t3;
                     }
                 }
             }
         }
 
         // ── Batched GEMM: M[p] = U[p] · V[p] ──
-        // U[p]: [C_out, C_in],  V[p]: [C_in, num_tiles]  →  M[p]: [C_out, num_tiles]
-        let oc_tiles = self.out_channels * num_tiles;
-        let mut m = vec![0.0f32; 16 * oc_tiles];
-        let u_shape = Shape::new(&[self.out_channels, self.in_channels]);
-        let v_shape = Shape::new(&[self.in_channels, num_tiles]);
-
+        // U[p] cached as B::Storage (zero-copy), V[p] moved in (zero-copy on CPU)
+        let v_shape = Shape::new(&[c_in, num_tiles]);
+        let mut m_bufs: Vec<Vec<f32>> = Vec::with_capacity(16);
         for p in 0..16 {
-            let u_s = B::from_vec(
-                u[p * oc_ic..(p + 1) * oc_ic].to_vec(),
-                &u_shape,
-            );
-            let v_s = B::from_vec(
-                v[p * ic_tiles..(p + 1) * ic_tiles].to_vec(),
-                &v_shape,
-            );
+            let v_vec = std::mem::take(&mut v_bufs[p]);
+            let v_s = B::from_vec(v_vec, &v_shape);
             let result = B::matmul(
-                &u_s,
+                &u_storages[p],
                 &v_s,
-                self.out_channels,
-                self.in_channels,
+                c_out,
+                c_in,
                 num_tiles,
                 false,
                 false,
             );
-            let result_vec = B::into_vec(result);
-            m[p * oc_tiles..(p + 1) * oc_tiles].copy_from_slice(&result_vec);
+            m_bufs.push(B::into_vec(result));
         }
 
         // ── Output inverse transform + bias + scatter ──
-        let mut output = vec![0.0f32; self.out_channels * h_out * w_out];
+        let mut output = vec![0.0f32; c_out * h_out * w_out];
         let bias = self.bias.to_vec();
 
-        for oc in 0..self.out_channels {
+        for oc in 0..c_out {
             let b = bias[oc];
             let out_base = oc * h_out * w_out;
             for ty in 0..tiles_h {
@@ -347,10 +348,10 @@ impl<B: MathBackend> Conv2d<B> {
                     let tile_idx = ty * tiles_w + tx;
                     let m_base = oc * num_tiles + tile_idx;
 
-                    // Gather m_tile[4][4] from M[p][oc, tile]
+                    // Gather m_tile[4][4] from m_bufs[p][oc * num_tiles + tile]
                     let mut mt = [0.0f32; 16];
                     for p in 0..16 {
-                        mt[p] = m[p * oc_tiles + m_base];
+                        mt[p] = m_bufs[p][m_base];
                     }
 
                     // temp = m · A  (4×2)
@@ -383,7 +384,7 @@ impl<B: MathBackend> Conv2d<B> {
             }
         }
 
-        Tensor::<B>::from_vec(output, Shape::new(&[self.out_channels, h_out, w_out]))
+        Tensor::<B>::from_vec(output, Shape::new(&[c_out, h_out, w_out]))
     }
 }
 
