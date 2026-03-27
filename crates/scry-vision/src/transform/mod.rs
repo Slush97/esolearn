@@ -9,14 +9,20 @@
 //! trait, these transforms have no `fit` step — all parameters are known at
 //! construction time (deterministic inference preprocessing).
 
+pub mod affine;
 pub mod color;
+pub mod crop;
 pub mod normalize;
+pub mod pad;
 pub mod resize;
 pub mod to_tensor;
 
+pub use affine::AffineTransform;
 pub use color::ColorConvert;
+pub use crop::{CenterCrop, Crop};
 pub use normalize::Normalize;
-pub use resize::{InterpolationMode, Resize};
+pub use pad::{Pad, PadMode};
+pub use resize::{InterpolationMode, Letterbox, LetterboxInfo, Resize};
 pub use to_tensor::ToTensor;
 
 use crate::error::Result;

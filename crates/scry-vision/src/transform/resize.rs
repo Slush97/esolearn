@@ -124,6 +124,107 @@ fn resize_bilinear(src: &ImageBuffer, dst_w: u32, dst_h: u32) -> ImageBuffer {
     }
 }
 
+/// Aspect-preserving resize + padding (letterboxing).
+///
+/// The image is scaled to fit within `width × height` while preserving its
+/// aspect ratio, then padded with `pad_value` on the shorter axis.
+/// This is the standard YOLO input preprocessing step.
+///
+/// After applying `Letterbox`, use [`LetterboxInfo`] to undo the transform
+/// on output coordinates (see [`crate::postprocess::boxes::rescale_detections`]).
+#[derive(Clone, Debug)]
+pub struct Letterbox {
+    pub width: u32,
+    pub height: u32,
+    pub pad_value: u8,
+    pub mode: InterpolationMode,
+}
+
+/// Information needed to undo a letterbox transform on coordinates.
+#[derive(Clone, Debug)]
+pub struct LetterboxInfo {
+    /// Scale factor applied during resize (original → model input).
+    pub scale: f32,
+    /// Horizontal padding added (pixels in model input space).
+    pub pad_x: f32,
+    /// Vertical padding added (pixels in model input space).
+    pub pad_y: f32,
+}
+
+impl LetterboxInfo {
+    /// Convert from model input coordinates back to original image coordinates.
+    pub fn unscale(&self, x: f32, y: f32) -> (f32, f32) {
+        ((x - self.pad_x) / self.scale, (y - self.pad_y) / self.scale)
+    }
+}
+
+impl Letterbox {
+    #[must_use]
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            width,
+            height,
+            pad_value: 114,
+            mode: InterpolationMode::Bilinear,
+        }
+    }
+
+    /// Apply letterboxing, returning the padded image and transform metadata.
+    pub fn apply_with_info(&self, image: &ImageBuffer) -> Result<(ImageBuffer, LetterboxInfo)> {
+        let scale_x = self.width as f32 / image.width as f32;
+        let scale_y = self.height as f32 / image.height as f32;
+        let scale = scale_x.min(scale_y);
+
+        let new_w = (image.width as f32 * scale).round() as u32;
+        let new_h = (image.height as f32 * scale).round() as u32;
+
+        // Resize to fit
+        let resized = match self.mode {
+            InterpolationMode::Nearest => resize_nearest(image, new_w, new_h),
+            InterpolationMode::Bilinear => resize_bilinear(image, new_w, new_h),
+        };
+
+        let pad_x = (self.width - new_w) as f32 / 2.0;
+        let pad_y = (self.height - new_h) as f32 / 2.0;
+        let pad_left = pad_x.floor() as u32;
+        let pad_top = pad_y.floor() as u32;
+        let pad_right = self.width - new_w - pad_left;
+        let pad_bottom = self.height - new_h - pad_top;
+
+        // Pad to target size
+        let ch = resized.channels as usize;
+        let mut data = vec![self.pad_value; self.width as usize * self.height as usize * ch];
+
+        for row in 0..new_h as usize {
+            let src_start = row * new_w as usize * ch;
+            let dst_start =
+                ((pad_top as usize + row) * self.width as usize + pad_left as usize) * ch;
+            let row_bytes = new_w as usize * ch;
+            data[dst_start..dst_start + row_bytes]
+                .copy_from_slice(&resized.data[src_start..src_start + row_bytes]);
+        }
+
+        let output = ImageBuffer::from_raw(data, self.width, self.height, resized.channels)?;
+        let info = LetterboxInfo {
+            scale,
+            pad_x: pad_left as f32,
+            pad_y: pad_top as f32,
+        };
+
+        let _ = pad_right;
+        let _ = pad_bottom;
+
+        Ok((output, info))
+    }
+}
+
+impl ImageTransform for Letterbox {
+    fn apply(&self, image: &ImageBuffer) -> Result<ImageBuffer> {
+        let (output, _info) = self.apply_with_info(image)?;
+        Ok(output)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +285,53 @@ mod tests {
         let out = transform.apply(&img).unwrap();
         assert_eq!(out.width, 6);
         assert_eq!(out.height, 6);
+    }
+
+    #[test]
+    fn letterbox_square_input() {
+        let img = make_2x2_rgb();
+        let lb = Letterbox::new(4, 4);
+        let (out, info) = lb.apply_with_info(&img).unwrap();
+        assert_eq!(out.width, 4);
+        assert_eq!(out.height, 4);
+        // Square input → square target, scale = 2.0, no padding
+        assert!((info.scale - 2.0).abs() < 1e-6);
+        assert!((info.pad_x).abs() < 1e-6);
+        assert!((info.pad_y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn letterbox_wide_input() {
+        // 6×2 image → 4×4 target
+        let img = ImageBuffer::from_raw(vec![128u8; 6 * 2 * 3], 6, 2, 3).unwrap();
+        let lb = Letterbox::new(4, 4);
+        let (out, info) = lb.apply_with_info(&img).unwrap();
+        assert_eq!(out.width, 4);
+        assert_eq!(out.height, 4);
+        // scale = min(4/6, 4/2) = min(0.667, 2.0) = 0.667
+        assert!((info.scale - 4.0 / 6.0).abs() < 0.01);
+        // Resized: 4×1 (rounded), padded vertically
+        assert!(info.pad_y > 0.0);
+    }
+
+    #[test]
+    fn letterbox_trait_impl() {
+        let img = make_2x2_rgb();
+        let lb = Letterbox::new(8, 8);
+        let out = lb.apply(&img).unwrap();
+        assert_eq!(out.width, 8);
+        assert_eq!(out.height, 8);
+    }
+
+    #[test]
+    fn letterbox_unscale_roundtrip() {
+        let info = LetterboxInfo {
+            scale: 2.0,
+            pad_x: 10.0,
+            pad_y: 5.0,
+        };
+        let (x, y) = info.unscale(50.0, 25.0);
+        assert!((x - 20.0).abs() < 1e-6); // (50-10)/2
+        assert!((y - 10.0).abs() < 1e-6); // (25-5)/2
     }
 }
