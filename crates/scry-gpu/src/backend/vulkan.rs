@@ -713,6 +713,208 @@ impl VulkanBackend {
     }
 }
 
+// ── Batch dispatch ──
+
+/// A command buffer being recorded with multiple dispatches.
+///
+/// Created via [`VulkanBackend::begin_batch`]. Records dispatches into a
+/// single command buffer, then submits them all at once with a single fence.
+pub struct VulkanBatch {
+    cmd: vk::CommandBuffer,
+    pools: Vec<vk::DescriptorPool>,
+    state: Arc<SharedState>,
+    submitted: bool,
+}
+
+impl VulkanBatch {
+    pub fn record_dispatch(
+        &mut self,
+        kernel: &VulkanKernel,
+        buffers: &[&VulkanBuffer],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        let device = &self.state.device;
+
+        unsafe {
+            let desc_pool = device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(1)
+                        .pool_sizes(&[vk::DescriptorPoolSize {
+                            ty: vk::DescriptorType::STORAGE_BUFFER,
+                            descriptor_count: kernel.binding_count.max(1) as u32,
+                        }]),
+                    None,
+                )
+                .map_err(|e| GpuError::Backend(format!("batch desc pool: {e}")))?;
+
+            let desc_set = device
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::default()
+                        .descriptor_pool(desc_pool)
+                        .set_layouts(std::slice::from_ref(
+                            &kernel.descriptor_set_layout,
+                        )),
+                )
+                .map_err(|e| {
+                    device.destroy_descriptor_pool(desc_pool, None);
+                    GpuError::Backend(format!("batch alloc desc: {e}"))
+                })?[0];
+
+            self.pools.push(desc_pool);
+
+            let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
+                .iter()
+                .map(|b| vk::DescriptorBufferInfo {
+                    buffer: b.buffer,
+                    offset: 0,
+                    range: vk::WHOLE_SIZE,
+                })
+                .collect();
+
+            let writes: Vec<vk::WriteDescriptorSet> = buf_infos
+                .iter()
+                .enumerate()
+                .map(|(i, info)| {
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(desc_set)
+                        .dst_binding(i as u32)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(std::slice::from_ref(info))
+                })
+                .collect();
+
+            device.update_descriptor_sets(&writes, &[]);
+
+            device.cmd_bind_pipeline(
+                self.cmd,
+                vk::PipelineBindPoint::COMPUTE,
+                kernel.pipeline,
+            );
+
+            device.cmd_bind_descriptor_sets(
+                self.cmd,
+                vk::PipelineBindPoint::COMPUTE,
+                kernel.pipeline_layout,
+                0,
+                &[desc_set],
+                &[],
+            );
+
+            if let Some(pc) = push_constants {
+                device.cmd_push_constants(
+                    self.cmd,
+                    kernel.pipeline_layout,
+                    vk::ShaderStageFlags::COMPUTE,
+                    0,
+                    pc,
+                );
+            }
+
+            device.cmd_dispatch(self.cmd, workgroups[0], workgroups[1], workgroups[2]);
+        }
+
+        Ok(())
+    }
+
+    pub fn record_barrier(&mut self) {
+        let device = &self.state.device;
+        unsafe {
+            let barrier = vk::MemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ);
+
+            device.cmd_pipeline_barrier(
+                self.cmd,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::DependencyFlags::empty(),
+                &[barrier],
+                &[],
+                &[],
+            );
+        }
+    }
+
+    pub fn submit(mut self) -> Result<()> {
+        let device = &self.state.device;
+
+        unsafe {
+            device
+                .end_command_buffer(self.cmd)
+                .map_err(|e| GpuError::Backend(format!("batch end cmd: {e}")))?;
+
+            let fence = device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+                .map_err(|e| GpuError::Backend(format!("batch fence: {e}")))?;
+
+            device
+                .queue_submit(
+                    self.state.queue,
+                    &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
+                    fence,
+                )
+                .map_err(|e| GpuError::Backend(format!("batch submit: {e}")))?;
+
+            device
+                .wait_for_fences(&[fence], true, u64::MAX)
+                .map_err(|e| GpuError::Backend(format!("batch wait: {e}")))?;
+
+            device.destroy_fence(fence, None);
+        }
+
+        self.submitted = true;
+        Ok(())
+    }
+}
+
+impl Drop for VulkanBatch {
+    fn drop(&mut self) {
+        unsafe {
+            let device = &self.state.device;
+            device.free_command_buffers(self.state.cmd_pool, &[self.cmd]);
+            for pool in &self.pools {
+                device.destroy_descriptor_pool(*pool, None);
+            }
+        }
+    }
+}
+
+impl VulkanBackend {
+    pub fn begin_batch(&self) -> Result<VulkanBatch> {
+        let device = &self.state.device;
+
+        let cmd = unsafe {
+            device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(self.state.cmd_pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .map_err(|e| GpuError::Backend(format!("batch alloc cmd: {e}")))?[0]
+        };
+
+        unsafe {
+            device
+                .begin_command_buffer(
+                    cmd,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                )
+                .map_err(|e| GpuError::Backend(format!("batch begin cmd: {e}")))?;
+        }
+
+        Ok(VulkanBatch {
+            cmd,
+            pools: Vec::new(),
+            state: Arc::clone(&self.state),
+            submitted: false,
+        })
+    }
+}
+
 // ── Buffer helpers ──
 
 impl VulkanBackend {

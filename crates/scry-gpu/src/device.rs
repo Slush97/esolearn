@@ -245,6 +245,42 @@ impl Device {
         self.run_pipeline(kernel, &backend_bufs, workgroups, Some(push_constants))
     }
 
+    /// Dispatch a precompiled kernel with explicit workgroup dimensions.
+    ///
+    /// Use this for 2D/3D dispatches or when you need precise control over
+    /// workgroup counts. For simple 1D dispatches, prefer [`Device::run`].
+    pub fn run_configured(
+        &self,
+        kernel: &Kernel,
+        buffers: &[&dyn GpuBuf],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        let backend_bufs: Vec<&BackendBuffer> = buffers.iter().map(|b| b.raw()).collect();
+        if kernel.binding_count != backend_bufs.len() {
+            return Err(GpuError::BindingMismatch {
+                expected: kernel.binding_count,
+                got: backend_bufs.len(),
+            });
+        }
+
+        self.run_pipeline(kernel, &backend_bufs, workgroups, push_constants)
+    }
+
+    /// Begin a batched dispatch session.
+    ///
+    /// Records multiple dispatches into a single command buffer, submitted
+    /// with one fence wait via [`Batch::submit`].
+    pub fn batch(&self) -> Result<crate::batch::Batch> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let vk_batch = b.begin_batch()?;
+                Ok(crate::batch::Batch::new_vulkan(vk_batch))
+            }
+        }
+    }
+
     /// Device name (for diagnostics / logging).
     pub fn name(&self) -> &str {
         match &self.inner {

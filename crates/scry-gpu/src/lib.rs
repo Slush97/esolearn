@@ -41,6 +41,7 @@
 //!   doesn't change.
 
 mod backend;
+mod batch;
 mod buffer;
 mod device;
 mod dispatch;
@@ -48,6 +49,7 @@ mod error;
 mod kernel;
 mod shader;
 
+pub use batch::Batch;
 pub use buffer::{Buffer, GpuBuf};
 pub use device::{BackendKind, Device};
 pub use dispatch::DispatchConfig;
