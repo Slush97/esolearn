@@ -202,7 +202,7 @@ pub fn generate_annotations(
     }
 }
 
-/// Generate subtitle below the title.
+/// Generate subtitle below the title (with word wrapping).
 pub fn generate_subtitle(
     scene: &mut SceneGraph,
     root_id: NodeId,
@@ -211,26 +211,28 @@ pub fn generate_subtitle(
     title_font_size: f32,
     theme: &NewTheme,
 ) {
-    // Position subtitle below title with proper spacing.
-    // Title is rendered at margins.top * 0.6 ≈ title_font_size * 0.6 + 12.
-    // Place subtitle one full line below that.
-    let title_y = title_font_size + 10.0;
-    let y = title_y + title_font_size + 6.0;
-    let text = Node::with_mark(Mark::Text(TextMark {
-        position: [chart_width * 0.5, y],
-        text: subtitle.to_string(),
-        font: FontStyle {
-            family: theme.font_family.clone(),
-            size: theme.subtitle_font_size,
-            weight: 400,
-            italic: false,
-        },
-        fill: FillStyle::Solid(theme.muted_foreground),
-        angle: 0.0,
-        anchor: TextAnchor::Middle,
-    }))
-    .z_order(10);
-    scene.insert_child(root_id, text);
+    let max_chars = (chart_width / (theme.base_font_size * 0.6)).floor() as usize;
+    let lines = layout::wrap_text(subtitle, max_chars, 2);
+
+    let title_y = title_font_size + 4.0;
+    for (i, line) in lines.iter().enumerate() {
+        let y = title_y + title_font_size + 3.0 + i as f32 * theme.subtitle_font_size * 1.2;
+        let text = Node::with_mark(Mark::Text(TextMark {
+            position: [chart_width * 0.5, y],
+            text: line.clone(),
+            font: FontStyle {
+                family: theme.font_family.clone(),
+                size: theme.subtitle_font_size,
+                weight: 400,
+                italic: false,
+            },
+            fill: FillStyle::Solid(theme.muted_foreground),
+            angle: 0.0,
+            anchor: TextAnchor::Middle,
+        }))
+        .z_order(10);
+        scene.insert_child(root_id, text);
+    }
 }
 
 /// Generate caption below the plot area.

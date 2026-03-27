@@ -46,8 +46,51 @@ macro_rules! xy_builder_methods {
         }
 
         /// Build and render to SVG.
+        #[allow(deprecated)]
         pub fn to_svg(self) -> Result<String> {
             self.build().to_svg()
+        }
+
+        /// Build and save as SVG file.
+        #[allow(deprecated)]
+        pub fn save_svg(self, path: impl AsRef<std::path::Path>) -> Result<()> {
+            let svg = self.build().to_svg()?;
+            std::fs::write(path, svg)?;
+            Ok(())
+        }
+
+        /// Set explicit X-axis domain (overrides auto-computed bounds).
+        pub fn x_domain(mut self, min: f64, max: f64) -> Self {
+            self.x_domain = Some((min, max));
+            self
+        }
+
+        /// Set explicit Y-axis domain (overrides auto-computed bounds).
+        pub fn y_domain(mut self, min: f64, max: f64) -> Self {
+            self.y_domain = Some((min, max));
+            self
+        }
+
+        /// Set point/fill opacity (0.0–1.0).
+        pub fn opacity(mut self, alpha: f32) -> Self {
+            self.opacity = Some(alpha.clamp(0.0, 1.0));
+            self
+        }
+
+        /// Add a horizontal reference line at the given y value.
+        pub fn hline(mut self, y: f64) -> Self {
+            self.annotations.push(
+                crate::grammar::annotation::Annotation::hline(y)
+            );
+            self
+        }
+
+        /// Add a vertical reference line at the given x value.
+        pub fn vline(mut self, x: f64) -> Self {
+            self.annotations.push(
+                crate::grammar::annotation::Annotation::vline(x)
+            );
+            self
         }
     };
 }
@@ -77,6 +120,13 @@ macro_rules! pie_builder_methods {
         /// Build and render to SVG.
         pub fn to_svg(self) -> Result<String> {
             self.build().to_svg()
+        }
+
+        /// Build and save as SVG file.
+        pub fn save_svg(self, path: impl AsRef<std::path::Path>) -> Result<()> {
+            let svg = self.build().to_svg()?;
+            std::fs::write(path, svg)?;
+            Ok(())
         }
     };
 }
@@ -108,6 +158,7 @@ macro_rules! apply_chart_labels {
 // ── Scatter ──────────────────────────────────────────────────────────
 
 /// Create a scatter plot.
+#[must_use]
 pub fn scatter(x: &[f64], y: &[f64]) -> ScatterBuilder {
     ScatterBuilder {
         x: x.to_vec(),
@@ -121,6 +172,12 @@ pub fn scatter(x: &[f64], y: &[f64]) -> ScatterBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        error_bars: None,
+        add_trend: false,
+        annotations: Vec::new(),
     }
 }
 
@@ -137,6 +194,12 @@ pub struct ScatterBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    error_bars: Option<Vec<f64>>,
+    add_trend: bool,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl ScatterBuilder {
@@ -155,25 +218,57 @@ impl ScatterBuilder {
         self
     }
 
+    /// Set symmetric error bar values (±err per point).
+    pub fn error_bars(mut self, errors: &[f64]) -> Self {
+        self.error_bars = Some(errors.to_vec());
+        self
+    }
+
+    /// Add a LOESS trend line overlay.
+    pub fn trend_line(mut self) -> Self {
+        self.add_trend = true;
+        self
+    }
+
     /// Build the chart.
     pub fn build(self) -> Chart {
         let mut layer = Layer::new(MarkType::Point)
-            .with_x(self.x)
-            .with_y(self.y);
+            .with_x(self.x.clone())
+            .with_y(self.y.clone());
         if let Some(cats) = self.categories {
             layer = layer.with_categories(cats);
         }
         if let Some(fv) = self.facet_values {
             layer = layer.with_facet_values(fv);
         }
+        if let Some(eb) = self.error_bars {
+            layer = layer.with_error_bars(eb);
+        }
         let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
-            .theme(self.theme);
+            .theme(self.theme.clone());
+        // Add LOESS trend line as a second layer
+        if self.add_trend && self.x.len() >= 3 {
+            let trend_layer = Layer::new(MarkType::Line)
+                .with_x(self.x)
+                .with_y(self.y)
+                .stat(Stat::Smooth { bandwidth: 0.3 });
+            chart = chart.layer(trend_layer);
+        }
         if (!matches!(chart.facet, Facet::None) || self.facet_ncol > 0)
             && chart.layers.iter().any(|l| l.facet_values.is_some())
         {
             chart = chart.facet(Facet::Wrap { ncol: self.facet_ncol });
+        }
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
         }
         apply_chart_labels!(xy: chart, self)
     }
@@ -182,6 +277,7 @@ impl ScatterBuilder {
 // ── Line ─────────────────────────────────────────────────────────────
 
 /// Create a line chart.
+#[must_use]
 pub fn line(x: &[f64], y: &[f64]) -> LineBuilder {
     LineBuilder {
         x: x.to_vec(),
@@ -193,6 +289,10 @@ pub fn line(x: &[f64], y: &[f64]) -> LineBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -207,6 +307,10 @@ pub struct LineBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl LineBuilder {
@@ -226,10 +330,19 @@ impl LineBuilder {
         if let Some(cats) = self.categories {
             layer = layer.with_categories(cats);
         }
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
@@ -237,6 +350,7 @@ impl LineBuilder {
 // ── Bar ──────────────────────────────────────────────────────────────
 
 /// Create a bar chart.
+#[must_use]
 pub fn bar(categories: &[impl ToString], values: &[f64]) -> BarBuilder {
     let x: Vec<f64> = (0..categories.len()).map(|i| i as f64).collect();
     BarBuilder {
@@ -250,6 +364,10 @@ pub fn bar(categories: &[impl ToString], values: &[f64]) -> BarBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -265,6 +383,10 @@ pub struct BarBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl BarBuilder {
@@ -285,10 +407,19 @@ impl BarBuilder {
         if let Some(eb) = self.error_bars {
             layer = layer.with_error_bars(eb);
         }
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
@@ -296,6 +427,7 @@ impl BarBuilder {
 // ── Histogram ────────────────────────────────────────────────────────
 
 /// Create a histogram from raw values.
+#[must_use]
 pub fn histogram(values: &[f64]) -> HistogramBuilder {
     HistogramBuilder {
         values: values.to_vec(),
@@ -306,6 +438,10 @@ pub fn histogram(values: &[f64]) -> HistogramBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -319,6 +455,10 @@ pub struct HistogramBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl HistogramBuilder {
@@ -335,10 +475,19 @@ impl HistogramBuilder {
         let layer = Layer::new(MarkType::Bar)
             .with_x(self.values)
             .stat(Stat::Bin { bins: self.bins });
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
@@ -346,6 +495,7 @@ impl HistogramBuilder {
 // ── BoxPlot ──────────────────────────────────────────────────────────
 
 /// Create a box plot.
+#[must_use]
 pub fn boxplot(categories: &[impl ToString], values: &[f64]) -> BoxPlotBuilder {
     BoxPlotBuilder {
         categories: categories.iter().map(|c| c.to_string()).collect(),
@@ -356,6 +506,10 @@ pub fn boxplot(categories: &[impl ToString], values: &[f64]) -> BoxPlotBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -369,6 +523,10 @@ pub struct BoxPlotBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl BoxPlotBuilder {
@@ -380,10 +538,19 @@ impl BoxPlotBuilder {
             .with_y(self.values)
             .with_categories(self.categories)
             .stat(Stat::BoxPlot);
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
@@ -391,6 +558,7 @@ impl BoxPlotBuilder {
 // ── Area ─────────────────────────────────────────────────────────────
 
 /// Create an area chart.
+#[must_use]
 pub fn area(x: &[f64], y: &[f64]) -> AreaBuilder {
     AreaBuilder {
         x: x.to_vec(),
@@ -402,6 +570,10 @@ pub fn area(x: &[f64], y: &[f64]) -> AreaBuilder {
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -416,6 +588,10 @@ pub struct AreaBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl AreaBuilder {
@@ -435,17 +611,44 @@ impl AreaBuilder {
         if let Some(cats) = self.categories {
             layer = layer.with_categories(cats);
         }
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
 
 // ── Pie ──────────────────────────────────────────────────────────────
 
+/// Create a pie chart with consistent (labels, values) parameter order.
+#[must_use]
+pub fn pie_labeled(labels: &[impl ToString], values: &[f64]) -> PieBuilder {
+    PieBuilder {
+        values: values.to_vec(),
+        labels: labels.iter().map(|l| l.to_string()).collect(),
+        inner_fraction: 0.0,
+        title: None,
+        theme: NewTheme::default(),
+        width: 600.0,
+        height: 600.0,
+    }
+}
+
 /// Create a pie chart.
+///
+/// Note: parameter order is `(values, labels)`. Prefer [`pie_labeled`] which uses
+/// the consistent `(labels, values)` order matching `bar()` and `treemap()`.
+#[deprecated(note = "Use pie_labeled(labels, values) for consistent parameter order")]
 pub fn pie(values: &[f64], labels: &[impl ToString]) -> PieBuilder {
     PieBuilder {
         values: values.to_vec(),
@@ -495,6 +698,7 @@ impl PieBuilder {
 // ── Treemap ──────────────────────────────────────────────────────────
 
 /// Create a treemap chart.
+#[must_use]
 pub fn treemap(labels: &[impl ToString], values: &[f64]) -> TreemapBuilder {
     TreemapBuilder {
         labels: labels.iter().map(|l| l.to_string()).collect(),
@@ -546,6 +750,10 @@ pub struct MultiBarBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 /// Backward-compatible alias for stacked bar builder.
@@ -557,6 +765,7 @@ pub type GroupedBarBuilder = MultiBarBuilder;
 ///
 /// `categories` defines the x-axis groups, `groups` assigns each value to a series,
 /// and `values` is a flat array of values. The data is split into per-group layers internally.
+#[must_use]
 pub fn stacked_bar(
     categories: &[impl ToString],
     groups: &[impl ToString],
@@ -573,10 +782,15 @@ pub fn stacked_bar(
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
 /// Create a grouped (dodged) bar chart.
+#[must_use]
 pub fn grouped_bar(
     categories: &[impl ToString],
     groups: &[impl ToString],
@@ -593,6 +807,10 @@ pub fn grouped_bar(
         theme: NewTheme::default(),
         width: 800.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -609,10 +827,24 @@ impl MultiBarBuilder {
             width: self.width,
             height: self.height,
         };
-        try_build_grouped_chart(self.categories, self.groups, self.values, self.position, config)
+        let mut chart = try_build_grouped_chart(self.categories, self.groups, self.values, self.position, config)?;
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
+        Ok(chart)
     }
 
     /// Build the chart. Panics if categories, groups, and values have different lengths.
+    ///
+    /// Prefer [`try_build()`](Self::try_build) which returns a `Result` instead of panicking.
+    #[allow(deprecated)]
+    #[deprecated(note = "Use try_build() instead — build() panics on invalid input")]
     pub fn build(self) -> Chart {
         self.try_build().expect("MultiBarBuilder::build() failed")
     }
@@ -710,7 +942,10 @@ fn try_build_grouped_chart(
 
 // ── Heatmap ─────────────────────────────────────────────────────────
 
-/// Create a heatmap from a 2D matrix.
+/// Create a heatmap from a 2D matrix (takes ownership).
+///
+/// Prefer [`heatmap_ref`] to avoid cloning when you already have the data.
+#[must_use]
 pub fn heatmap(data: Vec<Vec<f64>>) -> HeatmapBuilder {
     HeatmapBuilder {
         data,
@@ -723,6 +958,31 @@ pub fn heatmap(data: Vec<Vec<f64>>) -> HeatmapBuilder {
         theme: NewTheme::default(),
         width: 600.0,
         height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
+    }
+}
+
+/// Create a heatmap from a borrowed 2D slice.
+#[must_use]
+pub fn heatmap_ref(data: &[Vec<f64>]) -> HeatmapBuilder {
+    HeatmapBuilder {
+        data: data.to_vec(),
+        row_labels: None,
+        col_labels: None,
+        annotate: false,
+        title: None,
+        x_label: None,
+        y_label: None,
+        theme: NewTheme::default(),
+        width: 600.0,
+        height: 600.0,
+        x_domain: None,
+        y_domain: None,
+        opacity: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -738,6 +998,10 @@ pub struct HeatmapBuilder {
     theme: NewTheme,
     width: f32,
     height: f32,
+    x_domain: Option<(f64, f64)>,
+    y_domain: Option<(f64, f64)>,
+    opacity: Option<f32>,
+    annotations: Vec<crate::grammar::annotation::Annotation>,
 }
 
 impl HeatmapBuilder {
@@ -749,15 +1013,29 @@ impl HeatmapBuilder {
         self
     }
 
-    /// Set row labels.
+    /// Set row labels (owned).
+    #[deprecated(note = "Use with_row_labels(&[impl ToString]) instead")]
     pub fn row_labels(mut self, labels: Vec<String>) -> Self {
         self.row_labels = Some(labels);
         self
     }
 
-    /// Set column labels.
+    /// Set column labels (owned).
+    #[deprecated(note = "Use with_col_labels(&[impl ToString]) instead")]
     pub fn col_labels(mut self, labels: Vec<String>) -> Self {
         self.col_labels = Some(labels);
+        self
+    }
+
+    /// Set row labels from any string-like slice.
+    pub fn with_row_labels(mut self, labels: &[impl ToString]) -> Self {
+        self.row_labels = Some(labels.iter().map(|l| l.to_string()).collect());
+        self
+    }
+
+    /// Set column labels from any string-like slice.
+    pub fn with_col_labels(mut self, labels: &[impl ToString]) -> Self {
+        self.col_labels = Some(labels.iter().map(|l| l.to_string()).collect());
         self
     }
 
@@ -774,10 +1052,19 @@ impl HeatmapBuilder {
         if self.annotate {
             layer = layer.annotate_cells();
         }
-        let chart = Chart::new()
+        let mut chart = Chart::new()
             .layer(layer)
             .size(self.width, self.height)
             .theme(self.theme);
+        if let Some((lo, hi)) = self.x_domain {
+            chart = chart.x_domain(lo, hi);
+        }
+        if let Some((lo, hi)) = self.y_domain {
+            chart = chart.y_domain(lo, hi);
+        }
+        for ann in self.annotations {
+            chart = chart.annotate(ann);
+        }
         apply_chart_labels!(xy: chart, self)
     }
 }
@@ -858,7 +1145,7 @@ mod tests {
     fn pie_builds_svg() {
         let values = vec![30.0, 20.0, 50.0];
         let labels = vec!["A", "B", "C"];
-        let svg = pie(&values, &labels).title("Pie Chart").to_svg().unwrap();
+        let svg = pie_labeled(&labels, &values).title("Pie Chart").to_svg().unwrap();
         assert!(svg.contains("<svg"));
         assert!(!svg.contains("<line") || svg.contains("<path"));
     }
@@ -867,7 +1154,7 @@ mod tests {
     fn pie_equal_values() {
         let values = vec![1.0, 1.0, 1.0];
         let labels = vec!["X", "Y", "Z"];
-        let svg = pie(&values, &labels).to_svg().unwrap();
+        let svg = pie_labeled(&labels, &values).to_svg().unwrap();
         assert!(svg.contains("<svg"));
     }
 
@@ -875,7 +1162,7 @@ mod tests {
     fn donut_builds_svg() {
         let values = vec![40.0, 60.0];
         let labels = vec!["Yes", "No"];
-        let svg = pie(&values, &labels).donut(0.5).to_svg().unwrap();
+        let svg = pie_labeled(&labels, &values).donut(0.5).to_svg().unwrap();
         assert!(svg.contains("<svg"));
     }
 
@@ -1029,6 +1316,7 @@ mod tests {
 
     #[test]
     fn grouped_bar_mismatched_lengths_panics() {
+        #[allow(deprecated)]
         let result = std::panic::catch_unwind(|| {
             grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0])
                 .build();
@@ -1129,5 +1417,15 @@ mod tests {
         let svg = stacked_bar(&cats, &groups, &vals).to_svg().unwrap();
         assert!(svg.contains("Alpha"), "legend should contain group name 'Alpha'");
         assert!(svg.contains("Beta"), "legend should contain group name 'Beta'");
+    }
+
+    #[test]
+    fn boxplot_shows_category_labels() {
+        let cats = vec!["GroupA", "GroupA", "GroupA", "GroupA", "GroupA",
+                        "GroupB", "GroupB", "GroupB", "GroupB", "GroupB"];
+        let vals = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 4.0, 6.0, 8.0, 10.0];
+        let svg = boxplot(&cats, &vals).title("Box Plot").to_svg().unwrap();
+        assert!(svg.contains("GroupA"), "boxplot SVG should contain category name GroupA");
+        assert!(svg.contains("GroupB"), "boxplot SVG should contain category name GroupB");
     }
 }

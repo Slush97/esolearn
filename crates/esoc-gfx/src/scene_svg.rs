@@ -84,7 +84,8 @@ pub fn render_scene_png(
     height: f32,
 ) -> Result<Vec<u8>> {
     let svg_str = render_scene_svg(scene, width, height)?;
-    let tree = resvg::usvg::Tree::from_str(&svg_str, &resvg::usvg::Options::default())
+    let opt = crate::usvg_options_with_fonts();
+    let tree = resvg::usvg::Tree::from_str(&svg_str, &opt)
         .map_err(|e| crate::error::GfxError::Render(format!("SVG parse error: {e}")))?;
 
     let w = width as u32;

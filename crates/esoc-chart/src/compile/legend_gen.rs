@@ -149,25 +149,28 @@ pub fn generate_legends(
     plot_h: f32,
     theme: &NewTheme,
 ) {
-    let legend_x = plot_x + plot_w + 15.0;
+    let legend_x = plot_x + plot_w + 18.0;
     let mut y = plot_y + 5.0;
     let swatch_size = 12.0_f32;
     let line_height = theme.legend_font_size * 1.5;
 
     for legend in legends {
-        // Gradient legend for heatmaps
+        // Gradient legend (colorbar) for heatmaps
         if let Some(grad) = &legend.gradient {
-            let bar_w = 15.0_f32;
-            let bar_h = plot_h * 0.85;
-            let n_steps = 50_usize;
+            let bar_w = 20.0_f32;
+            let bar_x = plot_x + plot_w + 10.0;
+            let bar_y = plot_y;
+            let bar_h = plot_h;
+            let n_steps = 64_usize;
             let step_h = bar_h / n_steps as f32;
             let color_scale = theme.color_scale.clone().unwrap_or_else(esoc_color::ColorScale::viridis);
 
+            // Draw gradient steps
             for i in 0..n_steps {
                 let t = 1.0 - i as f32 / n_steps as f32; // top = max
                 let color = color_scale.map(t);
                 let rect = Node::with_mark(Mark::Rect(RectMark {
-                    bounds: BoundingBox::new(legend_x, y + i as f32 * step_h, bar_w, step_h + 0.5),
+                    bounds: BoundingBox::new(bar_x, bar_y + i as f32 * step_h, bar_w, step_h + 0.5),
                     fill: FillStyle::Solid(color),
                     stroke: StrokeStyle { width: 0.0, ..Default::default() },
                     corner_radius: 0.0,
@@ -175,37 +178,50 @@ pub fn generate_legends(
                 scene.insert_child(root_id, rect);
             }
 
-            // Min/max labels
+            // Outline around the bar
+            let outline = Node::with_mark(Mark::Rect(RectMark {
+                bounds: BoundingBox::new(bar_x, bar_y, bar_w, bar_h),
+                fill: FillStyle::Solid(esoc_color::Color::TRANSPARENT),
+                stroke: StrokeStyle::solid(theme.foreground.with_alpha(0.4), 0.5),
+                corner_radius: 0.0,
+            })).z_order(10);
+            scene.insert_child(root_id, outline);
+
+            // Compute nice tick values for the colorbar
             let fmt = |v: f64| -> String {
                 if (v - v.round()).abs() < 1e-9 { format!("{}", v as i64) } else { format!("{v:.1}") }
             };
-            let max_label = Node::with_mark(Mark::Text(TextMark {
-                position: [legend_x + bar_w + 5.0, y + theme.legend_font_size * 0.8],
-                text: fmt(grad.v_max),
-                font: FontStyle {
-                    family: theme.font_family.clone(),
-                    size: theme.legend_font_size,
-                    weight: 400, italic: false,
-                },
-                fill: FillStyle::Solid(theme.foreground),
-                angle: 0.0, anchor: TextAnchor::Start,
-            })).z_order(10);
-            scene.insert_child(root_id, max_label);
+            let tick_count = 5_usize;
+            let label_x = bar_x + bar_w + 6.0;
+            for i in 0..=tick_count {
+                let t = i as f64 / tick_count as f64;
+                let val = grad.v_min + t * (grad.v_max - grad.v_min);
+                let ty = bar_y + bar_h - t as f32 * bar_h;
 
-            let min_label = Node::with_mark(Mark::Text(TextMark {
-                position: [legend_x + bar_w + 5.0, y + bar_h],
-                text: fmt(grad.v_min),
-                font: FontStyle {
-                    family: theme.font_family.clone(),
-                    size: theme.legend_font_size,
-                    weight: 400, italic: false,
-                },
-                fill: FillStyle::Solid(theme.foreground),
-                angle: 0.0, anchor: TextAnchor::Start,
-            })).z_order(10);
-            scene.insert_child(root_id, min_label);
+                // Tick mark (thin rect)
+                let tick = Node::with_mark(Mark::Rect(RectMark {
+                    bounds: BoundingBox::new(bar_x + bar_w, ty - 0.25, 4.0, 0.5),
+                    fill: FillStyle::Solid(theme.foreground.with_alpha(0.5)),
+                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    corner_radius: 0.0,
+                })).z_order(10);
+                scene.insert_child(root_id, tick);
 
-            y += bar_h + line_height;
+                // Tick label
+                let label = Node::with_mark(Mark::Text(TextMark {
+                    position: [label_x, ty + theme.tick_font_size * 0.35],
+                    text: fmt(val),
+                    font: FontStyle {
+                        family: theme.font_family.clone(),
+                        size: theme.tick_font_size,
+                        weight: 400, italic: false,
+                    },
+                    fill: FillStyle::Solid(theme.foreground),
+                    angle: 0.0, anchor: TextAnchor::Start,
+                })).z_order(10);
+                scene.insert_child(root_id, label);
+            }
+
             continue;
         }
 
@@ -240,10 +256,7 @@ pub fn generate_legends(
             let swatch = Node::with_mark(Mark::Rect(RectMark {
                 bounds: BoundingBox::new(legend_x, y, swatch_size, swatch_size),
                 fill: FillStyle::Solid(entry.color),
-                stroke: StrokeStyle {
-                    width: 0.0,
-                    ..Default::default()
-                },
+                stroke: StrokeStyle::solid(entry.color.with_alpha(0.6), 1.5),
                 corner_radius: 2.0,
             }))
             .z_order(10);
@@ -251,7 +264,7 @@ pub fn generate_legends(
 
             // Label
             let text = Node::with_mark(Mark::Text(TextMark {
-                position: [legend_x + swatch_size + 5.0, y + swatch_size * 0.85],
+                position: [legend_x + swatch_size + 4.0, y + swatch_size * 0.85],
                 text: entry.label.clone(),
                 font: FontStyle {
                     family: theme.font_family.clone(),
@@ -288,6 +301,76 @@ pub fn generate_legends(
             .z_order(10);
             scene.insert_child(root_id, overflow_text);
             y += line_height;
+        }
+    }
+}
+
+/// Render legends horizontally below the plot area.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_legends_bottom(
+    scene: &mut SceneGraph,
+    root_id: NodeId,
+    legends: &[LegendSpec],
+    plot_x: f32,
+    plot_y: f32,
+    plot_w: f32,
+    plot_h: f32,
+    theme: &NewTheme,
+) {
+    let swatch_size = 10.0_f32;
+    let line_height = theme.legend_font_size * 1.5;
+    let entry_gap = 16.0_f32;
+    let available_w = plot_w;
+
+    // Start below the plot area with a gap
+    let legend_y_start = plot_y + plot_h + line_height + 8.0;
+    let mut y = legend_y_start;
+    let mut x = plot_x;
+
+    for legend in legends {
+        // Skip gradient legends (heatmap) — those always go on the right
+        if legend.gradient.is_some() {
+            continue;
+        }
+
+        for entry in &legend.entries {
+            let label_w = crate::compile::layout::estimate_text_width(&entry.label, theme.legend_font_size);
+            let entry_w = swatch_size + 4.0 + label_w + entry_gap;
+
+            // Wrap to next row if needed
+            if x + entry_w > plot_x + available_w && x > plot_x {
+                x = plot_x;
+                y += line_height;
+            }
+
+            // Color swatch
+            let swatch = Node::with_mark(Mark::Rect(RectMark {
+                bounds: BoundingBox::new(x, y, swatch_size, swatch_size),
+                fill: FillStyle::Solid(entry.color),
+                stroke: StrokeStyle::solid(entry.color.with_alpha(0.6), 1.5),
+                corner_radius: 2.0,
+            }))
+            .z_order(10);
+            scene.insert_child(root_id, swatch);
+
+            // Label
+            let text = Node::with_mark(Mark::Text(TextMark {
+                position: [x + swatch_size + 4.0, y + swatch_size * 0.85],
+                text: entry.label.clone(),
+                font: FontStyle {
+                    family: theme.font_family.clone(),
+                    size: theme.legend_font_size,
+                    weight: 400,
+                    italic: false,
+                },
+                fill: FillStyle::Solid(theme.foreground),
+                angle: 0.0,
+                anchor: TextAnchor::Start,
+            }))
+            .z_order(10);
+            scene.insert_child(root_id, text);
+
+            x += entry_w;
         }
     }
 }

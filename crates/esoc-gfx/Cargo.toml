@@ -15,7 +15,7 @@ png = ["dep:resvg", "dep:tiny-skia"]
 [dependencies]
 esoc-scene = { path = "../esoc-scene" }
 esoc-color = { path = "../esoc-color" }
-resvg = { version = "0.44", optional = true, default-features = false }
+resvg = { version = "0.44", optional = true, default-features = false, features = ["text", "system-fonts"] }
 tiny-skia = { version = "0.11", optional = true }
 
 [lints.rust]

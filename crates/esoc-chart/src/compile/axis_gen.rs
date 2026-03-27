@@ -395,7 +395,11 @@ pub fn generate_axes(
                 .fold(0.0_f32, f32::max);
             plot_x - max_cat_w - theme.label_font_size - 5.0
         } else {
-            plot_x - theme.tick_font_size * 2.5
+            // Compute label offset from actual tick label widths to avoid overlap
+            let max_tick_w = y_ticks.iter()
+                .map(|&t| layout::estimate_text_width(&y_scale.format_tick(t), theme.tick_font_size))
+                .fold(0.0_f32, f32::max);
+            plot_x - max_tick_w - theme.label_font_size * 0.5 - y_tick_gap
         };
         let text = Node::with_mark(Mark::Text(TextMark {
             position: [

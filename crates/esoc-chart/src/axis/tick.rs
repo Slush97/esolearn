@@ -89,24 +89,69 @@ fn nice_num(x: f64, round: bool) -> f64 {
     nice_frac * 10.0_f64.powf(exp)
 }
 
-/// Format a tick value as a concise label.
+/// Format a tick value as a concise label using SI prefixes and comma grouping.
 pub fn format_tick(value: f64) -> String {
     if value == 0.0 {
         return "0".to_string();
     }
 
     let abs = value.abs();
-    if !(1e-3..1e6).contains(&abs) {
-        // Scientific notation for very large/small
-        format!("{value:.2e}")
-    } else if (value - value.round()).abs() < 1e-9 {
-        // Integer-looking values
-        format!("{}", value as i64)
+    let sign = if value < 0.0 { "-" } else { "" };
+
+    if abs >= 1e9 {
+        let v = value / 1e9;
+        format_si(v, sign, "B")
+    } else if abs >= 1e6 {
+        let v = value / 1e6;
+        format_si(v, sign, "M")
+    } else if abs >= 1e4 {
+        // Comma-grouped integers
+        format_with_commas(value)
     } else if abs >= 1.0 {
-        format!("{value:.1}")
+        if (value - value.round()).abs() < 1e-9 {
+            format!("{}", value as i64)
+        } else {
+            format!("{value:.1}")
+        }
+    } else if abs >= 0.01 {
+        format!("{value:.2}")
+    } else if abs >= 1e-6 {
+        // SI prefix for small numbers
+        if abs >= 1e-3 {
+            let v = value * 1e3;
+            format_si(v, sign, "m")
+        } else {
+            let v = value * 1e6;
+            format_si(v, sign, "\u{00B5}") // µ
+        }
     } else {
-        format!("{value:.3}")
+        format!("{value:.2e}")
     }
+}
+
+fn format_si(v: f64, sign: &str, suffix: &str) -> String {
+    let abs_v = v.abs();
+    if (abs_v - abs_v.round()).abs() < 0.05 {
+        format!("{sign}{}{suffix}", abs_v.round() as i64)
+    } else {
+        format!("{sign}{:.1}{suffix}", abs_v)
+    }
+}
+
+fn format_with_commas(value: f64) -> String {
+    let rounded = value.round() as i64;
+    let s = rounded.abs().to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    if rounded < 0 {
+        result.push('-');
+    }
+    result.chars().rev().collect()
 }
 
 #[cfg(test)]
@@ -137,6 +182,17 @@ mod tests {
         assert_eq!(format_tick(0.0), "0");
         assert_eq!(format_tick(100.0), "100");
         assert_eq!(format_tick(2.5), "2.5");
+        // SI prefixes
+        assert_eq!(format_tick(1_000_000.0), "1M");
+        assert_eq!(format_tick(2_500_000.0), "2.5M");
+        assert_eq!(format_tick(1_000_000_000.0), "1B");
+        assert_eq!(format_tick(-3_000_000.0), "-3M");
+        // Comma grouping
+        assert_eq!(format_tick(12_000.0), "12,000");
+        assert_eq!(format_tick(100_000.0), "100,000");
+        // Small numbers
+        assert_eq!(format_tick(0.001), "1m");
+        assert_eq!(format_tick(0.0002), "200\u{00B5}");
     }
 
     #[test]

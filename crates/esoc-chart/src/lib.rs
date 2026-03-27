@@ -65,16 +65,18 @@ pub mod prelude {
 
 /// New API re-exports.
 pub mod v2 {
-    pub use crate::express::{area, bar, boxplot, grouped_bar, histogram, line, pie, scatter, stacked_bar, treemap};
+    #[allow(deprecated)]
+    pub use crate::express::{area, bar, boxplot, grouped_bar, heatmap, heatmap_ref, histogram, line, pie, pie_labeled, scatter, stacked_bar, treemap};
     pub use crate::grammar::annotation::Annotation;
     pub use crate::grammar::chart::Chart;
     pub use crate::grammar::coord::CoordSystem;
-    pub use crate::grammar::encoding::{nominal, quantitative};
+    // nominal() and quantitative() removed — they are deprecated.
+    // Use Encoding struct directly instead.
     pub use crate::grammar::facet::{Facet, FacetScales};
     pub use crate::grammar::layer::{Layer, MarkType};
     pub use crate::grammar::position::Position;
     pub use crate::grammar::stat::Stat;
-    pub use crate::new_theme::NewTheme;
+    pub use crate::new_theme::{NewTheme, Theme};
 
     // Re-export scene/color types
     pub use esoc_color::{Color, OkLab, OkLch, Palette};

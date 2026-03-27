@@ -47,13 +47,13 @@ pub struct NewTheme {
 impl NewTheme {
     /// Default light theme.
     pub fn light() -> Self {
-        let base = 11.0_f32;
+        let base = 13.0_f32;
         Self {
             background: Color::WHITE,
-            foreground: Color::BLACK,
-            muted_foreground: Color::new(0.20, 0.20, 0.20, 1.0), // ~60% grey
+            foreground: Color::from_srgb8(0x33, 0x33, 0x33), // near-black, softer than pure #000
+            muted_foreground: Color::from_srgb8(0x73, 0x73, 0x73), // sRGB ~0.45
             palette: Palette::tab10(),
-            grid_color: Color::new(0.88, 0.88, 0.88, 1.0), // ~#E0E0E0
+            grid_color: Color::from_srgb8(0xE0, 0xE0, 0xE0), // sRGB #E0E0E0
             grid_width: 0.5,
             show_grid: true,
             base_font_size: base,
@@ -72,13 +72,13 @@ impl NewTheme {
 
     /// Dark theme.
     pub fn dark() -> Self {
-        let base = 11.0_f32;
+        let base = 13.0_f32;
         Self {
             background: Color::from_srgb8(0x1e, 0x1e, 0x2e),
             foreground: Color::from_srgb8(0xcd, 0xd6, 0xf4),
             muted_foreground: Color::new(0.55, 0.55, 0.65, 1.0), // muted light
             palette: Palette::tab10(),
-            grid_color: Color::new(0.07, 0.07, 0.10, 1.0), // ~sRGB 0.3
+            grid_color: Color::from_srgb8(0x3a, 0x3a, 0x4a), // visible on dark bg
             grid_width: 0.5,
             show_grid: true,
             base_font_size: base,
@@ -126,3 +126,6 @@ impl Default for NewTheme {
         Self::light()
     }
 }
+
+/// Preferred alias for [`NewTheme`].
+pub type Theme = NewTheme;

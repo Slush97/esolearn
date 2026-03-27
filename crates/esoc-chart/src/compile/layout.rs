@@ -6,6 +6,17 @@ use crate::grammar::chart::Chart;
 use esoc_scene::bounds::DataBounds;
 use esoc_scene::scale::Scale;
 
+/// Where the legend should be placed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegendPlacement {
+    /// No legend needed.
+    None,
+    /// Legend to the right of the plot.
+    Right,
+    /// Legend below the plot (horizontal layout).
+    Bottom,
+}
+
 /// Per-character width factor for common ASCII glyphs (sans-serif approximation).
 /// Narrow chars ~0.3, average ~0.5, wide chars ~0.7.
 fn char_width_factor(c: char) -> f32 {
@@ -28,7 +39,7 @@ pub fn estimate_text_width(text: &str, font_size: f32) -> f32 {
 /// Compute adaptive tick count from axis pixel length.
 /// min_spacing: 80.0 for x-axis, 40.0 for y-axis.
 pub fn target_tick_count(axis_length_px: f32, min_spacing: f32) -> usize {
-    (axis_length_px / min_spacing).floor().clamp(2.0, 10.0) as usize
+    (axis_length_px / min_spacing).floor().clamp(2.0, 15.0) as usize
 }
 
 /// Compute margins based on chart properties and actual data bounds.
@@ -48,12 +59,14 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     let has_caption = chart.caption.is_some();
 
     // ── Top margin ──
+    // Title + gap so the title doesn't collide with the top tick label.
+    let title_plot_gap = 12.0;
     let top = if has_title && has_subtitle {
-        chart.theme.title_font_size + chart.theme.subtitle_font_size + 35.0
+        chart.theme.title_font_size + chart.theme.subtitle_font_size + 7.0 + title_plot_gap
     } else if has_title {
-        chart.theme.title_font_size + 20.0
+        chart.theme.title_font_size + 4.0 + title_plot_gap
     } else {
-        15.0
+        5.0
     };
 
     // ── Bottom margin ──
@@ -85,10 +98,16 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         0.0
     };
     let caption_extra = if has_caption { chart.theme.tick_font_size + 10.0 } else { 0.0 };
+    let tick_size = 5.0;
+    let tick_pad = 2.0;
+    // Match the title_gap used in axis_gen for x-label placement (label_font_size * 1.2),
+    // plus a descender allowance so the label text doesn't clip the chart edge.
+    let title_pad = chart.theme.label_font_size * 1.2;
+    let descender = chart.theme.label_font_size * 0.35;
     let bottom = if has_x_label {
-        chart.theme.tick_font_size + chart.theme.label_font_size + 25.0 + rotated_label_extra + caption_extra
+        tick_size + tick_pad + chart.theme.tick_font_size + title_pad + chart.theme.label_font_size + descender + rotated_label_extra + caption_extra
     } else {
-        chart.theme.tick_font_size + 20.0 + rotated_label_extra + caption_extra
+        tick_size + tick_pad + chart.theme.tick_font_size + rotated_label_extra + caption_extra
     };
 
     // ── Left margin — measure actual Y tick labels ──
@@ -122,53 +141,196 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         matches!(l.mark, crate::grammar::layer::MarkType::Heatmap) && l.heatmap_data.is_some()
     }) && !chart.layers.is_empty();
 
-    let right = if is_heatmap {
-        // Gradient bar (15px) + label gap (5px) + label width (~40px)
-        60.0
+    // Count legend entries for placement decision
+    let legend_entry_count = if is_heatmap {
+        0 // gradient legend always on right
     } else if has_legend {
+        collect_legend_entry_count(chart)
+    } else {
+        0
+    };
+
+    // Determine legend placement: bottom when many entries or narrow chart
+    let legend_placement = if is_heatmap {
+        LegendPlacement::Right // gradient legend always right
+    } else if !has_legend {
+        LegendPlacement::None
+    } else if legend_entry_count > 5 || chart.width < 500.0 {
+        LegendPlacement::Bottom
+    } else {
+        LegendPlacement::Right
+    };
+
+    let (right, bottom_legend_extra) = if is_heatmap {
+        // Colorbar: gap (10px) + bar (20px) + tick marks (4px) + gap (6px) + label width (~40px)
+        (80.0, 0.0)
+    } else if has_legend && legend_placement == LegendPlacement::Right {
         // Collect unique legend labels from categories and layer labels
-        let mut all_labels: Vec<String> = Vec::new();
-        let has_layer_labels = chart.layers.iter().any(|l| l.label.is_some());
-        if has_layer_labels || chart.layers.len() > 1 {
-            // Multi-layer: use layer labels (or "Series N" fallback)
-            for (i, layer) in chart.layers.iter().enumerate() {
-                let lbl = layer.label.clone()
-                    .unwrap_or_else(|| format!("Series {}", i + 1));
-                if !all_labels.contains(&lbl) {
-                    all_labels.push(lbl);
-                }
-            }
-        }
-        // Also collect category labels
-        for layer in &chart.layers {
-            if let Some(cats) = &layer.categories {
-                for c in cats {
-                    if !all_labels.contains(c) {
-                        all_labels.push(c.clone());
-                    }
-                }
-            }
-        }
-        if all_labels.is_empty() {
-            all_labels.push("Series 00".into());
-        }
+        let all_labels = collect_legend_labels(chart);
         let max_label_width = all_labels
             .iter()
             .map(|c| estimate_text_width(c, chart.theme.legend_font_size))
             .fold(0.0_f32, f32::max);
         let swatch = 12.0;
         let gaps = 20.0;
-        (swatch + gaps + max_label_width).max(80.0)
+        ((swatch + gaps + max_label_width).max(80.0), 0.0)
+    } else if has_legend && legend_placement == LegendPlacement::Bottom {
+        // Bottom legend: minimal right margin, add to bottom
+        let all_labels = collect_legend_labels(chart);
+        let line_height = chart.theme.legend_font_size * 1.5;
+        let swatch = 12.0;
+        let entry_gap = 16.0;
+        let entry_widths: Vec<f32> = all_labels
+            .iter()
+            .map(|l| swatch + 4.0 + estimate_text_width(l, chart.theme.legend_font_size) + entry_gap)
+            .collect();
+        let available_w = chart.width - left - 10.0;
+        let mut rows = 1_usize;
+        let mut row_w = 0.0_f32;
+        for &w in &entry_widths {
+            if row_w + w > available_w && row_w > 0.0 {
+                rows += 1;
+                row_w = w;
+            } else {
+                row_w += w;
+            }
+        }
+        let legend_h = rows as f32 * line_height + 8.0; // 8px gap above legend
+        (10.0, legend_h)
     } else {
-        15.0
+        (10.0, 0.0)
     };
 
     Margins {
         top,
         right,
-        bottom,
+        bottom: bottom + bottom_legend_extra,
         left,
+        legend_placement,
     }
+}
+
+/// Collect unique legend labels from a chart for margin measurement.
+fn collect_legend_labels(chart: &Chart) -> Vec<String> {
+    let mut all_labels: Vec<String> = Vec::new();
+    let has_layer_labels = chart.layers.iter().any(|l| l.label.is_some());
+    if has_layer_labels || chart.layers.len() > 1 {
+        for (i, layer) in chart.layers.iter().enumerate() {
+            let lbl = layer
+                .label
+                .clone()
+                .unwrap_or_else(|| format!("Series {}", i + 1));
+            if !all_labels.contains(&lbl) {
+                all_labels.push(lbl);
+            }
+        }
+    }
+    for layer in &chart.layers {
+        if let Some(cats) = &layer.categories {
+            for c in cats {
+                if !all_labels.contains(c) {
+                    all_labels.push(c.clone());
+                }
+            }
+        }
+    }
+    if all_labels.is_empty() {
+        all_labels.push("Series 00".into());
+    }
+    all_labels
+}
+
+/// Count the total number of unique legend entries.
+fn collect_legend_entry_count(chart: &Chart) -> usize {
+    collect_legend_labels(chart).len()
+}
+
+/// Validate that the plot area occupies a reasonable fraction of the chart.
+/// Clamps margins if the plot area would be squeezed below 65% of chart area.
+pub fn validate_plot_ratio(margins: &mut super::Margins, chart_width: f32, chart_height: f32) {
+    let plot_w = chart_width - margins.left - margins.right;
+    let plot_h = chart_height - margins.top - margins.bottom;
+    let plot_area = plot_w * plot_h;
+    let chart_area = chart_width * chart_height;
+
+    if chart_area > 0.0 && plot_area / chart_area < 0.65 {
+        // Proportionally shrink all margins to bring plot area to ~65%
+        let target_ratio = 0.65_f32;
+        let total_h_margin = margins.left + margins.right;
+        let total_v_margin = margins.top + margins.bottom;
+        // Scale margins down uniformly
+        let scale = {
+            // We need: (W - h*s)(H - v*s) / (W*H) >= target
+            // Binary search for the right scale factor
+            let mut lo = 0.0_f32;
+            let mut hi = 1.0_f32;
+            for _ in 0..20 {
+                let mid = (lo + hi) * 0.5;
+                let pw = chart_width - total_h_margin * mid;
+                let ph = chart_height - total_v_margin * mid;
+                if pw * ph / chart_area >= target_ratio {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            hi
+        };
+        margins.left *= scale;
+        margins.right *= scale;
+        margins.top *= scale;
+        margins.bottom *= scale;
+    }
+}
+
+/// Wrap text at word boundaries, returning at most `max_lines` lines.
+/// Adds ellipsis if text would require more lines than allowed.
+pub fn wrap_text(text: &str, max_chars: usize, max_lines: usize) -> Vec<String> {
+    if max_chars == 0 || max_lines == 0 {
+        return vec![text.to_string()];
+    }
+    if text.len() <= max_chars {
+        return vec![text.to_string()];
+    }
+
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return vec![text.to_string()];
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for word in &words {
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.len() + 1 + word.len() <= max_chars {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current);
+            current = word.to_string();
+            if lines.len() >= max_lines {
+                break;
+            }
+        }
+    }
+
+    if lines.len() < max_lines {
+        lines.push(current);
+    } else {
+        // Text overflows: add ellipsis to last line
+        if let Some(last) = lines.last_mut() {
+            if last.len() + 1 < max_chars {
+                last.push('…');
+            } else {
+                let truncated: String = last.chars().take(max_chars.saturating_sub(1)).collect();
+                *last = format!("{truncated}…");
+            }
+        }
+    }
+
+    lines
 }
 
 /// Compute margins for treemap charts (minimal: title + legend, no axes).
@@ -220,6 +382,7 @@ fn compute_treemap_margins(chart: &Chart) -> Margins {
         right,
         bottom,
         left: 10.0,
+        legend_placement: if has_legend { LegendPlacement::Right } else { LegendPlacement::None },
     }
 }
 
@@ -260,9 +423,9 @@ mod tests {
     fn tick_count_in_range() {
         // Very small axis
         assert!(target_tick_count(50.0, 80.0) >= 2);
-        assert!(target_tick_count(50.0, 80.0) <= 10);
+        assert!(target_tick_count(50.0, 80.0) <= 15);
         // Very large axis
         assert!(target_tick_count(5000.0, 80.0) >= 2);
-        assert!(target_tick_count(5000.0, 80.0) <= 10);
+        assert!(target_tick_count(5000.0, 80.0) <= 15);
     }
 }

@@ -23,8 +23,9 @@ pub fn generate_layer_marks(
     plot_w: f32,
     plot_h: f32,
     theme: &NewTheme,
+    total_layers: usize,
 ) -> Result<(), ChartError> {
-    generate_layer_marks_inner(scene, plot_id, layer, data_bounds, plot_w, plot_h, theme, false)
+    generate_layer_marks_inner(scene, plot_id, layer, data_bounds, plot_w, plot_h, theme, false, total_layers)
 }
 
 /// Generate marks for a single resolved layer, with optional flip flag.
@@ -38,8 +39,9 @@ pub fn generate_layer_marks_flipped(
     plot_h: f32,
     theme: &NewTheme,
     is_flipped: bool,
+    total_layers: usize,
 ) -> Result<(), ChartError> {
-    generate_layer_marks_inner(scene, plot_id, layer, data_bounds, plot_w, plot_h, theme, is_flipped)
+    generate_layer_marks_inner(scene, plot_id, layer, data_bounds, plot_w, plot_h, theme, is_flipped, total_layers)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -52,6 +54,7 @@ fn generate_layer_marks_inner(
     plot_h: f32,
     theme: &NewTheme,
     is_flipped: bool,
+    total_layers: usize,
 ) -> Result<(), ChartError> {
     let x_scale = Scale::Linear {
         domain: (data_bounds.x_min, data_bounds.x_max),
@@ -74,7 +77,7 @@ fn generate_layer_marks_inner(
             generate_points(scene, plot_id, layer, &x_scale, &y_scale, series_color, theme)?;
         }
         MarkType::Line => {
-            generate_line(scene, plot_id, layer, &x_scale, &y_scale, series_color, theme)?;
+            generate_line(scene, plot_id, layer, &x_scale, &y_scale, series_color, theme, total_layers)?;
         }
         MarkType::Bar => {
             generate_bars(
@@ -84,6 +87,7 @@ fn generate_layer_marks_inner(
                 &x_scale,
                 &y_scale,
                 series_color,
+                plot_w,
                 plot_h,
                 theme,
                 is_flipped,
@@ -128,15 +132,22 @@ fn generate_points(
         return Ok(());
     }
 
-    // Convert area (px²) to diameter for rendering
-    let diameter = (theme.point_size / std::f32::consts::PI).sqrt() * 2.0;
-
-    // Density-adaptive opacity: reduce opacity for dense scatter plots
+    // Convert area (px²) to diameter for rendering, scaling down for dense scatter plots
     let n = layer.x_data.len();
-    let opacity = if n > 100 {
-        (100.0 / (n as f32).sqrt()).clamp(0.1, 0.7)
+    let diameter = {
+        let base = (theme.point_size / std::f32::consts::PI).sqrt() * 2.0;
+        if n > 200 {
+            base * (200.0 / n as f32).sqrt()
+        } else {
+            base
+        }
+    };
+
+    // Density-adaptive opacity: full opacity for small datasets, taper for dense scatter plots
+    let opacity = if n > 50 {
+        (50.0 / (n as f32).sqrt()).clamp(0.1, 1.0)
     } else {
-        0.7
+        1.0
     };
 
     if let Some(cats) = &layer.categories {
@@ -177,7 +188,7 @@ fn generate_points(
         )
         .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
-        let node = Node::with_batch(batch).z_order(2);
+        let node = Node::with_batch(batch).z_order(3);
         scene.insert_child(plot_id, node);
     } else {
         let positions: Vec<[f32; 2]> = layer
@@ -199,7 +210,7 @@ fn generate_points(
         )
         .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
 
-        let node = Node::with_batch(batch).z_order(2);
+        let node = Node::with_batch(batch).z_order(3);
         scene.insert_child(plot_id, node);
     }
     Ok(())
@@ -213,10 +224,20 @@ fn generate_line(
     y_scale: &Scale,
     color: esoc_color::Color,
     theme: &NewTheme,
+    total_layers: usize,
 ) -> Result<(), ChartError> {
     if layer.x_data.is_empty() || layer.y_data.is_empty() {
         return Ok(());
     }
+
+    // Reduce line width when many series overlap to keep the chart readable
+    let line_w = if total_layers > 10 {
+        theme.line_width * 0.5
+    } else if total_layers > 5 {
+        theme.line_width * 0.75
+    } else {
+        theme.line_width
+    };
 
     let points: Vec<[f32; 2]> = layer
         .x_data
@@ -227,7 +248,7 @@ fn generate_line(
 
     let mark = Mark::Line(LineMark {
         points,
-        stroke: StrokeStyle::solid(color, theme.line_width),
+        stroke: StrokeStyle::solid(color, line_w),
         interpolation: Interpolation::Linear,
     });
 
@@ -244,6 +265,7 @@ fn generate_bars(
     x_scale: &Scale,
     y_scale: &Scale,
     color: esoc_color::Color,
+    plot_w: f32,
     _plot_h: f32,
     theme: &NewTheme,
     is_flipped: bool,
@@ -280,19 +302,22 @@ fn generate_bars(
         }
     } else {
         // Vertical bars: x_data has positions, y_data has values.
-        let bar_width = if let Some(dw) = layer.dodge_width {
-            let x0_px = x_scale.map(0.0);
-            let x1_px = x_scale.map(dw);
-            (x1_px - x0_px).abs()
-        } else {
-            let gap_factor = if layer.is_binned { 0.98 } else { 0.8 };
-            if n > 1 {
-                let x0 = x_scale.map(layer.x_data[0]);
-                let x1 = x_scale.map(layer.x_data[1]);
-                (x1 - x0).abs() * gap_factor
+        let bar_width = {
+            let raw = if let Some(dw) = layer.dodge_width {
+                let x0_px = x_scale.map(0.0);
+                let x1_px = x_scale.map(dw);
+                (x1_px - x0_px).abs()
             } else {
-                20.0
-            }
+                let gap_factor = if layer.is_binned { 0.98 } else { 0.8 };
+                if n > 1 {
+                    let x0 = x_scale.map(layer.x_data[0]);
+                    let x1 = x_scale.map(layer.x_data[1]);
+                    (x1 - x0).abs() * gap_factor
+                } else {
+                    plot_w * 0.67
+                }
+            };
+            raw.max(2.0) // Enforce minimum bar width for readability
         };
 
         for i in 0..n {
@@ -344,7 +369,7 @@ fn generate_bars(
 
     // Histogram bars get a thin stroke to clearly separate bins
     let stroke = if layer.is_binned {
-        StrokeStyle::solid(esoc_color::Color::WHITE, 0.5)
+        StrokeStyle::solid(theme.background, 0.5)
     } else {
         StrokeStyle {
             width: 0.0,
@@ -424,6 +449,62 @@ fn generate_area(
         return Ok(());
     }
 
+    // Split by category when color_by is used
+    if let Some(cats) = &layer.categories {
+        let unique_cats: Vec<String> = {
+            let mut seen = Vec::new();
+            for c in cats {
+                if !seen.contains(c) {
+                    seen.push(c.clone());
+                }
+            }
+            seen
+        };
+
+        for (cat_idx, cat) in unique_cats.iter().enumerate() {
+            let cat_color = theme.palette.get(cat_idx);
+            let indices: Vec<usize> = cats.iter().enumerate()
+                .filter(|(_, c)| *c == cat)
+                .map(|(i, _)| i)
+                .collect();
+
+            let upper: Vec<[f32; 2]> = indices.iter()
+                .map(|&i| [x_scale.map(layer.x_data[i]), y_scale.map(layer.y_data[i])])
+                .collect();
+
+            let lower: Vec<[f32; 2]> = if let Some(baseline) = &layer.y_baseline {
+                indices.iter()
+                    .map(|&i| [x_scale.map(layer.x_data[i]), y_scale.map(baseline[i])])
+                    .collect()
+            } else {
+                indices.iter()
+                    .map(|&i| [x_scale.map(layer.x_data[i]), y_scale.map(0.0)])
+                    .collect()
+            };
+
+            if upper.len() != lower.len() || upper.is_empty() {
+                continue;
+            }
+
+            let alpha = if layer.y_baseline.is_some() { 0.3 } else { 0.4 };
+            let mark = Mark::Area(AreaMark {
+                upper: upper.clone(),
+                lower,
+                fill: FillStyle::Solid(cat_color.with_alpha(alpha)),
+                stroke: StrokeStyle { width: 0.0, ..Default::default() },
+            });
+            scene.insert_child(plot_id, Node::with_mark(mark).z_order(1));
+
+            let line_mark = Mark::Line(LineMark {
+                points: upper,
+                stroke: StrokeStyle::solid(cat_color, theme.line_width),
+                interpolation: Interpolation::Linear,
+            });
+            scene.insert_child(plot_id, Node::with_mark(line_mark).z_order(2));
+        }
+        return Ok(());
+    }
+
     let upper: Vec<[f32; 2]> = layer
         .x_data
         .iter()
@@ -462,7 +543,7 @@ fn generate_area(
     let mark = Mark::Area(AreaMark {
         upper: upper.clone(),
         lower,
-        fill: FillStyle::Solid(color.with_alpha(0.3)),
+        fill: FillStyle::Solid(color.with_alpha(if layer.y_baseline.is_some() { 0.3 } else { 0.5 })),
         stroke: StrokeStyle { width: 0.0, ..Default::default() },
     });
 
@@ -494,6 +575,12 @@ fn generate_arcs(
         return Ok(());
     }
 
+    if let Some(pos) = layer.y_data.iter().position(|&v| v < 0.0) {
+        return Err(ChartError::InvalidData {
+            layer: layer.layer_idx,
+            detail: format!("pie chart values must be non-negative, but value[{pos}] = {}", layer.y_data[pos]),
+        });
+    }
     let total: f64 = layer.y_data.iter().sum();
     if total <= 0.0 {
         return Ok(());
@@ -526,7 +613,7 @@ fn generate_arcs(
             start_angle,
             end_angle,
             fill: FillStyle::Solid(color),
-            stroke: StrokeStyle::solid(esoc_color::Color::WHITE, 1.5),
+            stroke: StrokeStyle::solid(theme.background, 1.5),
         }))
         .z_order(2);
         scene.insert_child(plot_id, arc);
@@ -568,8 +655,8 @@ fn generate_boxplot(
         let box_top = y_q3.min(y_q1);
         let box_h = (y_q1 - y_q3).abs();
 
-        // Q1→Q3 box
-        let color = theme.palette.get(i);
+        // Q1→Q3 box — uniform color unless color aesthetic is mapped
+        let color = theme.palette.get(0);
         let box_rect = Node::with_mark(Mark::Rect(esoc_scene::mark::RectMark {
             bounds: BoundingBox::new(cx - half_w, box_top, box_width, box_h),
             fill: FillStyle::Solid(color.with_alpha(0.6)),
@@ -616,7 +703,7 @@ fn generate_boxplot(
             let batch = MarkBatch::points(
                 positions,
                 BatchAttr::Uniform((theme.point_size / std::f32::consts::PI).sqrt() * 2.0 * 0.6),
-                BatchAttr::Uniform(FillStyle::Solid(theme.foreground)),
+                BatchAttr::Uniform(FillStyle::Solid(color.with_alpha(0.7))),
                 MarkerShape::Circle,
                 BatchAttr::Uniform(StrokeStyle {
                     width: 0.0,
@@ -686,10 +773,7 @@ fn generate_heatmap(
     let batch = MarkBatch::rects(
         rects,
         BatchAttr::Varying(fills),
-        BatchAttr::Uniform(StrokeStyle {
-            width: 1.0,
-            ..Default::default()
-        }),
+        BatchAttr::Uniform(StrokeStyle::solid(theme.background, 1.0)),
         0.0,
     )
     .map_err(|e| ChartError::InvalidData { layer: layer.layer_idx, detail: e })?;
@@ -703,11 +787,8 @@ fn generate_heatmap(
         for (r, row) in data.iter().enumerate() {
             for (c, &val) in row.iter().enumerate() {
                 let t = ((val - v_min) / v_range) as f32;
-                let text_color = if t < 0.5 {
-                    esoc_color::Color::WHITE
-                } else {
-                    esoc_color::Color::BLACK
-                };
+                let cell_color = color_scale.map(t);
+                let text_color = esoc_color::contrast::text_color_on(cell_color);
 
                 let cx = (c as f32 + 0.5) * cell_w;
                 let cy = (r as f32 + 0.5) * cell_h;
@@ -916,7 +997,7 @@ mod tests {
         let layer = make_resolved(MarkType::Point, vec![0.0, 1.0, 2.0], vec![3.0, 4.0, 5.0], 0);
         let bounds = DataBounds::new(0.0, 2.0, 0.0, 5.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         assert!(count_non_container(&scene) >= 1);
     }
 
@@ -928,7 +1009,7 @@ mod tests {
         let layer = make_resolved(MarkType::Bar, vec![0.0, 1.0, 2.0], vec![10.0, 20.0, 30.0], 0);
         let bounds = DataBounds::new(0.0, 2.0, 0.0, 30.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         assert!(count_non_container(&scene) >= 1);
     }
 
@@ -940,7 +1021,7 @@ mod tests {
         let layer = make_resolved(MarkType::Line, vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0], 0);
         let bounds = DataBounds::new(0.0, 2.0, 0.0, 3.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         assert!(count_non_container(&scene) >= 1);
     }
 
@@ -953,7 +1034,7 @@ mod tests {
         layer.inner_radius_fraction = 0.0;
         let bounds = DataBounds::new(0.0, 1.0, 0.0, 1.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         // Should generate 3 arc marks
         assert_eq!(count_non_container(&scene), 3);
     }
@@ -970,7 +1051,7 @@ mod tests {
         ]);
         let bounds = DataBounds::new(-0.5, 2.5, -0.5, 1.5);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 300.0, 200.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 300.0, 200.0, &theme, 1).unwrap();
         assert!(count_non_container(&scene) >= 1);
     }
 
@@ -987,7 +1068,7 @@ mod tests {
         layer.annotate_cells = true;
         let bounds = DataBounds::new(-0.5, 1.5, -0.5, 1.5);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 200.0, 200.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 200.0, 200.0, &theme, 1).unwrap();
         // Should have rects batch + 4 text marks
         assert!(count_non_container(&scene) >= 5);
     }
@@ -1001,7 +1082,7 @@ mod tests {
         layer.categories = Some(vec!["A".into(), "B".into(), "C".into()]);
         let bounds = DataBounds::new(0.0, 1.0, 0.0, 1.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         // Should have rect batch + text labels
         assert!(count_non_container(&scene) >= 1);
     }
@@ -1014,7 +1095,7 @@ mod tests {
         let layer = make_resolved(MarkType::Treemap, vec![], vec![], 0);
         let bounds = DataBounds::new(0.0, 1.0, 0.0, 1.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         assert_eq!(count_non_container(&scene), 0);
     }
 
@@ -1026,7 +1107,7 @@ mod tests {
         let layer = make_resolved(MarkType::Area, vec![0.0, 1.0, 2.0], vec![1.0, 3.0, 2.0], 0);
         let bounds = DataBounds::new(0.0, 2.0, 0.0, 3.0);
         let theme = NewTheme::default();
-        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme).unwrap();
+        generate_layer_marks(&mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1).unwrap();
         assert!(count_non_container(&scene) >= 1);
     }
 }

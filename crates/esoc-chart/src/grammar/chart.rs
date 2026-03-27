@@ -44,6 +44,8 @@ pub struct Chart {
     pub x_domain: Option<(f64, f64)>,
     /// Explicit y-axis domain override (min, max).
     pub y_domain: Option<(f64, f64)>,
+    /// Legend title (optional).
+    pub legend_title: Option<String>,
 }
 
 impl Chart {
@@ -66,6 +68,7 @@ impl Chart {
             facet_scales: FacetScales::default(),
             x_domain: None,
             y_domain: None,
+            legend_title: None,
         }
     }
 
@@ -160,6 +163,12 @@ impl Chart {
         self
     }
 
+    /// Set legend title.
+    pub fn legend_title(mut self, title: impl Into<String>) -> Self {
+        self.legend_title = Some(title.into());
+        self
+    }
+
     /// Compile to a scene graph.
     pub fn build(&self) -> Result<SceneGraph> {
         crate::compile::compile_chart(self)
@@ -178,8 +187,14 @@ impl Chart {
         Ok(svg)
     }
 
-    /// Save as SVG.
+    /// Save as SVG (deprecated — use [`save_svg_to`] for `impl AsRef<Path>`).
+    #[deprecated(note = "Use save_svg_to(path) which accepts impl AsRef<Path>")]
     pub fn save_svg(&self, path: &str) -> Result<()> {
+        self.save_svg_to(path)
+    }
+
+    /// Save as SVG to a path.
+    pub fn save_svg_to(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let svg = self.to_svg()?;
         std::fs::write(path, svg)?;
         Ok(())
@@ -194,9 +209,16 @@ impl Chart {
         Ok(bytes)
     }
 
-    /// Save as PNG (requires `png` feature).
+    /// Save as PNG (deprecated — use [`save_png_to`] for `impl AsRef<Path>`).
     #[cfg(feature = "png")]
+    #[deprecated(note = "Use save_png_to(path) which accepts impl AsRef<Path>")]
     pub fn save_png(&self, path: &str) -> Result<()> {
+        self.save_png_to(path)
+    }
+
+    /// Save as PNG to a path (requires `png` feature).
+    #[cfg(feature = "png")]
+    pub fn save_png_to(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let bytes = self.to_png()?;
         std::fs::write(path, bytes)?;
         Ok(())

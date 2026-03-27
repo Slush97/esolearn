@@ -21,7 +21,8 @@ impl RenderBackend for PngBackend {
 
 /// Convert an SVG string to PNG bytes.
 fn svg_to_png(svg: &str, width: u32, height: u32) -> Result<Vec<u8>> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+    let opt = crate::usvg_options_with_fonts();
+    let tree = resvg::usvg::Tree::from_str(svg, &opt)
         .map_err(|e| GfxError::Render(format!("SVG parse error: {e}")))?;
 
     let mut pixmap = tiny_skia::Pixmap::new(width, height)

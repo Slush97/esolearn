@@ -30,6 +30,7 @@ pub(crate) struct Margins {
     pub right: f32,
     pub bottom: f32,
     pub left: f32,
+    pub legend_placement: layout::LegendPlacement,
 }
 
 /// Compile a Chart definition into a SceneGraph.
@@ -219,17 +220,15 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
             crate::grammar::layer::MarkType::Bar | crate::grammar::layer::MarkType::Area
         )
     });
-    if has_bar_or_area && data_bounds.y_min < 0.0 {
-        let actual_min: f64 = resolved
-            .iter()
-            .flat_map(|l| l.y_data.iter())
-            .copied()
-            .fold(f64::INFINITY, f64::min);
-        let range = data_bounds.y_max - data_bounds.y_min;
-        // Clamp if actual data min is non-negative, or if it's negligibly small
-        // relative to the full range (< 2% of range).
-        if actual_min >= 0.0 || (range > 0.0 && actual_min.abs() < 0.02 * range) {
+    // Bar/area charts must always include the zero baseline to avoid truncated-bar
+    // misleading visuals.  This is applied before domain overrides so users can
+    // still override manually.
+    if has_bar_or_area {
+        if data_bounds.y_min > 0.0 {
             data_bounds.y_min = 0.0;
+        }
+        if data_bounds.y_max < 0.0 {
+            data_bounds.y_max = 0.0;
         }
     }
 
@@ -258,7 +257,9 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     }
 
     // Compute margins for axes/title (needs data_bounds for tick label measurement)
-    let margins = layout::compute_margins(chart, &data_bounds);
+    let mut margins = layout::compute_margins(chart, &data_bounds);
+    // Validate plot area ratio: clamp margins if plot area is squeezed below 65%
+    layout::validate_plot_ratio(&mut margins, chart.width, chart.height);
 
     let plot_x = margins.left;
     let plot_y = margins.top;
@@ -297,29 +298,34 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     } else {
         compile_single_panel(
             chart, &mut scene, root, &resolved, &data_bounds, plot_x, plot_y, plot_w, plot_h,
-            is_flipped,
+            is_flipped, margins.legend_placement,
         )?;
     }
 
-    // Title
+    // Title (with word-wrap for long titles)
     if let Some(title) = &chart.title {
-        let title_node = Node::with_mark(esoc_scene::mark::Mark::Text(
-            esoc_scene::mark::TextMark {
-                position: [chart.width * 0.5, theme.title_font_size + 10.0],
-                text: title.clone(),
-                font: esoc_scene::style::FontStyle {
-                    family: theme.font_family.clone(),
-                    size: theme.title_font_size,
-                    weight: 700,
-                    italic: false,
+        let max_chars = (chart.width / (theme.base_font_size * 0.6)).floor() as usize;
+        let lines = layout::wrap_text(title, max_chars, 2);
+        for (i, line) in lines.iter().enumerate() {
+            let y = theme.title_font_size + 4.0 + i as f32 * theme.title_font_size * 1.2;
+            let title_node = Node::with_mark(esoc_scene::mark::Mark::Text(
+                esoc_scene::mark::TextMark {
+                    position: [chart.width * 0.5, y],
+                    text: line.clone(),
+                    font: esoc_scene::style::FontStyle {
+                        family: theme.font_family.clone(),
+                        size: theme.title_font_size,
+                        weight: 700,
+                        italic: false,
+                    },
+                    fill: esoc_scene::style::FillStyle::Solid(theme.foreground),
+                    angle: 0.0,
+                    anchor: esoc_scene::mark::TextAnchor::Middle,
                 },
-                fill: esoc_scene::style::FillStyle::Solid(theme.foreground),
-                angle: 0.0,
-                anchor: esoc_scene::mark::TextAnchor::Middle,
-            },
-        ))
-        .z_order(10);
-        scene.insert_child(root, title_node);
+            ))
+            .z_order(10);
+            scene.insert_child(root, title_node);
+        }
     }
 
     // Subtitle
@@ -466,6 +472,7 @@ fn compile_single_panel(
     plot_w: f32,
     plot_h: f32,
     is_flipped: bool,
+    legend_placement: layout::LegendPlacement,
 ) -> Result<()> {
     let theme = &chart.theme;
 
@@ -524,16 +531,37 @@ fn compile_single_panel(
         );
     }
 
+    let total_layers = resolved.len();
     for resolved_layer in resolved {
         mark_gen::generate_layer_marks_flipped(
             scene, plot_id, resolved_layer, data_bounds, plot_w, plot_h, theme, is_flipped,
+            total_layers,
         )?;
     }
 
     // Legends
-    let legends = legend_gen::collect_legends(resolved, theme);
+    let mut legends = legend_gen::collect_legends(resolved, theme);
+    // Apply chart-level legend title
+    if let Some(lt) = &chart.legend_title {
+        for legend in &mut legends {
+            if legend.title.is_none() {
+                legend.title = Some(lt.clone());
+            }
+        }
+    }
     if !legends.is_empty() {
-        legend_gen::generate_legends(scene, root, &legends, plot_x, plot_y, plot_w, plot_h, theme);
+        match legend_placement {
+            layout::LegendPlacement::Bottom => {
+                legend_gen::generate_legends_bottom(
+                    scene, root, &legends, plot_x, plot_y, plot_w, plot_h, theme,
+                );
+            }
+            _ => {
+                legend_gen::generate_legends(
+                    scene, root, &legends, plot_x, plot_y, plot_w, plot_h, theme,
+                );
+            }
+        }
     }
 
     // Annotations
@@ -568,7 +596,7 @@ fn compile_faceted(
         Facet::None => 1,
     };
 
-    let gap = 30.0_f32;
+    let gap = 20.0_f32;
     let strip_h = theme.tick_font_size + 6.0;
     // Account for strip labels in available height
     let effective_h = plot_h - (strip_h * panels.len().div_ceil(ncol) as f32);
@@ -580,7 +608,7 @@ fn compile_faceted(
 
     // Use smaller tick font for facet panels to prevent label overlap
     let mut facet_theme = theme.clone();
-    facet_theme.tick_font_size = (theme.tick_font_size * 0.8).max(7.0);
+    facet_theme.tick_font_size = (theme.tick_font_size - 1.0).max(7.0);
 
     let nrow = panels.len().div_ceil(ncol);
 
@@ -636,9 +664,11 @@ fn compile_faceted(
         );
 
         // Marks
+        let panel_total_layers = panel.layers.len();
         for layer in &panel.layers {
             mark_gen::generate_layer_marks(
                 scene, panel_id, layer, &panel_bounds, rect.w, rect.h, theme,
+                panel_total_layers,
             )?;
         }
 
@@ -745,9 +775,10 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
             bounds.y_max = 0.0;
         }
     } else {
-        // For line/point: include zero only if data starts negligibly above zero
+        // For line/point: include zero if data minimum is within 25% of the range
+        // above zero, making the chart more contextually honest.
         let y_range = bounds.y_max - bounds.y_min;
-        if bounds.y_min > 0.0 && y_range > 0.0 && bounds.y_min < 0.05 * y_range {
+        if bounds.y_min > 0.0 && y_range > 0.0 && bounds.y_min < 0.25 * y_range {
             bounds.y_min = 0.0;
         }
     }

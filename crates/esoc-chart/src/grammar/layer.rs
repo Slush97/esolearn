@@ -30,6 +30,7 @@ pub enum MarkType {
 
 /// A single chart layer: a mark type with visual encodings.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Layer {
     /// The mark type.
     pub mark: MarkType,

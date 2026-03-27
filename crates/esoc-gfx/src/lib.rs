@@ -26,6 +26,15 @@ pub mod style;
 pub mod text;
 pub mod transform;
 
+/// Build resvg/usvg options with system fonts loaded.
+#[cfg(feature = "png")]
+pub(crate) fn usvg_options_with_fonts() -> resvg::usvg::Options<'static> {
+    let mut opt = resvg::usvg::Options::default();
+    let fontdb = opt.fontdb_mut();
+    fontdb.load_system_fonts();
+    opt
+}
+
 /// Convenience re-exports.
 pub mod prelude {
     pub use crate::backend::svg::{render_svg, save_svg, SvgBackend};
