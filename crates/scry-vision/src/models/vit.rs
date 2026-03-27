@@ -304,6 +304,10 @@ pub struct Vit<B: MathBackend> {
     pub cls_token: Tensor<B>,
     /// Positional embeddings: `[1 + num_patches, embed_dim]`.
     pub pos_embed: Tensor<B>,
+    /// Optional pre-LN applied after positional embedding, before transformer blocks.
+    /// Present in OpenCLIP models, absent in vanilla ViT/DeiT.
+    pub ln_pre_gamma: Option<Tensor<B>>,
+    pub ln_pre_beta: Option<Tensor<B>>,
     pub blocks: Vec<VitBlock<B>>,
     /// Final layer norm.
     pub ln_post_gamma: Tensor<B>,
@@ -329,6 +333,8 @@ impl<B: MathBackend> Vit<B> {
                 vec![0.0; (1 + num_patches) * d],
                 Shape::new(&[1 + num_patches, d]),
             ),
+            ln_pre_gamma: None,
+            ln_pre_beta: None,
             blocks,
             ln_post_gamma: Tensor::from_vec(vec![1.0; d], Shape::new(&[d])),
             ln_post_beta: Tensor::from_vec(vec![0.0; d], Shape::new(&[d])),
@@ -357,7 +363,12 @@ impl<B: MathBackend> Vit<B> {
         // Add positional embeddings
         let seq_shape = Shape::new(&[seq, d]);
         let seq_storage = B::from_vec(seq_data, &seq_shape);
-        let x = B::add(&seq_storage, &self.pos_embed.data, &seq_shape, &seq_shape, &seq_shape);
+        let mut x = B::add(&seq_storage, &self.pos_embed.data, &seq_shape, &seq_shape, &seq_shape);
+
+        // Optional pre-LN (present in OpenCLIP, absent in vanilla ViT)
+        if let (Some(gamma), Some(beta)) = (&self.ln_pre_gamma, &self.ln_pre_beta) {
+            x = B::layernorm_inference(&x, &gamma.data, &beta.data, &seq_shape, 1e-5);
+        }
 
         // Transformer blocks
         let mut x_tensor = Tensor::new(x, seq_shape);
@@ -503,6 +514,17 @@ impl<B: MathBackend> Vit<B> {
             });
         }
 
+        // ── Optional pre-LN (OpenCLIP has it, vanilla ViT doesn't) ──
+        let ln_pre_key = format!("{prefix}ln_pre.weight");
+        let (ln_pre_gamma, ln_pre_beta) = if tensors.tensor(&ln_pre_key).is_ok() {
+            (
+                Some(load_tensor(tensors, &ln_pre_key, &[d])?),
+                Some(load_tensor(tensors, &format!("{prefix}ln_pre.bias"), &[d])?),
+            )
+        } else {
+            (None, None)
+        };
+
         // ── Final layer norm ──
         let ln_post_gamma = load_tensor(tensors, &format!("{prefix}ln_post.weight"), &[d])?;
         let ln_post_beta = load_tensor(tensors, &format!("{prefix}ln_post.bias"), &[d])?;
@@ -511,6 +533,8 @@ impl<B: MathBackend> Vit<B> {
             patch_embed,
             cls_token,
             pos_embed,
+            ln_pre_gamma,
+            ln_pre_beta,
             blocks,
             ln_post_gamma,
             ln_post_beta,
@@ -525,6 +549,8 @@ impl<B: MathBackend> Module<B> for Vit<B> {
         params.extend(self.patch_embed.parameters());
         params.push(&self.cls_token);
         params.push(&self.pos_embed);
+        if let Some(ref g) = self.ln_pre_gamma { params.push(g); }
+        if let Some(ref b) = self.ln_pre_beta { params.push(b); }
         for block in &self.blocks {
             params.push(&block.ln1_gamma);
             params.push(&block.ln1_beta);
