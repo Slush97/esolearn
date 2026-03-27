@@ -102,6 +102,39 @@ impl<B: MathBackend> ClipVisual<B> {
     }
 }
 
+#[cfg(feature = "safetensors")]
+impl<B: MathBackend> ClipVisual<B> {
+    /// Load a CLIP visual encoder from a safetensors file.
+    ///
+    /// Expects OpenAI CLIP naming with `visual.` prefix for the ViT weights,
+    /// plus `visual.proj` for the projection matrix.
+    pub fn from_safetensors(
+        config: ClipConfig,
+        path: &std::path::Path,
+    ) -> crate::error::Result<Self> {
+        use crate::checkpoint::load_tensor;
+        use crate::error::VisionError;
+
+        let file = std::fs::File::open(path).map_err(|e| {
+            VisionError::ModelLoad(format!("cannot open {}: {e}", path.display()))
+        })?;
+        let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| {
+            VisionError::ModelLoad(format!("mmap failed: {e}"))
+        })?;
+        let tensors = safetensors::SafeTensors::deserialize(&mmap).map_err(|e| {
+            VisionError::ModelLoad(format!("safetensors parse failed: {e}"))
+        })?;
+
+        let vit = Vit::from_safetensors(config.vit.clone(), &tensors, "visual.")?;
+
+        // visual.proj: [embed_dim, proj_dim] — same layout as ours (not a Linear)
+        let d = config.vit.embed_dim;
+        let proj = load_tensor(&tensors, "visual.proj", &[d, config.proj_dim])?;
+
+        Ok(Self { vit, proj, config })
+    }
+}
+
 /// CLIP visual encoder that implements the [`Embed`] pipeline trait.
 ///
 /// Handles preprocessing (resize + normalize) internally.
@@ -114,6 +147,18 @@ impl<B: MathBackend> ClipEmbedder<B> {
         Self {
             model: ClipVisual::new(config),
         }
+    }
+}
+
+#[cfg(feature = "safetensors")]
+impl<B: MathBackend> ClipEmbedder<B> {
+    /// Load a CLIP visual embedder from a safetensors file.
+    pub fn from_safetensors(
+        config: ClipConfig,
+        path: &std::path::Path,
+    ) -> crate::error::Result<Self> {
+        let model = ClipVisual::from_safetensors(config, path)?;
+        Ok(Self { model })
     }
 }
 
@@ -143,6 +188,93 @@ mod tests {
         let input = Tensor::from_vec(vec![0.0; 3 * 224 * 224], Shape::new(&[3, 224, 224]));
         let output = model.forward(&input);
         assert_eq!(output.shape.dims(), &[512]);
+    }
+
+    #[cfg(feature = "safetensors")]
+    #[test]
+    fn clip_roundtrip_safetensors() {
+        use std::borrow::Cow;
+        use std::collections::HashMap;
+
+        struct F32View { data: Vec<u8>, shape: Vec<usize> }
+        impl F32View {
+            fn new(values: &[f32], shape: &[usize]) -> Self {
+                let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+                Self { data, shape: shape.to_vec() }
+            }
+        }
+        impl safetensors::View for F32View {
+            fn dtype(&self) -> safetensors::Dtype { safetensors::Dtype::F32 }
+            fn shape(&self) -> &[usize] { &self.shape }
+            fn data(&self) -> Cow<'_, [u8]> { Cow::Borrowed(&self.data) }
+            fn data_len(&self) -> usize { self.data.len() }
+        }
+
+        let config = ClipConfig {
+            vit: VitConfig {
+                image_size: 32, patch_size: 16, embed_dim: 64,
+                num_heads: 4, num_layers: 1, mlp_ratio: 4.0, in_channels: 3,
+            },
+            proj_dim: 32,
+        };
+        let original = ClipVisual::<CpuBackend>::new(config.clone());
+
+        // Serialize with CLIP naming (visual.* prefix)
+        let d = config.vit.embed_dim;
+        let d_ff = config.vit.d_ff();
+        let mut entries: Vec<(String, F32View)> = Vec::new();
+
+        // Patch embed
+        entries.push(("visual.conv1.weight".into(), F32View::new(&original.vit.patch_embed.proj.to_vec(), original.vit.patch_embed.proj.shape.dims())));
+        entries.push(("visual.class_embedding".into(), F32View::new(&original.vit.cls_token.to_vec(), &[d])));
+        entries.push(("visual.positional_embedding".into(), F32View::new(&original.vit.pos_embed.to_vec(), original.vit.pos_embed.shape.dims())));
+
+        // Block 0
+        let b = &original.vit.blocks[0];
+        let bp = "visual.transformer.resblocks.0";
+        entries.push((format!("{bp}.ln_1.weight"), F32View::new(&b.ln1_gamma.to_vec(), &[d])));
+        entries.push((format!("{bp}.ln_1.bias"), F32View::new(&b.ln1_beta.to_vec(), &[d])));
+        let qkv_t = crate::checkpoint::transpose_2d(&b.attn.qkv_weight.to_vec(), d, 3 * d);
+        entries.push((format!("{bp}.attn.in_proj_weight"), F32View::new(&qkv_t, &[3 * d, d])));
+        entries.push((format!("{bp}.attn.in_proj_bias"), F32View::new(&b.attn.qkv_bias.to_vec(), &[3 * d])));
+        let proj_t = crate::checkpoint::transpose_2d(&b.attn.proj_weight.to_vec(), d, d);
+        entries.push((format!("{bp}.attn.out_proj.weight"), F32View::new(&proj_t, &[d, d])));
+        entries.push((format!("{bp}.attn.out_proj.bias"), F32View::new(&b.attn.proj_bias.to_vec(), &[d])));
+        entries.push((format!("{bp}.ln_2.weight"), F32View::new(&b.ln2_gamma.to_vec(), &[d])));
+        entries.push((format!("{bp}.ln_2.bias"), F32View::new(&b.ln2_beta.to_vec(), &[d])));
+        let fc1_t = crate::checkpoint::transpose_2d(&b.mlp.fc1_weight.to_vec(), d, d_ff);
+        entries.push((format!("{bp}.mlp.c_fc.weight"), F32View::new(&fc1_t, &[d_ff, d])));
+        entries.push((format!("{bp}.mlp.c_fc.bias"), F32View::new(&b.mlp.fc1_bias.to_vec(), &[d_ff])));
+        let fc2_t = crate::checkpoint::transpose_2d(&b.mlp.fc2_weight.to_vec(), d_ff, d);
+        entries.push((format!("{bp}.mlp.c_proj.weight"), F32View::new(&fc2_t, &[d, d_ff])));
+        entries.push((format!("{bp}.mlp.c_proj.bias"), F32View::new(&b.mlp.fc2_bias.to_vec(), &[d])));
+
+        // LN post
+        entries.push(("visual.ln_post.weight".into(), F32View::new(&original.vit.ln_post_gamma.to_vec(), &[d])));
+        entries.push(("visual.ln_post.bias".into(), F32View::new(&original.vit.ln_post_beta.to_vec(), &[d])));
+
+        // Projection matrix
+        entries.push(("visual.proj".into(), F32View::new(&original.proj.to_vec(), original.proj.shape.dims())));
+
+        let info: Option<HashMap<String, String>> = None;
+        let bytes = safetensors::serialize(entries, &info).unwrap();
+
+        // Write to temp file and reload
+        let path = std::env::temp_dir().join(format!("scry_test_{}_clip.safetensors", std::process::id()));
+        std::fs::write(&path, &bytes).unwrap();
+        let loaded = ClipVisual::<CpuBackend>::from_safetensors(config, &path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        // Verify projection matrix round-trips
+        let orig_proj = original.proj.to_vec();
+        let load_proj = loaded.proj.to_vec();
+        for (i, (a, b)) in orig_proj.iter().zip(load_proj.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "proj[{i}]: {a} vs {b}");
+        }
+
+        // Verify a few ViT tensors
+        assert_eq!(original.vit.cls_token.to_vec(), loaded.vit.cls_token.to_vec());
+        assert_eq!(original.vit.pos_embed.to_vec(), loaded.vit.pos_embed.to_vec());
     }
 
     #[test]

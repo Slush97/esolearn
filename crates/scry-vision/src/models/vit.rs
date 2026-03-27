@@ -381,6 +381,144 @@ impl<B: MathBackend> Vit<B> {
     }
 }
 
+#[cfg(feature = "safetensors")]
+impl<B: MathBackend> Vit<B> {
+    /// Load a ViT from safetensors using OpenAI CLIP naming.
+    ///
+    /// `prefix` selects the key namespace:
+    /// - `"visual."` — for full CLIP checkpoints (`visual.conv1.weight`, ...)
+    /// - `""` — for standalone ViT checkpoints (`conv1.weight`, ...)
+    ///
+    /// # Weight layout
+    ///
+    /// Linear weights in PyTorch are `[out, in]`; we store `[in, out]` for
+    /// direct matmul, so all Linear weights are transposed during loading.
+    ///
+    /// # Naming convention (with `prefix = "visual."`)
+    ///
+    /// ```text
+    /// visual.conv1.weight                                [d, C, P, P]
+    /// visual.class_embedding                             [d]
+    /// visual.positional_embedding                        [1+N, d]
+    /// visual.transformer.resblocks.{i}.ln_1.{weight,bias}
+    /// visual.transformer.resblocks.{i}.attn.in_proj_weight   [3d, d]
+    /// visual.transformer.resblocks.{i}.attn.in_proj_bias     [3d]
+    /// visual.transformer.resblocks.{i}.attn.out_proj.{weight,bias}
+    /// visual.transformer.resblocks.{i}.ln_2.{weight,bias}
+    /// visual.transformer.resblocks.{i}.mlp.c_fc.{weight,bias}
+    /// visual.transformer.resblocks.{i}.mlp.c_proj.{weight,bias}
+    /// visual.ln_post.{weight,bias}
+    /// ```
+    pub fn from_safetensors(
+        config: VitConfig,
+        tensors: &safetensors::SafeTensors<'_>,
+        prefix: &str,
+    ) -> crate::error::Result<Self> {
+        use crate::checkpoint::{load_f32, load_tensor, load_tensor_transposed};
+
+        let d = config.embed_dim;
+        let d_ff = config.d_ff();
+        let n_heads = config.num_heads;
+        let num_patches = config.num_patches();
+        let in_ch = config.in_channels;
+        let p = config.patch_size;
+        let patch_len = in_ch * p * p;
+
+        // ── Patch embedding ──
+        // CLIP: conv1.weight [d, C, P, P] → our proj [d, C*P*P] (same flat layout)
+        let proj = load_tensor(tensors, &format!("{prefix}conv1.weight"), &[d, patch_len])?;
+        // CLIP doesn't store a separate patch embed bias; use zeros.
+        let patch_bias = Tensor::from_vec(vec![0.0; d], Shape::new(&[d]));
+        let patch_embed = PatchEmbedding {
+            proj,
+            bias: patch_bias,
+            patch_size: p,
+            in_channels: in_ch,
+            embed_dim: d,
+        };
+
+        // ── CLS token ──
+        // CLIP: class_embedding [d] → our cls_token [1, d]
+        let cls_data = load_f32(tensors, &format!("{prefix}class_embedding"))?;
+        let cls_token = Tensor::from_vec(cls_data, Shape::new(&[1, d]));
+
+        // ── Positional embedding ──
+        let pos_embed = load_tensor(
+            tensors,
+            &format!("{prefix}positional_embedding"),
+            &[1 + num_patches, d],
+        )?;
+
+        // ── Transformer blocks ──
+        let mut blocks = Vec::with_capacity(config.num_layers);
+        for i in 0..config.num_layers {
+            let bp = format!("{prefix}transformer.resblocks.{i}");
+
+            let ln1_gamma = load_tensor(tensors, &format!("{bp}.ln_1.weight"), &[d])?;
+            let ln1_beta = load_tensor(tensors, &format!("{bp}.ln_1.bias"), &[d])?;
+
+            // QKV: in_proj_weight [3d, d] → our qkv_weight [d, 3d] (transpose)
+            let qkv_weight = load_tensor_transposed(
+                tensors, &format!("{bp}.attn.in_proj_weight"), 3 * d, d,
+            )?;
+            let qkv_bias = load_tensor(tensors, &format!("{bp}.attn.in_proj_bias"), &[3 * d])?;
+
+            // Output projection: out_proj.weight [d, d] → our proj_weight [d, d] (transpose)
+            let proj_weight = load_tensor_transposed(
+                tensors, &format!("{bp}.attn.out_proj.weight"), d, d,
+            )?;
+            let proj_bias = load_tensor(tensors, &format!("{bp}.attn.out_proj.bias"), &[d])?;
+
+            let attn = VitAttention {
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                n_heads,
+                d_head: d / n_heads,
+                d_model: d,
+            };
+
+            let ln2_gamma = load_tensor(tensors, &format!("{bp}.ln_2.weight"), &[d])?;
+            let ln2_beta = load_tensor(tensors, &format!("{bp}.ln_2.bias"), &[d])?;
+
+            // MLP: c_fc.weight [d_ff, d] → our fc1_weight [d, d_ff] (transpose)
+            let fc1_weight = load_tensor_transposed(
+                tensors, &format!("{bp}.mlp.c_fc.weight"), d_ff, d,
+            )?;
+            let fc1_bias = load_tensor(tensors, &format!("{bp}.mlp.c_fc.bias"), &[d_ff])?;
+
+            // c_proj.weight [d, d_ff] → our fc2_weight [d_ff, d] (transpose)
+            let fc2_weight = load_tensor_transposed(
+                tensors, &format!("{bp}.mlp.c_proj.weight"), d, d_ff,
+            )?;
+            let fc2_bias = load_tensor(tensors, &format!("{bp}.mlp.c_proj.bias"), &[d])?;
+
+            let mlp = VitMlp { fc1_weight, fc1_bias, fc2_weight, fc2_bias, d_model: d, d_ff };
+
+            blocks.push(VitBlock {
+                ln1_gamma, ln1_beta, attn,
+                ln2_gamma, ln2_beta, mlp,
+                d_model: d,
+            });
+        }
+
+        // ── Final layer norm ──
+        let ln_post_gamma = load_tensor(tensors, &format!("{prefix}ln_post.weight"), &[d])?;
+        let ln_post_beta = load_tensor(tensors, &format!("{prefix}ln_post.bias"), &[d])?;
+
+        Ok(Self {
+            patch_embed,
+            cls_token,
+            pos_embed,
+            blocks,
+            ln_post_gamma,
+            ln_post_beta,
+            config,
+        })
+    }
+}
+
 impl<B: MathBackend> Module<B> for Vit<B> {
     fn parameters(&self) -> Vec<&Tensor<B>> {
         let mut params = Vec::new();
@@ -461,5 +599,162 @@ mod tests {
         let params = model.parameters();
         // patch_embed (2) + cls (1) + pos_embed (1) + 2 blocks × 12 params + ln_post (2) = 30
         assert_eq!(params.len(), 2 + 1 + 1 + 2 * 12 + 2);
+    }
+
+    #[cfg(feature = "safetensors")]
+    mod safetensors_tests {
+        use super::*;
+        use std::borrow::Cow;
+        use std::collections::HashMap;
+
+        struct F32View {
+            data: Vec<u8>,
+            shape: Vec<usize>,
+        }
+
+        impl F32View {
+            fn new(values: &[f32], shape: &[usize]) -> Self {
+                let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+                Self { data, shape: shape.to_vec() }
+            }
+        }
+
+        impl safetensors::View for F32View {
+            fn dtype(&self) -> safetensors::Dtype { safetensors::Dtype::F32 }
+            fn shape(&self) -> &[usize] { &self.shape }
+            fn data(&self) -> Cow<'_, [u8]> { Cow::Borrowed(&self.data) }
+            fn data_len(&self) -> usize { self.data.len() }
+        }
+
+        /// Serialize a Vit into safetensors bytes using OpenAI CLIP naming.
+        fn serialize_vit(
+            model: &Vit<CpuBackend>,
+            config: &VitConfig,
+            prefix: &str,
+        ) -> Vec<u8> {
+            let d = config.embed_dim;
+            let d_ff = config.d_ff();
+            let mut entries: Vec<(String, F32View)> = Vec::new();
+
+            // Patch embed: proj [d, C*P*P] — same flat layout as conv1.weight [d, C, P, P]
+            entries.push((
+                format!("{prefix}conv1.weight"),
+                F32View::new(&model.patch_embed.proj.to_vec(), model.patch_embed.proj.shape.dims()),
+            ));
+
+            // CLS token: our [1, d] → CLIP stores as [d]
+            entries.push((
+                format!("{prefix}class_embedding"),
+                F32View::new(&model.cls_token.to_vec(), &[d]),
+            ));
+
+            // Positional embedding
+            entries.push((
+                format!("{prefix}positional_embedding"),
+                F32View::new(&model.pos_embed.to_vec(), model.pos_embed.shape.dims()),
+            ));
+
+            // Blocks
+            for (i, block) in model.blocks.iter().enumerate() {
+                let bp = format!("{prefix}transformer.resblocks.{i}");
+
+                entries.push((format!("{bp}.ln_1.weight"), F32View::new(&block.ln1_gamma.to_vec(), &[d])));
+                entries.push((format!("{bp}.ln_1.bias"), F32View::new(&block.ln1_beta.to_vec(), &[d])));
+
+                // qkv_weight: our [d, 3d] → CLIP in_proj_weight [3d, d] (transpose)
+                let qkv_t = crate::checkpoint::transpose_2d(&block.attn.qkv_weight.to_vec(), d, 3 * d);
+                entries.push((format!("{bp}.attn.in_proj_weight"), F32View::new(&qkv_t, &[3 * d, d])));
+                entries.push((format!("{bp}.attn.in_proj_bias"), F32View::new(&block.attn.qkv_bias.to_vec(), &[3 * d])));
+
+                // proj_weight: our [d, d] → CLIP out_proj.weight [d, d] (transpose)
+                let proj_t = crate::checkpoint::transpose_2d(&block.attn.proj_weight.to_vec(), d, d);
+                entries.push((format!("{bp}.attn.out_proj.weight"), F32View::new(&proj_t, &[d, d])));
+                entries.push((format!("{bp}.attn.out_proj.bias"), F32View::new(&block.attn.proj_bias.to_vec(), &[d])));
+
+                entries.push((format!("{bp}.ln_2.weight"), F32View::new(&block.ln2_gamma.to_vec(), &[d])));
+                entries.push((format!("{bp}.ln_2.bias"), F32View::new(&block.ln2_beta.to_vec(), &[d])));
+
+                // fc1: our [d, d_ff] → CLIP c_fc.weight [d_ff, d] (transpose)
+                let fc1_t = crate::checkpoint::transpose_2d(&block.mlp.fc1_weight.to_vec(), d, d_ff);
+                entries.push((format!("{bp}.mlp.c_fc.weight"), F32View::new(&fc1_t, &[d_ff, d])));
+                entries.push((format!("{bp}.mlp.c_fc.bias"), F32View::new(&block.mlp.fc1_bias.to_vec(), &[d_ff])));
+
+                // fc2: our [d_ff, d] → CLIP c_proj.weight [d, d_ff] (transpose)
+                let fc2_t = crate::checkpoint::transpose_2d(&block.mlp.fc2_weight.to_vec(), d_ff, d);
+                entries.push((format!("{bp}.mlp.c_proj.weight"), F32View::new(&fc2_t, &[d, d_ff])));
+                entries.push((format!("{bp}.mlp.c_proj.bias"), F32View::new(&block.mlp.fc2_bias.to_vec(), &[d])));
+            }
+
+            // LN post
+            entries.push((format!("{prefix}ln_post.weight"), F32View::new(&model.ln_post_gamma.to_vec(), &[d])));
+            entries.push((format!("{prefix}ln_post.bias"), F32View::new(&model.ln_post_beta.to_vec(), &[d])));
+
+            let info: Option<HashMap<String, String>> = None;
+            safetensors::serialize(entries, &info).unwrap()
+        }
+
+        fn tensors_equal(a: &Tensor<CpuBackend>, b: &Tensor<CpuBackend>, name: &str) {
+            assert_eq!(a.shape.dims(), b.shape.dims(), "shape mismatch for {name}");
+            for (i, (x, y)) in a.to_vec().iter().zip(b.to_vec().iter()).enumerate() {
+                assert!((x - y).abs() < 1e-5, "{name}[{i}]: {x} vs {y}");
+            }
+        }
+
+        #[test]
+        fn roundtrip_vit_small() {
+            let config = VitConfig {
+                image_size: 32,
+                patch_size: 16,
+                embed_dim: 64,
+                num_heads: 4,
+                num_layers: 2,
+                mlp_ratio: 4.0,
+                in_channels: 3,
+            };
+            let original = Vit::<CpuBackend>::new(config.clone());
+
+            let bytes = serialize_vit(&original, &config, "");
+            let tensors = safetensors::SafeTensors::deserialize(&bytes).unwrap();
+            let loaded = Vit::<CpuBackend>::from_safetensors(config, &tensors, "").unwrap();
+
+            // Compare key tensors
+            tensors_equal(&original.patch_embed.proj, &loaded.patch_embed.proj, "patch_embed.proj");
+            tensors_equal(&original.cls_token, &loaded.cls_token, "cls_token");
+            tensors_equal(&original.pos_embed, &loaded.pos_embed, "pos_embed");
+            tensors_equal(&original.ln_post_gamma, &loaded.ln_post_gamma, "ln_post.gamma");
+            tensors_equal(&original.ln_post_beta, &loaded.ln_post_beta, "ln_post.beta");
+
+            for (i, (a, b)) in original.blocks.iter().zip(loaded.blocks.iter()).enumerate() {
+                tensors_equal(&a.attn.qkv_weight, &b.attn.qkv_weight, &format!("block{i}.qkv_w"));
+                tensors_equal(&a.attn.proj_weight, &b.attn.proj_weight, &format!("block{i}.proj_w"));
+                tensors_equal(&a.mlp.fc1_weight, &b.mlp.fc1_weight, &format!("block{i}.fc1_w"));
+                tensors_equal(&a.mlp.fc2_weight, &b.mlp.fc2_weight, &format!("block{i}.fc2_w"));
+                tensors_equal(&a.ln1_gamma, &b.ln1_gamma, &format!("block{i}.ln1_g"));
+                tensors_equal(&a.ln2_gamma, &b.ln2_gamma, &format!("block{i}.ln2_g"));
+            }
+        }
+
+        #[test]
+        fn roundtrip_vit_with_prefix() {
+            // Simulate CLIP visual.* prefix
+            let config = VitConfig {
+                image_size: 32,
+                patch_size: 16,
+                embed_dim: 64,
+                num_heads: 4,
+                num_layers: 1,
+                mlp_ratio: 4.0,
+                in_channels: 3,
+            };
+            let original = Vit::<CpuBackend>::new(config.clone());
+
+            let bytes = serialize_vit(&original, &config, "visual.");
+            let tensors = safetensors::SafeTensors::deserialize(&bytes).unwrap();
+            let loaded = Vit::<CpuBackend>::from_safetensors(config, &tensors, "visual.").unwrap();
+
+            tensors_equal(&original.patch_embed.proj, &loaded.patch_embed.proj, "proj");
+            tensors_equal(&original.cls_token, &loaded.cls_token, "cls");
+            tensors_equal(&original.blocks[0].attn.qkv_weight, &loaded.blocks[0].attn.qkv_weight, "qkv");
+        }
     }
 }
