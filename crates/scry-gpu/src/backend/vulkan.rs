@@ -101,6 +101,7 @@ pub struct VulkanBackend {
     state: Arc<SharedState>,
     device_name: String,
     device_memory: u64,
+    subgroup_size: u32,
 }
 
 /// A buffer allocated on the Vulkan device.
@@ -589,6 +590,10 @@ impl Backend for VulkanBackend {
     fn device_memory(&self) -> u64 {
         self.device_memory
     }
+
+    fn subgroup_size(&self) -> u32 {
+        self.subgroup_size
+    }
 }
 
 // ── Initialization ──
@@ -638,6 +643,13 @@ impl VulkanBackend {
         let device_name = CStr::from_ptr(props.device_name.as_ptr())
             .to_string_lossy()
             .into_owned();
+
+        // Query subgroup properties (core in Vulkan 1.1+)
+        let mut subgroup_props = vk::PhysicalDeviceSubgroupProperties::default();
+        let mut props2 = vk::PhysicalDeviceProperties2::default()
+            .push_next(&mut subgroup_props);
+        instance.get_physical_device_properties2(physical_device, &mut props2);
+        let subgroup_size = subgroup_props.subgroup_size;
 
         let mem_props = instance.get_physical_device_memory_properties(physical_device);
         let device_memory: u64 = mem_props.memory_heaps
@@ -709,6 +721,7 @@ impl VulkanBackend {
             state,
             device_name,
             device_memory,
+            subgroup_size,
         })
     }
 }

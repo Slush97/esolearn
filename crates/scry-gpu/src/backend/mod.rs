@@ -58,6 +58,11 @@ pub trait Backend: Sized {
 
     /// Total device memory in bytes (best estimate).
     fn device_memory(&self) -> u64;
+
+    /// Subgroup (warp/wavefront) size.
+    ///
+    /// Typically 32 on NVIDIA, 64 on AMD, 32 on Intel.
+    fn subgroup_size(&self) -> u32;
 }
 
 /// Operations available on a backend buffer.

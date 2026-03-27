@@ -297,6 +297,17 @@ impl Device {
         }
     }
 
+    /// Subgroup (warp/wavefront) size.
+    ///
+    /// Typically 32 on NVIDIA, 64 on AMD, 32 on Intel.
+    /// Useful for sizing subgroup-aware shaders.
+    pub fn subgroup_size(&self) -> u32 {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => b.subgroup_size(),
+        }
+    }
+
     // ── private helpers ──
 
     fn upload_raw(&self, data: &[u8]) -> Result<BackendBuffer> {
