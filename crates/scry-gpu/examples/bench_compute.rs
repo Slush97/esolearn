@@ -45,6 +45,45 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }";
 
+/// Subgroup-accelerated reduction: subgroupAdd within warps, then shared
+/// memory to collect warp partial sums, then one more subgroupAdd.
+/// Eliminates the log2(256) shared-memory reduction iterations.
+const REDUCE_SUBGROUP_SHADER: &str = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+var<workgroup> partials: array<f32, 32>;
+
+@compute @workgroup_size(256)
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(subgroup_invocation_id) lane: u32,
+    @builtin(subgroup_id) sg_id: u32,
+    @builtin(subgroup_size) sg_size: u32,
+) {
+    let val = select(0.0, input[gid.x], gid.x < arrayLength(&input));
+
+    // Warp-level reduction (no shared memory needed)
+    let warp_sum = subgroupAdd(val);
+
+    // Lane 0 of each subgroup writes partial sum
+    if lane == 0u {
+        partials[sg_id] = warp_sum;
+    }
+    workgroupBarrier();
+
+    // First subgroup reduces the collected partial sums
+    let num_subgroups = 256u / sg_size;
+    if sg_id == 0u {
+        let p = select(0.0, partials[lane], lane < num_subgroups);
+        let total = subgroupAdd(p);
+        if lane == 0u {
+            output[wid.x] = total;
+        }
+    }
+}";
+
 const REDUCE_SHADER: &str = "\
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -317,48 +356,62 @@ fn bench_saxpy(gpu: &Device) {
 // ── Reduction (multi-pass, kernel reuse) ────────────────────────────────────
 
 fn bench_reduce(gpu: &Device) {
-    println!("═══ Reduction (sum) — multi-pass kernel reuse ═══");
+    println!("═══ Reduction (sum) — shared-memory vs subgroup ═══");
+    println!("  subgroup_size = {}", gpu.subgroup_size());
 
-    let kernel = gpu.compile(REDUCE_SHADER).expect("compile failed");
+    let shmem = gpu.compile(REDUCE_SHADER).expect("compile shmem reduce");
+    let subgroup = gpu.compile(REDUCE_SUBGROUP_SHADER).expect("compile subgroup reduce");
 
     for &n in &[1_000_000u32, 4_000_000, 16_000_000] {
         let iters: u32 = 100;
         let data: Vec<f32> = vec![1.0; n as usize];
         let input = gpu.upload(&data).expect("upload");
-
-        // warmup + correctness check
-        let result = reduce_sum_sync(gpu, &kernel, &input, n);
         let expected = n as f32;
+
+        // correctness check for both variants
+        let result_shmem = reduce_sum_batched(gpu, &shmem, &input, n);
         assert!(
-            (result - expected).abs() / expected < 1e-3,
-            "reduction: got {result}, expected {expected}"
+            (result_shmem - expected).abs() / expected < 1e-3,
+            "shmem reduction: got {result_shmem}, expected {expected}"
+        );
+        let result_sg = reduce_sum_batched(gpu, &subgroup, &input, n);
+        assert!(
+            (result_sg - expected).abs() / expected < 1e-3,
+            "subgroup reduction: got {result_sg}, expected {expected}"
         );
 
         let passes = count_passes(n);
         let bytes = n as f64 * 4.0;
 
-        // ── Sync (fence per pass) ──
-        let start = Instant::now();
-        for _ in 0..iters {
-            reduce_sum_sync(gpu, &kernel, &input, n);
+        println!("  n = {:>3}  ({passes} passes)", fmt_count(n));
+
+        for (name, kernel) in [("shmem   ", &shmem), ("subgroup", &subgroup)] {
+            // warmup
+            reduce_sum_batched(gpu, kernel, &input, n);
+
+            // ── Sync (fence per pass) ──
+            let start = Instant::now();
+            for _ in 0..iters {
+                reduce_sum_sync(gpu, kernel, &input, n);
+            }
+            let sync_per = start.elapsed() / iters;
+            let sync_gbps = bytes / sync_per.as_secs_f64() / 1e9;
+
+            // ── Batched (one fence for all passes) ──
+            let start = Instant::now();
+            for _ in 0..iters {
+                reduce_sum_batched(gpu, kernel, &input, n);
+            }
+            let batch_per = start.elapsed() / iters;
+            let batch_gbps = bytes / batch_per.as_secs_f64() / 1e9;
+
+            let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
+
+            println!(
+                "    {name}  sync {:>7.2?} {:>5.1} GB/s  │  batch {:>7.2?} {:>5.1} GB/s  ({speedup:.1}x)",
+                sync_per, sync_gbps, batch_per, batch_gbps
+            );
         }
-        let sync_per = start.elapsed() / iters;
-        let sync_gbps = bytes / sync_per.as_secs_f64() / 1e9;
-
-        // ── Batched (one fence for all passes) ──
-        let start = Instant::now();
-        for _ in 0..iters {
-            reduce_sum_batched(gpu, &kernel, &input, n);
-        }
-        let batch_per = start.elapsed() / iters;
-        let batch_gbps = bytes / batch_per.as_secs_f64() / 1e9;
-
-        let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
-
-        println!(
-            "  n = {:>3}  sync {:>7.2?} {:>5.1} GB/s  │  batch {:>7.2?} {:>5.1} GB/s  ({speedup:.1}x, {passes}p)",
-            fmt_count(n), sync_per, sync_gbps, batch_per, batch_gbps
-        );
     }
     println!();
 }

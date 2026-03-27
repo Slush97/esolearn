@@ -645,6 +645,92 @@ fn batch_fluent_api() {
     assert_eq!(output.download().unwrap(), vec![20.0]); // 5 * 2 * 2
 }
 
+// ── Subgroup operations ──
+
+#[test]
+fn subgroup_size_is_nonzero() {
+    let gpu = gpu();
+    let sg = gpu.subgroup_size();
+    assert!(sg > 0, "subgroup_size should be > 0, got {sg}");
+    assert!(sg.is_power_of_two(), "subgroup_size should be power of 2, got {sg}");
+}
+
+#[test]
+fn subgroup_reduction_sum() {
+    // Single-pass reduction using subgroupAdd.
+    // Each workgroup: subgroupAdd within warps → shared memory collect → subgroupAdd again.
+    let gpu = gpu();
+
+    let shader = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+var<workgroup> partials: array<f32, 32>;
+
+@compute @workgroup_size(256)
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(subgroup_invocation_id) lane: u32,
+    @builtin(subgroup_id) sg_id: u32,
+    @builtin(subgroup_size) sg_size: u32,
+) {
+    // Load (0 for out-of-bounds threads)
+    let val = select(0.0, input[gid.x], gid.x < arrayLength(&input));
+
+    // Warp-level reduction
+    let warp_sum = subgroupAdd(val);
+
+    // Lane 0 of each subgroup writes its partial sum to shared memory
+    if lane == 0u {
+        partials[sg_id] = warp_sum;
+    }
+    workgroupBarrier();
+
+    // First subgroup reduces the partial sums
+    let num_subgroups = 256u / sg_size;
+    if sg_id == 0u {
+        let p = select(0.0, partials[lane], lane < num_subgroups);
+        let total = subgroupAdd(p);
+        if lane == 0u {
+            output[wid.x] = total;
+        }
+    }
+}";
+
+    let kernel = gpu.compile(shader).expect("compile subgroup reduce");
+
+    // Test: sum of 1024 ones = 1024
+    let n: u32 = 1024;
+    let data: Vec<f32> = vec![1.0; n as usize];
+    let input = gpu.upload(&data).unwrap();
+    let output = gpu.alloc::<f32>((n.div_ceil(256)) as usize).unwrap();
+
+    gpu.run(&kernel, &[&input, &output], n).unwrap();
+
+    let result = output.download().unwrap();
+    let total: f32 = result.iter().sum();
+    assert!(
+        (total - 1024.0).abs() < 0.01,
+        "expected 1024.0, got {total} (partials: {result:?})"
+    );
+
+    // Test: sum of 0..256 = 256*255/2 = 32640
+    let data2: Vec<f32> = (0..256).map(|i| i as f32).collect();
+    let input2 = gpu.upload(&data2).unwrap();
+    let output2 = gpu.alloc::<f32>(1).unwrap();
+
+    gpu.run(&kernel, &[&input2, &output2], 256).unwrap();
+
+    let result2 = output2.download().unwrap();
+    assert!(
+        (result2[0] - 32640.0).abs() < 1.0,
+        "expected 32640.0, got {}",
+        result2[0]
+    );
+}
+
 // ── Push constants ──
 
 #[test]
