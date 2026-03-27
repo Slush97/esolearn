@@ -270,3 +270,155 @@ fn kernel_metadata() {
     assert_eq!(kernel.binding_count(), 2);
     assert_eq!(kernel.workgroup_size(), [64, 1, 1]);
 }
+
+// ── Scale + edge-case tests ──
+
+#[test]
+fn scale_100k_elements() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let n = 100_000;
+    let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+    let input = gpu.upload(&data).expect("upload failed");
+    let output = gpu.alloc::<f32>(n).expect("alloc failed");
+
+    gpu.run(&kernel, &[&input, &output], n as u32)
+        .expect("run failed");
+
+    let result: Vec<f32> = output.download().expect("download failed");
+    assert_eq!(result.len(), n);
+
+    // Spot-check a handful of indices rather than comparing 100K floats.
+    for &i in &[0, 1, 999, 50_000, 99_999] {
+        let expected = data[i] * 2.0;
+        assert!(
+            (result[i] - expected).abs() < f32::EPSILON,
+            "mismatch at {i}: got {}, expected {expected}",
+            result[i]
+        );
+    }
+}
+
+#[test]
+fn scale_500k_elements() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let n = 500_000;
+    let data: Vec<f32> = (0..n).map(|i| (i as f32) * 0.001).collect();
+    let input = gpu.upload(&data).expect("upload failed");
+    let output = gpu.alloc::<f32>(n).expect("alloc failed");
+
+    gpu.run(&kernel, &[&input, &output], n as u32)
+        .expect("run failed");
+
+    let result: Vec<f32> = output.download().expect("download failed");
+    assert_eq!(result.len(), n);
+
+    for &i in &[0, 1, n / 2, n - 1] {
+        let expected = data[i] * 2.0;
+        assert!(
+            (result[i] - expected).abs() < 0.001,
+            "mismatch at {i}: got {}, expected {expected}",
+            result[i]
+        );
+    }
+}
+
+#[test]
+fn workgroup_boundary_alignment() {
+    // Test sizes that are NOT multiples of workgroup_size (64).
+    // Ensures the bounds check in the shader + dispatch ceiling work correctly.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    for n in [1, 2, 63, 65, 127, 128, 129, 255, 257] {
+        let data: Vec<f32> = (0..n).map(|i| i as f32 + 1.0).collect();
+        let input = gpu.upload(&data).expect("upload failed");
+        let output = gpu.alloc::<f32>(n).expect("alloc failed");
+
+        gpu.run(&kernel, &[&input, &output], n as u32)
+            .unwrap_or_else(|e| panic!("run failed for n={n}: {e}"));
+
+        let result: Vec<f32> = output.download().expect("download failed");
+        assert_eq!(result.len(), n, "wrong length for n={n}");
+
+        // Check first and last element.
+        assert!(
+            (result[0] - data[0] * 2.0).abs() < f32::EPSILON,
+            "first element wrong for n={n}"
+        );
+        assert!(
+            (result[n - 1] - data[n - 1] * 2.0).abs() < f32::EPSILON,
+            "last element wrong for n={n}"
+        );
+    }
+}
+
+#[test]
+fn single_element_buffer() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[42.0f32]).expect("upload failed");
+    let output = gpu.alloc::<f32>(1).expect("alloc failed");
+
+    gpu.run(&kernel, &[&input, &output], 1).expect("run failed");
+
+    let result: Vec<f32> = output.download().expect("download failed");
+    assert_eq!(result, vec![84.0]);
+}
+
+// ── Push constants ──
+
+#[test]
+fn push_constants_scale_factor() {
+    let gpu = gpu();
+
+    let shader = "\
+struct Params {
+    scale: f32,
+}
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+var<push_constant> params: Params;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] * params.scale;
+    }
+}";
+
+    let kernel = gpu.compile(shader).expect("compile failed");
+    let data = [1.0f32, 2.0, 3.0, 4.0];
+    let input = gpu.upload(&data).expect("upload failed");
+
+    // Run with scale = 10.0
+    let output = gpu.alloc::<f32>(4).expect("alloc failed");
+    gpu.run_with_push_constants(
+        &kernel,
+        &[&input, &output],
+        4,
+        &10.0f32.to_ne_bytes(),
+    )
+    .expect("run failed");
+
+    let result: Vec<f32> = output.download().expect("download failed");
+    assert_eq!(result, vec![10.0, 20.0, 30.0, 40.0]);
+
+    // Same kernel, different scale = 0.5
+    let output2 = gpu.alloc::<f32>(4).expect("alloc failed");
+    gpu.run_with_push_constants(
+        &kernel,
+        &[&input, &output2],
+        4,
+        &0.5f32.to_ne_bytes(),
+    )
+    .expect("run failed");
+
+    let result2: Vec<f32> = output2.download().expect("download failed");
+    assert_eq!(result2, vec![0.5, 1.0, 1.5, 2.0]);
+}

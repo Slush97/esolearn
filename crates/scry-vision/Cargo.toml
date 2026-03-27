@@ -1,0 +1,37 @@
+[package]
+name = "scry-vision"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "High-level vision inference toolkit — image preprocessing, model loading, and pre-built pipelines"
+
+[features]
+default = []
+cuda = ["scry-llm/cuda"]
+blas = ["scry-llm/blas"]
+mkl = ["scry-llm/mkl"]
+wgpu = ["scry-llm/wgpu"]
+safetensors = ["dep:safetensors", "dep:memmap2", "dep:half"]
+onnx = ["dep:ort"]
+gpu-preprocess = ["dep:scry-gpu"]
+decode = ["dep:image"]
+
+[dependencies]
+scry-llm = { path = "../scry-llm", default-features = false }
+scry-gpu = { path = "../scry-gpu", optional = true }
+thiserror = "2"
+rayon = "1"
+safetensors = { version = "0.4", optional = true }
+memmap2 = { version = "0.9", optional = true }
+half = { version = "2", features = ["num-traits"], optional = true }
+ort = { version = "2.0.0-rc.12", optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
+
+[dev-dependencies]
+scry-learn = { path = "../scry-learn" }
+
+[lints]
+workspace = true
