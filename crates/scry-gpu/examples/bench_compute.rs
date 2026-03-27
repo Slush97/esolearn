@@ -276,6 +276,94 @@ fn main(
     }
 }";
 
+/// Large-tile matmul: 128×128 output tile, 32×32 workgroup, 4×4 per thread.
+///
+/// Same 16-accumulator register budget as the 64×64 coarsened kernel, but
+/// 4× the threads (1024 vs 256) gives 4× the output tile area.
+/// Arithmetic intensity: 32 FLOP/byte (2× over 64×64).
+/// K-tile = 16 to match the 64×64 kernel's barrier cadence.
+/// A[128×16] padded stride 17 + B[16×128] = ~16.6 KB shared memory.
+const MATMUL_LARGE_SHADER: &str = "\
+struct Dims { M: u32, N: u32, K: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> A: array<f32>;
+@group(0) @binding(1) var<storage, read> B: array<f32>;
+@group(0) @binding(2) var<storage, read_write> C: array<f32>;
+
+var<workgroup> sa: array<f32, 2176>;
+var<workgroup> sb: array<f32, 2048>;
+
+@compute @workgroup_size(32, 32)
+fn main(
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(local_invocation_index) li: u32,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    let block_row = wid.y * 128u;
+    let block_col = wid.x * 128u;
+    let tr = lid.y * 4u;
+    let tc = lid.x * 4u;
+
+    var acc: array<f32, 16>;
+    for (var i = 0u; i < 16u; i++) { acc[i] = 0.0; }
+
+    let num_k_tiles = (dims.K + 15u) / 16u;
+
+    for (var kt = 0u; kt < num_k_tiles; kt++) {
+        // Load A[128×16]: 2048 elements, 2 per thread, padded stride 17
+        for (var x = 0u; x < 2u; x++) {
+            let flat = li * 2u + x;
+            let r = flat / 16u;
+            let c = flat % 16u;
+            let gr = block_row + r;
+            let gc = kt * 16u + c;
+            if gr < dims.M && gc < dims.K {
+                sa[r * 17u + c] = A[gr * dims.K + gc];
+            } else {
+                sa[r * 17u + c] = 0.0;
+            }
+        }
+
+        // Load B[16×128]: 2048 elements, 2 per thread
+        for (var x = 0u; x < 2u; x++) {
+            let flat = li * 2u + x;
+            let r = flat / 128u;
+            let c = flat % 128u;
+            let gr = kt * 16u + r;
+            let gc = block_col + c;
+            if gr < dims.K && gc < dims.N {
+                sb[flat] = B[gr * dims.N + gc];
+            } else {
+                sb[flat] = 0.0;
+            }
+        }
+
+        workgroupBarrier();
+
+        for (var k = 0u; k < 16u; k++) {
+            for (var i = 0u; i < 4u; i++) {
+                let a_val = sa[(tr + i) * 17u + k];
+                for (var j = 0u; j < 4u; j++) {
+                    acc[i * 4u + j] += a_val * sb[k * 128u + tc + j];
+                }
+            }
+        }
+
+        workgroupBarrier();
+    }
+
+    for (var i = 0u; i < 4u; i++) {
+        for (var j = 0u; j < 4u; j++) {
+            let gr = block_row + tr + i;
+            let gc = block_col + tc + j;
+            if gr < dims.M && gc < dims.N {
+                C[gr * dims.N + gc] = acc[i * 4u + j];
+            }
+        }
+    }
+}";
+
 fn main() {
     let gpu = Device::auto().expect("no GPU found");
     println!(
@@ -471,7 +559,8 @@ fn count_passes(mut n: u32) -> u32 {
 struct MatmulKernel {
     name: &'static str,
     kernel: Kernel,
-    tile: u32, // output tile dimension (0 = 1D dispatch)
+    tile_m: u32, // output tile rows (0 = 1D dispatch)
+    tile_n: u32, // output tile cols (0 = 1D dispatch)
 }
 
 fn bench_matmul(gpu: &Device) {
@@ -481,17 +570,26 @@ fn bench_matmul(gpu: &Device) {
         MatmulKernel {
             name: "naive",
             kernel: gpu.compile(MATMUL_NAIVE_SHADER).expect("compile naive"),
-            tile: 0,
+            tile_m: 0,
+            tile_n: 0,
         },
         MatmulKernel {
             name: "tiled 16×16",
             kernel: gpu.compile(MATMUL_TILED_SHADER).expect("compile tiled"),
-            tile: 16,
+            tile_m: 16,
+            tile_n: 16,
         },
         MatmulKernel {
             name: "coarse 4×4",
             kernel: gpu.compile(MATMUL_COARSE_SHADER).expect("compile coarse"),
-            tile: 64,
+            tile_m: 64,
+            tile_n: 64,
+        },
+        MatmulKernel {
+            name: "large 128×128",
+            kernel: gpu.compile(MATMUL_LARGE_SHADER).expect("compile large"),
+            tile_m: 128,
+            tile_n: 128,
         },
     ];
 
@@ -513,7 +611,11 @@ fn bench_matmul(gpu: &Device) {
 
         for v in &variants {
             // Skip naive at 4096 (exceeds 1D dispatch limit of 65535 workgroups)
-            if v.tile == 0 && n > 2048 {
+            if v.tile_m == 0 && n > 2048 {
+                continue;
+            }
+            // Skip large tiles for small matrices
+            if v.tile_m >= 128 && n < 1024 {
                 continue;
             }
 
@@ -547,14 +649,15 @@ fn dispatch_matmul(
     n: u32,
     pc: &[u8],
 ) {
-    if v.tile == 0 {
+    if v.tile_m == 0 {
         // 1D dispatch (naive)
         gpu.run_with_push_constants(&v.kernel, &[a, b, c], n * n, pc)
             .expect("run");
     } else {
         // 2D dispatch (tiled/coarsened)
-        let wg = n.div_ceil(v.tile);
-        gpu.run_configured(&v.kernel, &[a, b, c], [wg, wg, 1], Some(pc))
+        let wg_y = n.div_ceil(v.tile_m);
+        let wg_x = n.div_ceil(v.tile_n);
+        gpu.run_configured(&v.kernel, &[a, b, c], [wg_x, wg_y, 1], Some(pc))
             .expect("run");
     }
 }
