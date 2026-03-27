@@ -25,6 +25,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }";
 
+/// Vec4 SAXPY: each thread processes 4 elements via vec4<f32> loads/stores.
+/// Buffer layout is identical (contiguous f32s) — the shader just reinterprets
+/// them as vec4<f32>, issuing 128-bit loads instead of 32-bit.
+/// Dispatch n/4 invocations (all benchmark sizes are divisible by 4).
+const SAXPY_VEC4_SHADER: &str = "\
+struct Params { alpha: f32 }
+var<push_constant> params: Params;
+
+@group(0) @binding(0) var<storage, read> a: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read> b: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read_write> out: array<vec4<f32>>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&a) {
+        out[i] = params.alpha * a[i] + b[i];
+    }
+}";
+
 const REDUCE_SHADER: &str = "\
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -235,7 +255,8 @@ fn main() {
 fn bench_saxpy(gpu: &Device) {
     println!("═══ SAXPY: out = α·a + b (bandwidth-bound) ═══");
 
-    let kernel = gpu.compile(SAXPY_SHADER).expect("compile failed");
+    let scalar = gpu.compile(SAXPY_SHADER).expect("compile scalar");
+    let vec4 = gpu.compile(SAXPY_VEC4_SHADER).expect("compile vec4");
     let alpha: f32 = 2.0;
     let pc = bytemuck::bytes_of(&alpha);
 
@@ -251,37 +272,44 @@ fn bench_saxpy(gpu: &Device) {
         // 2 reads + 1 write = 12 bytes per element
         let bytes = 3.0 * n as f64 * 4.0;
 
-        // warmup
-        gpu.run_with_push_constants(&kernel, &[&a, &b, &out], n, pc)
-            .expect("warmup");
+        println!("  n = {:>3}", fmt_count(n));
 
-        // ── Per-dispatch (sync fence each time) ──
-        let start = Instant::now();
-        for _ in 0..iters {
-            gpu.run_with_push_constants(&kernel, &[&a, &b, &out], n, pc)
-                .expect("run");
+        for (name, kernel, invocations) in [
+            ("scalar", &scalar, n),
+            ("vec4  ", &vec4, n / 4),
+        ] {
+            // warmup
+            gpu.run_with_push_constants(kernel, &[&a, &b, &out], invocations, pc)
+                .expect("warmup");
+
+            // ── Per-dispatch (sync fence each time) ──
+            let start = Instant::now();
+            for _ in 0..iters {
+                gpu.run_with_push_constants(kernel, &[&a, &b, &out], invocations, pc)
+                    .expect("run");
+            }
+            let sync_per = start.elapsed() / iters;
+            let sync_gbps = bytes / sync_per.as_secs_f64() / 1e9;
+
+            // ── Batched (one fence for all dispatches) ──
+            let start = Instant::now();
+            let mut batch = gpu.batch().expect("batch");
+            for _ in 0..iters {
+                batch
+                    .run_with_push_constants(kernel, &[&a, &b, &out], invocations, pc)
+                    .expect("batch run");
+            }
+            batch.submit().expect("batch submit");
+            let batch_per = start.elapsed() / iters;
+            let batch_gbps = bytes / batch_per.as_secs_f64() / 1e9;
+
+            let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
+
+            println!(
+                "    {name}  sync {:>7.2?} {:>5.0} GB/s  │  batch {:>7.2?} {:>5.0} GB/s  ({speedup:.1}x)",
+                sync_per, sync_gbps, batch_per, batch_gbps
+            );
         }
-        let sync_per = start.elapsed() / iters;
-        let sync_gbps = bytes / sync_per.as_secs_f64() / 1e9;
-
-        // ── Batched (one fence for all dispatches) ──
-        let start = Instant::now();
-        let mut batch = gpu.batch().expect("batch");
-        for _ in 0..iters {
-            batch
-                .run_with_push_constants(&kernel, &[&a, &b, &out], n, pc)
-                .expect("batch run");
-        }
-        batch.submit().expect("batch submit");
-        let batch_per = start.elapsed() / iters;
-        let batch_gbps = bytes / batch_per.as_secs_f64() / 1e9;
-
-        let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
-
-        println!(
-            "  n = {:>3}  sync {:>7.2?} {:>5.0} GB/s  │  batch {:>7.2?} {:>5.0} GB/s  ({speedup:.1}x)",
-            fmt_count(n), sync_per, sync_gbps, batch_per, batch_gbps
-        );
     }
     println!();
 }
