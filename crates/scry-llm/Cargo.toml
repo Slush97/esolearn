@@ -17,9 +17,8 @@ tokenizer = ["dep:serde_json"]
 blas = ["dep:cblas-sys"]
 mkl = ["dep:cblas-sys"]
 dnnl = []
-wgpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 scry-gpu = ["dep:scry-gpu", "dep:bytemuck"]
-auto = ["blas", "wgpu"]
+auto = ["blas", "scry-gpu"]
 quantize = []
 
 [dependencies]
@@ -27,8 +26,6 @@ cudarc = { version = "0.19", features = ["cublas", "nvrtc", "cuda-13010"], optio
 half = { version = "2", optional = true }
 safetensors = { version = "0.4", optional = true }
 cblas-sys = { version = "0.1", optional = true }
-wgpu = { version = "24", optional = true }
-pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 scry-gpu = { path = "../scry-gpu", optional = true }
 arrayvec = "0.7"

@@ -17,7 +17,6 @@ default = []
 experimental = []
 csv = ["dep:csv"]
 serde = ["dep:serde"]
-gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 scry-gpu = ["dep:scry-gpu", "dep:bytemuck"]
 polars = ["dep:polars"]
 mmap = ["dep:memmap2", "dep:bytemuck"]
@@ -28,11 +27,8 @@ rayon = "1"
 csv = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 
-# Optional: GPU acceleration via wgpu compute shaders
-wgpu = { version = "24", optional = true }
-# Optional: GPU acceleration via scry-gpu (Vulkan compute, replaces wgpu)
+# Optional: GPU acceleration via scry-gpu (Vulkan compute)
 scry-gpu = { path = "../scry-gpu", optional = true }
-pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 
 # Optional: Polars DataFrame interop

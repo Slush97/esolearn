@@ -75,9 +75,9 @@ fn build_histograms(
     n_features: usize,
 ) -> Vec<FeatureHistogram> {
     // Try GPU-accelerated path when the feature is enabled.
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "scry-gpu")]
     {
-        if let Ok(gpu) = crate::accel::GpuBackend::new() {
+        if let Ok(gpu) = crate::accel::ScryGpuBackend::new() {
             use crate::accel::ComputeBackend;
             let accel_hists = gpu.build_histograms(
                 binned,

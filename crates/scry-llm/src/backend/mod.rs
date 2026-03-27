@@ -5,8 +5,6 @@ pub mod cuda;
 pub mod kernels;
 #[cfg(feature = "scry-gpu")]
 pub mod scry_gpu;
-#[cfg(feature = "wgpu")]
-pub mod wgpu;
 
 use crate::tensor::shape::Shape;
 

@@ -10,10 +10,10 @@ compile_error!("This benchmark requires --features safetensors");
 use std::path::PathBuf;
 use std::time::Instant;
 
-#[cfg(not(feature = "wgpu"))]
+#[cfg(not(feature = "scry-gpu"))]
 use scry_llm::backend::cpu::CpuBackend as Backend;
-#[cfg(feature = "wgpu")]
-use scry_llm::backend::wgpu::WgpuBackend as Backend;
+#[cfg(feature = "scry-gpu")]
+use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
@@ -59,13 +59,13 @@ fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║           scry-stt Cold-Start Benchmark (whisper-tiny)      ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
-    #[cfg(feature = "wgpu")]
-    println!("  Backend: WGPU (GPU compute)");
-    #[cfg(all(feature = "mkl", not(feature = "wgpu")))]
+    #[cfg(feature = "scry-gpu")]
+    println!("  Backend: scry-gpu (Vulkan compute)");
+    #[cfg(all(feature = "mkl", not(feature = "scry-gpu")))]
     println!("  Backend: MKL (Intel Math Kernel Library)");
-    #[cfg(all(feature = "blas", not(any(feature = "wgpu", feature = "mkl"))))]
+    #[cfg(all(feature = "blas", not(any(feature = "scry-gpu", feature = "mkl"))))]
     println!("  Backend: BLAS (OpenBLAS)");
-    #[cfg(not(any(feature = "blas", feature = "mkl", feature = "wgpu")))]
+    #[cfg(not(any(feature = "blas", feature = "mkl", feature = "scry-gpu")))]
     println!("  Backend: CPU (tiled + rayon)");
     println!();
 

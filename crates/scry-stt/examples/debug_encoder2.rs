@@ -6,10 +6,10 @@ compile_error!("Requires --features safetensors");
 
 use std::path::PathBuf;
 
-#[cfg(not(feature = "wgpu"))]
+#[cfg(not(feature = "scry-gpu"))]
 use scry_llm::backend::cpu::CpuBackend as Backend;
-#[cfg(feature = "wgpu")]
-use scry_llm::backend::wgpu::WgpuBackend as Backend;
+#[cfg(feature = "scry-gpu")]
+use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 

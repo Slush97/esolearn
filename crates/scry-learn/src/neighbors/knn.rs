@@ -1301,7 +1301,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "gpu"))]
+#[cfg(all(test, feature = "scry-gpu"))]
 mod gpu_tests {
     use super::*;
 
