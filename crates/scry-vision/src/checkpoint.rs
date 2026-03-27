@@ -117,6 +117,7 @@ pub fn load_conv2d<B: MathBackend>(
         stride,
         padding,
         workspace: RefCell::new(Vec::new()),
+        winograd_weight: RefCell::new(None),
     })
 }
 
