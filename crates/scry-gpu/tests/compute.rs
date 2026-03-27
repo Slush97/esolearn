@@ -142,3 +142,131 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let msg = format!("{err}");
     assert!(msg.contains("mismatch"), "expected binding mismatch error, got: {msg}");
 }
+
+// ── Kernel (compile-once, dispatch-many) tests ──
+
+const DOUBLE_SHADER: &str = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] * 2.0;
+    }
+}";
+
+#[test]
+fn kernel_reuse_vector_double() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    // Run the same kernel three times with different data.
+    for data in &[
+        vec![1.0f32, 2.0, 3.0, 4.0],
+        vec![10.0, 20.0, 30.0, 40.0],
+        vec![0.5, -1.0, 100.0, 0.0],
+    ] {
+        let input = gpu.upload(data).expect("upload failed");
+        let output = gpu.alloc::<f32>(data.len()).expect("alloc failed");
+
+        gpu.run(&kernel, &[&input, &output], data.len() as u32)
+            .expect("run failed");
+
+        let result: Vec<f32> = output.download().expect("download failed");
+        let expected: Vec<f32> = data.iter().map(|x| x * 2.0).collect();
+        assert_eq!(result, expected);
+    }
+}
+
+#[test]
+fn kernel_reuse_different_sizes() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    // Same kernel, different buffer sizes.
+    for n in [4, 100, 1000] {
+        let data: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let input = gpu.upload(&data).expect("upload failed");
+        let output = gpu.alloc::<f32>(n).expect("alloc failed");
+
+        gpu.run(&kernel, &[&input, &output], n as u32)
+            .expect("run failed");
+
+        let result: Vec<f32> = output.download().expect("download failed");
+        for (i, (&got, &src)) in result.iter().zip(data.iter()).enumerate() {
+            assert!(
+                (got - src * 2.0).abs() < f32::EPSILON,
+                "mismatch at index {i}: got {got}, expected {}",
+                src * 2.0
+            );
+        }
+    }
+}
+
+#[test]
+fn kernel_binding_mismatch() {
+    let gpu = gpu();
+
+    // Kernel expects 2 bindings.
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+    assert_eq!(kernel.binding_count(), 2);
+
+    // Provide only 1 buffer.
+    let buf = gpu.alloc::<f32>(4).expect("alloc failed");
+    let err = gpu.run(&kernel, &[&buf], 4).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("mismatch"), "expected binding mismatch, got: {msg}");
+}
+
+#[test]
+fn kernel_debug_format() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let debug = format!("{kernel:?}");
+    assert!(debug.contains("main"), "Debug output should contain entry point: {debug}");
+    assert!(debug.contains("Kernel"), "Debug output should contain type name: {debug}");
+}
+
+#[test]
+fn kernel_u32_square() {
+    let gpu = gpu();
+
+    let shader = "\
+@group(0) @binding(0) var<storage, read> input: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output: array<u32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] * input[i];
+    }
+}";
+
+    let kernel = gpu.compile(shader).expect("compile failed");
+
+    for data in &[vec![2u32, 3, 5, 7, 11], vec![0, 1, 100, 255]] {
+        let input = gpu.upload(data).expect("upload failed");
+        let output = gpu.alloc::<u32>(data.len()).expect("alloc failed");
+
+        gpu.run(&kernel, &[&input, &output], data.len() as u32)
+            .expect("run failed");
+
+        let result: Vec<u32> = output.download().expect("download failed");
+        let expected: Vec<u32> = data.iter().map(|x| x * x).collect();
+        assert_eq!(result, expected);
+    }
+}
+
+#[test]
+fn kernel_metadata() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    assert_eq!(kernel.entry_point(), "main");
+    assert_eq!(kernel.binding_count(), 2);
+    assert_eq!(kernel.workgroup_size(), [64, 1, 1]);
+}
