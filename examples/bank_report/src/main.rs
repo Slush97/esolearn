@@ -369,7 +369,161 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .save_svg(fig_dir.join("feature_importance.svg").to_str().unwrap())?;
 
     // ═══════════════════════════════════════════════════════════════
-    //  9. Logistic Regression test evaluation
+    //  9. Surrogate model — Interpretable ICP rules
+    // ═══════════════════════════════════════════════════════════════
+    println!("\n=== SURROGATE MODEL — ICP RULES ===");
+
+    // Generate RF predictions on training set (surrogate labels)
+    let train_rows = to_row_major(&train);
+    let rf_train_preds = rf.predict(&train_rows)?;
+
+    // Build surrogate dataset: unscaled features + RF predictions as target
+    let surrogate_data = Dataset::new(
+        train.features.clone(),
+        rf_train_preds,
+        data.feature_names.clone(),
+        "RF_prediction",
+    );
+
+    // Fit shallow decision tree on RF predictions
+    let mut surrogate = DecisionTreeClassifier::new().max_depth(3);
+    surrogate.fit(&surrogate_data)?;
+
+    // Measure fidelity (agreement with RF on test set)
+    let surrogate_preds = surrogate.predict(&test_rows)?;
+    let fidelity = surrogate_preds
+        .iter()
+        .zip(preds.iter())
+        .filter(|(s, r)| (*s - *r).abs() < 1e-6)
+        .count() as f64
+        / test.n_samples() as f64;
+    let surrogate_acc = accuracy(&test.target, &surrogate_preds);
+    println!(
+        "Surrogate fidelity to RF: {:.2}%",
+        fidelity * 100.0
+    );
+    println!(
+        "Surrogate accuracy (vs true labels): {:.2}%",
+        surrogate_acc * 100.0
+    );
+    println!(
+        "Surrogate depth: {}, leaves: {}",
+        surrogate.depth(),
+        surrogate.n_leaves()
+    );
+
+    // Detect integer-valued features for clean threshold formatting
+    let is_integer_feature: Vec<bool> = data
+        .feature_names
+        .iter()
+        .enumerate()
+        .map(|(i, _)| data.features[i].iter().all(|v| *v == v.floor()))
+        .collect();
+
+    // Walk the FlatTree to extract root-to-leaf rules
+    let ft = surrogate.flat_tree().unwrap();
+    let nodes = &ft.nodes;
+    let predictions_ft = &ft.predictions;
+    let node_counts = &ft.node_counts;
+    let total_train = train.n_samples() as f64;
+
+    struct PathEntry {
+        node_idx: usize,
+        conditions: Vec<String>,
+    }
+
+    let mut stack = vec![PathEntry {
+        node_idx: 0,
+        conditions: vec![],
+    }];
+    // (conditions, prediction, coverage%)
+    let mut rules: Vec<(Vec<String>, f64, f64)> = vec![];
+
+    while let Some(PathEntry {
+        node_idx,
+        conditions,
+    }) = stack.pop()
+    {
+        let node = &nodes[node_idx];
+        if node.right == u32::MAX {
+            // Leaf: feature_idx is repurposed as leaf data index
+            let leaf_idx = node.feature_idx as usize;
+            let pred = predictions_ft[leaf_idx];
+            let coverage = if node_idx < node_counts.len() {
+                node_counts[node_idx] as f64 / total_train * 100.0
+            } else {
+                0.0
+            };
+            rules.push((conditions, pred, coverage));
+        } else {
+            let feat_idx = node.feature_idx as usize;
+            let feat_name = &data.feature_names[feat_idx];
+            let threshold = node.threshold;
+            let is_int = is_integer_feature[feat_idx];
+
+            // Right child (feature > threshold)
+            let mut right_conds = conditions.clone();
+            if is_int {
+                right_conds.push(format!(
+                    "{} >= {}",
+                    feat_name,
+                    threshold.floor() as i64 + 1
+                ));
+            } else {
+                right_conds.push(format!("{} > {:.1}", feat_name, threshold));
+            }
+            stack.push(PathEntry {
+                node_idx: node.right as usize,
+                conditions: right_conds,
+            });
+
+            // Left child (feature <= threshold)
+            let mut left_conds = conditions;
+            if is_int {
+                left_conds.push(format!(
+                    "{} <= {}",
+                    feat_name,
+                    threshold.floor() as i64
+                ));
+            } else {
+                left_conds.push(format!("{} <= {:.1}", feat_name, threshold));
+            }
+            stack.push(PathEntry {
+                node_idx: node_idx + 1,
+                conditions: left_conds,
+            });
+        }
+    }
+
+    // Sort: positive class (ACCEPTED) first, then by coverage descending
+    rules.sort_by(|a, b| {
+        let a_pos = a.1 == 1.0;
+        let b_pos = b.1 == 1.0;
+        b_pos.cmp(&a_pos).then(b.2.partial_cmp(&a.2).unwrap())
+    });
+
+    println!("\n--- ICP Rules (Personal Loan Acceptance) ---");
+    let mut rule_num = 0;
+    for (conditions, pred, coverage) in &rules {
+        let label = if *pred == 1.0 {
+            "ACCEPTED"
+        } else {
+            "DECLINED"
+        };
+        let marker = if *pred == 1.0 { ">>>" } else { "   " };
+        rule_num += 1;
+        let cond_str = if conditions.is_empty() {
+            "Always".to_string()
+        } else {
+            conditions.join(" AND ")
+        };
+        println!(
+            "{marker} Rule {rule_num}: {cond_str}\n       -> {label} (covers {coverage:.1}% of training data)"
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 10. Logistic Regression test evaluation
     // ═══════════════════════════════════════════════════════════════
     println!("\n=== LOGISTIC REGRESSION TEST EVALUATION ===");
     let mut lr = LogisticRegression::new().max_iter(500).learning_rate(0.01);

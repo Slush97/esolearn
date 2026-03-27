@@ -68,8 +68,10 @@ campaign targeting. The following summarizes the key aspects of this study:
     \item \textbf{Results:} Random Forest (100 trees, max depth 10) achieved
           the best overall performance with \textbf{99.1\% test accuracy},
           \textbf{0.998 ROC AUC}, 97.8\% precision and 92.7\% recall on the
-          minority class. The top predictive features are \textit{Income},
-          \textit{CCAvg} (credit card spending), and \textit{Education} level.
+          minority class. A surrogate decision tree (98.3\% fidelity) distills
+          the ensemble into actionable rules: the ideal customer has
+          \textbf{Income $\geq$ \$117K} with a \textbf{graduate+ degree}, or
+          \textbf{Income $\geq$ \$105K} with a \textbf{family of 3+}.
 
     \item \textbf{Conclusions:} Tree-based ensemble methods dramatically
           outperform linear models on this dataset. The nonlinear decision
@@ -78,10 +80,12 @@ campaign targeting. The following summarizes the key aspects of this study:
           loan acceptors.
 
     \item \textbf{Recommendations:} Deploy the Random Forest model for targeted
-          campaigns. Prioritize high-income customers (\textgreater\$100K) with
-          high credit card spending, advanced degrees (Education level 3), and
-          existing CD account relationships. This targeted approach can
-          dramatically improve campaign ROI compared to the blanket strategy.
+          campaigns. The surrogate model provides directly implementable rules:
+          target customers with Income $\geq$ \$117K and a graduate or advanced
+          degree (primary segment), or Income $\geq$ \$105K with family size
+          $\geq$ 3 (secondary segment). This targeted approach can reduce
+          marketing effort by approximately 10$\times$ compared to the blanket
+          strategy.
 \end{itemize}
 
 % ──────────────────────────────────────────────────────────
@@ -490,6 +494,59 @@ Weighted avg & 0.9909 & 0.9910 & 0.9909 & 1000 \\
 \label{fig:roc_rf}
 \end{figure}
 
+\subsection{Surrogate Model --- Interpretable ICP Rules}
+
+To translate the Random Forest's predictions into actionable decision rules, a
+\textbf{surrogate model} was fitted: a shallow decision tree (max depth~3)
+trained on the Random Forest's own predictions rather than the original labels.
+This distills the ensemble's learned decision boundaries into a small set of
+human-readable rules with exact feature thresholds.
+
+\begin{table}[H]
+\centering
+\caption{Surrogate model performance}
+\label{tab:surrogate}
+\begin{tabular}{@{} l r @{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Fidelity to Random Forest & 98.30\% \\
+Accuracy (vs true labels) & 97.80\% \\
+Depth / Leaves            & 4 / 7 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The surrogate tree agrees with the Random Forest on 98.3\% of test predictions,
+confirming it is a faithful approximation. Its 97.8\% accuracy against true
+labels shows that the interpretability cost is minimal (1.3 percentage points
+below the full RF).
+
+The extracted rules for the positive class (\textit{Accepted}) define the
+\textbf{Ideal Customer Profile (ICP)} with exact thresholds:
+
+\begin{table}[H]
+\centering
+\caption{Surrogate model ICP rules for personal loan acceptance}
+\label{tab:icp_rules}
+\begin{tabular}{@{} c p{8.5cm} r @{}}
+\toprule
+\textbf{Rule} & \textbf{Conditions} & \textbf{Coverage} \\
+\midrule
+1 & Income $\geq$ \$117K \textbf{and} Education $\geq$ Graduate & 6.3\% \\
+2 & Income $\geq$ \$105K \textbf{and} Education = Undergrad \textbf{and} Family $\geq$ 3 & 1.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation:} The primary ICP segment comprises high-income customers
+(\$117K+) with graduate or advanced degrees---this single rule covers 6.3\% of
+the training population and captures the majority of loan acceptors. A secondary
+segment captures high-income undergraduates (\$105K+) with larger families
+(3--4 members), adding 1.7\% coverage. Together, these two rules provide a
+concrete, actionable targeting strategy with specific thresholds that marketing
+teams can directly implement.
+
 \subsection{Baseline Comparison --- Logistic Regression}
 
 For comparison, Logistic Regression (500 iterations, $\eta = 0.01$) was
@@ -544,25 +601,32 @@ Universal Bank's personal loan marketing strategy.
 
 \subsection{Customer Targeting}
 
-The Random Forest model and feature importance analysis identify three primary
-customer segments with high loan acceptance probability:
+The surrogate model (Section~7.4) distills the Random Forest's predictions into
+concrete ICP rules with exact thresholds. Combined with permutation feature
+importance, this identifies two primary customer segments:
 
 \begin{enumerate}[leftmargin=*, itemsep=4pt]
-    \item \textbf{High-income, high-spending customers:} Customers with annual
-          income above \$100K and monthly credit card spending above \$3K show
-          the strongest loan acceptance rates. These customers have both the
-          financial capacity and spending behavior that correlate with loan
-          interest.
+    \item \textbf{High-income graduates (\$117K+, Education $\geq$ 2):}
+          The dominant segment. Customers with annual income at or above \$117K
+          and a graduate or advanced degree have the highest loan acceptance
+          probability. This rule alone covers 6.3\% of the customer base and
+          captures the majority of acceptors.
 
-    \item \textbf{Advanced-degree holders:} Customers with Education level 3
-          (advanced/professional degree) are disproportionately represented
-          among loan acceptors, particularly when combined with high income.
-
-    \item \textbf{CD Account holders:} Customers with existing certificate of
-          deposit accounts show elevated acceptance rates, suggesting that
-          deeper banking relationships signal receptiveness to additional
-          products.
+    \item \textbf{High-income undergraduates with large families (\$105K+,
+          Family $\geq$ 3):} A secondary segment of high earners without
+          advanced degrees but with family sizes of 3--4. This captures an
+          additional 1.7\% of customers.
 \end{enumerate}
+
+Additional signals from the permutation importance analysis reinforce the
+targeting strategy:
+\begin{itemize}[itemsep=2pt]
+    \item \textbf{Income} is by far the most predictive feature (0.181 mean
+          accuracy decrease), confirming its role as the primary filter.
+    \item \textbf{CCAvg} and \textbf{CD Account} provide secondary lift---customers
+          with high credit card spending or existing CD relationships show
+          elevated acceptance rates.
+\end{itemize}
 
 \subsection{Expected Campaign Improvement}
 
@@ -608,11 +672,11 @@ recommendations are:
           tool. With 99.1\% accuracy and 0.998 AUC, it provides highly reliable
           predictions using only standard customer data.
 
-    \item \textbf{Prioritize three customer segments} for loan offers:
-          high-income/high-spending customers, advanced-degree holders, and
-          CD account holders. These segments, identified through both feature
-          importance analysis and exploratory visualization, represent the
-          highest-probability prospects.
+    \item \textbf{Target two specific customer segments} identified by the
+          surrogate model: (a)~customers with Income $\geq$ \$117K and a
+          graduate or advanced degree, and (b)~customers with Income $\geq$
+          \$105K, undergraduate education, and family size $\geq$ 3. These
+          rules can be directly implemented as campaign filters.
 
     \item \textbf{Monitor model performance} over time, as customer behavior
           patterns may shift. Periodic retraining on updated campaign data is
