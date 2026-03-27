@@ -20,13 +20,17 @@ fn bench<F: FnMut()>(warmup: usize, runs: usize, mut f: F) -> (f64, f64) {
     for _ in 0..warmup {
         f();
     }
-    let t0 = Instant::now();
+    // Take the median of `runs` individual timings for stability.
+    let mut times = Vec::with_capacity(runs);
     for _ in 0..runs {
+        let t0 = Instant::now();
         f();
+        times.push(t0.elapsed().as_secs_f64());
     }
-    let total = t0.elapsed().as_secs_f64();
-    let per_call = total / runs as f64 * 1000.0;
-    let throughput = runs as f64 / total;
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = times[runs / 2];
+    let per_call = median * 1000.0;
+    let throughput = 1.0 / median;
     (per_call, throughput)
 }
 

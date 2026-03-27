@@ -9,10 +9,11 @@ pub struct CpuBackend;
 /// Minimum number of rows (row-tiles) before engaging rayon for matmul.
 #[cfg(not(any(feature = "blas", feature = "mkl")))]
 const MATMUL_PAR_THRESHOLD: usize = 128;
-/// Minimum number of rows before parallelizing row-wise ops.
-const ROW_PAR_THRESHOLD: usize = 64;
-/// Minimum element count before parallelizing element-wise ops.
-const ELEM_PAR_THRESHOLD: usize = 8192;
+/// Minimum total element count before parallelizing any operation.
+/// Rayon dispatch overhead (~50-100µs on 16 threads) requires at least this
+/// much compute to amortize. At ~1-2ns/element for softmax/gelu/add, this
+/// threshold corresponds to ~130-260µs of sequential work.
+const PAR_THRESHOLD: usize = 262_144;
 
 impl DeviceBackend for CpuBackend {
     type Storage = Vec<f32>;
@@ -97,7 +98,7 @@ impl MathBackend for CpuBackend {
 
         // Fast path: same shape — direct elementwise add (no broadcast math)
         if a_shape == b_shape {
-            if out_numel >= ELEM_PAR_THRESHOLD {
+            if out_numel >= PAR_THRESHOLD {
                 return a.par_iter().zip(b.par_iter()).map(|(&x, &y)| x + y).collect();
             }
             return a.iter().zip(b.iter()).map(|(&x, &y)| x + y).collect();
@@ -295,7 +296,6 @@ impl MathBackend for CpuBackend {
     fn scaled_softmax(input: &Vec<f32>, scale: f32, shape: &Shape) -> Vec<f32> {
         let dims = shape.dims();
         let last = *dims.last().unwrap();
-        let batch = input.len() / last;
         let mut output = vec![0.0f32; input.len()];
 
         let process_row = |out_row: &mut [f32], in_row: &[f32]| {
@@ -311,7 +311,7 @@ impl MathBackend for CpuBackend {
             }
         };
 
-        if batch >= ROW_PAR_THRESHOLD {
+        if input.len() >= PAR_THRESHOLD {
             output
                 .par_chunks_mut(last)
                 .zip(input.par_chunks(last))
@@ -328,7 +328,6 @@ impl MathBackend for CpuBackend {
     fn softmax(input: &Vec<f32>, shape: &Shape) -> Vec<f32> {
         let dims = shape.dims();
         let last = *dims.last().unwrap();
-        let batch = input.len() / last;
         let mut output = vec![0.0f32; input.len()];
 
         let process_row = |out_row: &mut [f32], in_row: &[f32]| {
@@ -344,7 +343,7 @@ impl MathBackend for CpuBackend {
             }
         };
 
-        if batch >= ROW_PAR_THRESHOLD {
+        if input.len() >= PAR_THRESHOLD {
             output
                 .par_chunks_mut(last)
                 .zip(input.par_chunks(last))
@@ -367,7 +366,6 @@ impl MathBackend for CpuBackend {
     ) -> Vec<f32> {
         let dims = shape.dims();
         let d = *dims.last().unwrap();
-        let n = input.len() / d;
         let mut output = vec![0.0f32; input.len()];
 
         let process_row = |i: usize, out_row: &mut [f32]| {
@@ -391,7 +389,7 @@ impl MathBackend for CpuBackend {
             }
         };
 
-        if n >= ROW_PAR_THRESHOLD {
+        if input.len() >= PAR_THRESHOLD {
             output
                 .par_chunks_mut(d)
                 .enumerate()
@@ -419,10 +417,10 @@ impl MathBackend for CpuBackend {
     ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let dims = shape.dims();
         let d = *dims.last().unwrap();
-        let n = input.len() / d;
+        let rows = input.len() / d;
         let mut output = vec![0.0f32; input.len()];
-        let mut means = vec![0.0f32; n];
-        let mut rstds = vec![0.0f32; n];
+        let mut means = vec![0.0f32; rows];
+        let mut rstds = vec![0.0f32; rows];
 
         let process_row = |i: usize, out_row: &mut [f32], mean_out: &mut f32, rstd_out: &mut f32| {
             let start = i * d;
@@ -449,7 +447,7 @@ impl MathBackend for CpuBackend {
             }
         };
 
-        if n >= ROW_PAR_THRESHOLD {
+        if input.len() >= PAR_THRESHOLD {
             output
                 .par_chunks_mut(d)
                 .zip(means.par_iter_mut().zip(rstds.par_iter_mut()))
@@ -471,7 +469,7 @@ impl MathBackend for CpuBackend {
     }
 
     fn gelu(input: &Vec<f32>) -> Vec<f32> {
-        if input.len() >= ELEM_PAR_THRESHOLD {
+        if input.len() >= PAR_THRESHOLD {
             input.par_iter().map(|&x| gelu_scalar(x)).collect()
         } else {
             input.iter().map(|&x| gelu_scalar(x)).collect()
@@ -671,7 +669,7 @@ impl MathBackend for CpuBackend {
     }
 
     fn swiglu(gate: &Vec<f32>, up: &Vec<f32>) -> Vec<f32> {
-        if gate.len() >= ELEM_PAR_THRESHOLD {
+        if gate.len() >= PAR_THRESHOLD {
             gate.par_iter()
                 .zip(up.par_iter())
                 .map(|(&g, &u)| silu_scalar(g) * u)
@@ -1030,6 +1028,36 @@ mod dnnl_ffi {
     }
 }
 
+/// Pin BLAS to single-threaded mode on first use.
+///
+/// BLAS libraries (OpenBLAS, MKL) spawn their own thread pools by default,
+/// which contends with rayon's thread pool. Since we manage parallelism at
+/// the batch level ourselves, BLAS should run single-threaded per call.
+///
+/// Respects `OPENBLAS_NUM_THREADS` / `MKL_NUM_THREADS` if set explicitly.
+#[cfg(any(feature = "blas", feature = "mkl"))]
+fn init_blas_threading() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        // Only override if the user hasn't set the env var themselves.
+        #[cfg(all(feature = "blas", not(feature = "mkl")))]
+        if std::env::var("OPENBLAS_NUM_THREADS").is_err() {
+            extern "C" {
+                fn openblas_set_num_threads(num: i32);
+            }
+            unsafe { openblas_set_num_threads(1) };
+        }
+        #[cfg(feature = "mkl")]
+        if std::env::var("MKL_NUM_THREADS").is_err() {
+            extern "C" {
+                fn mkl_set_num_threads(num: i32);
+            }
+            unsafe { mkl_set_num_threads(1) };
+        }
+    });
+}
+
 /// BLAS-accelerated matmul via cblas_sgemm.
 #[cfg(any(feature = "blas", feature = "mkl"))]
 fn matmul_cblas(
@@ -1042,6 +1070,7 @@ fn matmul_cblas(
     trans_b: bool,
 ) -> Vec<f32> {
     use cblas_sys::{cblas_sgemm, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+    init_blas_threading();
 
     let mut c = vec![0.0f32; m * n];
 
@@ -1247,6 +1276,7 @@ fn matmul_bias_cblas(
     trans_b: bool,
 ) -> Vec<f32> {
     use cblas_sys::{cblas_sgemm, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+    init_blas_threading();
 
     // Pre-fill C with broadcast bias so sgemm's beta=1.0 adds it for free
     let mut c = Vec::with_capacity(m * n);
@@ -1378,6 +1408,7 @@ fn matmul_strided_batched_impl(
     #[cfg(any(feature = "blas", feature = "mkl"))]
     {
         use cblas_sys::{cblas_sgemm, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+        init_blas_threading();
 
         let mut c = vec![0.0f32; batch_count * c_stride];
 
@@ -1392,35 +1423,13 @@ fn matmul_strided_batched_impl(
             (CBLAS_TRANSPOSE::CblasNoTrans, n as i32)
         };
 
-        if batch_count >= 2 {
-            // Parallel across batches (attention heads) — each cblas_sgemm
-            // writes to its own non-overlapping slice so this is safe.
-            // For encoder attention ([1500,64]×[64,1500] per head), BLAS
-            // runs single-threaded per head; rayon parallelism across heads
-            // gives near-linear speedup.
-            c.par_chunks_mut(c_stride)
-                .enumerate()
-                .for_each(|(i, out_chunk)| {
-                    unsafe {
-                        cblas_sgemm(
-                            CBLAS_LAYOUT::CblasRowMajor,
-                            transa,
-                            transb,
-                            m as i32,
-                            n as i32,
-                            k as i32,
-                            1.0,
-                            a[i * a_stride..].as_ptr(),
-                            lda,
-                            b[i * b_stride..].as_ptr(),
-                            ldb,
-                            0.0,
-                            out_chunk.as_mut_ptr(),
-                            n as i32,
-                        );
-                    }
-                });
-        } else {
+        // Sequential across batches — avoids rayon/BLAS thread contention.
+        // cblas_sgemm is already highly optimized per call; nesting it inside
+        // rayon's thread pool causes scheduling overhead that exceeds the
+        // parallelism benefit, especially for the small per-head matrices
+        // typical in attention (e.g., [50,64]×[64,50]).
+        for i in 0..batch_count {
+            let out_offset = i * c_stride;
             unsafe {
                 cblas_sgemm(
                     CBLAS_LAYOUT::CblasRowMajor,
@@ -1430,12 +1439,12 @@ fn matmul_strided_batched_impl(
                     n as i32,
                     k as i32,
                     1.0,
-                    a.as_ptr(),
+                    a[i * a_stride..].as_ptr(),
                     lda,
-                    b.as_ptr(),
+                    b[i * b_stride..].as_ptr(),
                     ldb,
                     0.0,
-                    c.as_mut_ptr(),
+                    c[out_offset..].as_mut_ptr(),
                     n as i32,
                 );
             }
