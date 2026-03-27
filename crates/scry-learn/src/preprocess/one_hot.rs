@@ -115,7 +115,11 @@ impl OneHotEncoder {
         let mut names = Vec::new();
         for (j, orig_name) in self.orig_feature_names.iter().enumerate() {
             if encoded_set.contains(&j) {
-                let cat_idx = self.feature_indices.iter().position(|&fi| fi == j).unwrap();
+                let cat_idx = self
+                    .feature_indices
+                    .iter()
+                    .position(|&fi| fi == j)
+                    .expect("encoded_set built from feature_indices");
                 let cats = &self.categories[cat_idx];
                 let skip = self.n_drop(cat_idx);
                 for (ci, &cat_val) in cats.iter().enumerate() {
@@ -166,7 +170,7 @@ impl Transformer for OneHotEncoder {
         self.orig_feature_names.clone_from(&data.feature_names);
         for &idx in &self.feature_indices {
             let mut unique: Vec<f64> = data.features[idx].clone();
-            unique.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            unique.sort_by(|a, b| a.total_cmp(b));
             unique.dedup();
             self.categories.push(unique);
         }
@@ -190,7 +194,11 @@ impl Transformer for OneHotEncoder {
         for j in 0..data.n_features() {
             if encoded_set.contains(&j) {
                 // Find which cat_idx this corresponds to.
-                let cat_idx = self.feature_indices.iter().position(|&fi| fi == j).unwrap();
+                let cat_idx = self
+                    .feature_indices
+                    .iter()
+                    .position(|&fi| fi == j)
+                    .ok_or(ScryLearnError::InvalidFeatureIndex(j))?;
                 let cats = &self.categories[cat_idx];
                 let skip = self.n_drop(cat_idx);
                 let orig_name = &data.feature_names[j];

@@ -111,7 +111,7 @@ fn median_ignore_nan(col: &[f64]) -> f64 {
     if valid.is_empty() {
         return 0.0;
     }
-    valid.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    valid.sort_unstable_by(|a, b| a.total_cmp(b));
     let mid = valid.len() / 2;
     if valid.len() % 2 == 0 {
         (valid[mid - 1] + valid[mid]) / 2.0
@@ -141,7 +141,7 @@ fn mode_ignore_nan(col: &[f64]) -> f64 {
     }
     counts
         .into_values()
-        .max_by(|(v1, c1), (v2, c2)| c1.cmp(c2).then(v2.partial_cmp(v1).unwrap()))
+        .max_by(|(v1, c1), (v2, c2)| c1.cmp(c2).then_with(|| v2.total_cmp(v1)))
         .map_or(0.0, |(v, _)| v)
 }
 

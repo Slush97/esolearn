@@ -102,7 +102,7 @@ impl FeatureBinner {
 
             // Collect and sort non-NaN values.
             let mut valid: Vec<f64> = col.iter().copied().filter(|v| !v.is_nan()).collect();
-            valid.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            valid.sort_unstable_by(|a, b| a.total_cmp(b));
 
             if valid.is_empty() {
                 // All NaN — single bin (the missing bin).

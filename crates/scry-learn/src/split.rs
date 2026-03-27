@@ -52,8 +52,9 @@ pub fn stratified_split(data: &Dataset, test_ratio: f64, seed: u64) -> (Dataset,
 
     let mut rng = crate::rng::FastRng::new(seed);
     for class in sorted_classes {
-        // SAFETY: `class` comes from `sorted_classes`, which was built from class_map's keys.
-        let mut indices = class_map.remove(&class).unwrap();
+        let mut indices = class_map
+            .remove(&class)
+            .expect("class key from sorted_classes must exist in class_map");
         // Shuffle within each class.
         for i in (1..indices.len()).rev() {
             let j = rng.usize(0..=i);
@@ -112,8 +113,9 @@ pub fn stratified_k_fold(data: &Dataset, k: usize, seed: u64) -> Vec<(Dataset, D
 
     let mut rng = crate::rng::FastRng::new(seed);
     for class in &sorted_classes {
-        // SAFETY: `class` comes from `sorted_classes`, which was built from class_map's keys.
-        let indices = class_map.get_mut(class).unwrap();
+        let indices = class_map
+            .get_mut(class)
+            .expect("class key from sorted_classes must exist in class_map");
         for i in (1..indices.len()).rev() {
             let j = rng.usize(0..=i);
             indices.swap(i, j);

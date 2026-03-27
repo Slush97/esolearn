@@ -316,8 +316,9 @@ impl Dataset {
             }
             self.row_major_cache = Some(buf);
         }
-        // SAFETY: row_major_cache was unconditionally set to Some above.
-        self.row_major_cache.as_ref().unwrap()
+        self.row_major_cache
+            .as_ref()
+            .expect("row_major_cache populated above")
     }
 
     /// Get a zero-copy row slice from a pre-computed flat feature buffer.
@@ -649,7 +650,7 @@ fn subset_csc(csc: &CscMatrix, indices: &[usize]) -> CscMatrix {
 /// Compute descriptive statistics for a single column, filtering NaN values.
 fn compute_column_stats(name: &str, values: &[f64]) -> ColumnStats {
     let mut sorted: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
-    sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_unstable_by(|a, b| a.total_cmp(b));
 
     let count = sorted.len();
     if count == 0 {
@@ -725,8 +726,7 @@ fn parse_target_column(rows: &[Vec<String>], col_idx: usize) -> (Vec<f64>, Optio
 
     let all_numeric = numeric.iter().all(std::option::Option::is_some);
     if all_numeric {
-        // SAFETY: all_numeric is true, so every element is Some.
-        return (numeric.into_iter().map(|v| v.unwrap()).collect(), None);
+        return (numeric.into_iter().flatten().collect(), None);
     }
 
     // Label-encode string values.

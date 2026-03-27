@@ -415,7 +415,7 @@ impl Transformer for RobustScaler {
         for j in 0..data.n_features() {
             let col = mat.col(j);
             let mut sorted = col.to_vec();
-            sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            sorted.sort_unstable_by(|a, b| a.total_cmp(b));
             let median = quantile_sorted(&sorted, 0.5);
             let q1 = quantile_sorted(&sorted, 0.25);
             let q3 = quantile_sorted(&sorted, 0.75);

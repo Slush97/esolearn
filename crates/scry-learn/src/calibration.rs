@@ -333,10 +333,9 @@ impl IsotonicRegression {
                 if mean_prev <= mean_last {
                     break;
                 }
-                // Merge.
-                // SAFETY: loop guard ensures blocks.len() >= 2.
-                let last = blocks.pop().unwrap();
-                let prev = blocks.last_mut().unwrap();
+                // Merge — loop guard above ensures blocks.len() >= 2.
+                let last = blocks.pop().expect("loop guard: blocks.len() >= 2");
+                let prev = blocks.last_mut().expect("loop guard: blocks.len() >= 2");
                 prev.0 += last.0;
                 prev.1 += last.1;
             }
@@ -385,9 +384,9 @@ impl IsotonicRegression {
         if x <= self.xs[0] {
             return self.ys[0];
         }
-        // SAFETY: xs.len() >= 2 is guaranteed by the early returns above.
-        if x >= *self.xs.last().unwrap() {
-            return *self.ys.last().unwrap();
+        // xs.len() >= 2 is guaranteed by the early returns above.
+        if x >= self.xs[self.xs.len() - 1] {
+            return self.ys[self.ys.len() - 1];
         }
 
         // Binary search for the interval.

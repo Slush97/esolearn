@@ -156,7 +156,7 @@ impl Transformer for Pca {
 
         // 4. Sort by descending eigenvalue.
         let mut order: Vec<usize> = (0..m).collect();
-        order.sort_by(|&a, &b| eigenvalues[b].partial_cmp(&eigenvalues[a]).unwrap());
+        order.sort_by(|&a, &b| eigenvalues[b].total_cmp(&eigenvalues[a]));
 
         let total: f64 = eigenvalues.iter().filter(|&&v| v > 0.0).sum();
 

@@ -248,7 +248,7 @@ impl MLPClassifier {
 
         // Discover classes
         let mut class_labels: Vec<f64> = data.target.clone();
-        class_labels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        class_labels.sort_by(|a, b| a.total_cmp(b));
         class_labels.dedup();
         let n_classes = class_labels.len();
 
@@ -269,7 +269,7 @@ impl MLPClassifier {
                 class_labels
                     .iter()
                     .position(|&c| (c - t).abs() < f64::EPSILON)
-                    .unwrap() as f64
+                    .expect("target value must appear in class_labels") as f64
             })
             .collect();
 
@@ -589,7 +589,7 @@ impl PartialFit for MLPClassifier {
 
         // Discover classes from this batch.
         let mut batch_labels: Vec<f64> = data.target.clone();
-        batch_labels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        batch_labels.sort_by(|a, b| a.total_cmp(b));
         batch_labels.dedup();
 
         if self.is_initialized() {

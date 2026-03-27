@@ -47,6 +47,18 @@ use crate::error::{Result, ScryLearnError};
 const MAGIC: &[u8; 4] = b"SCRY";
 const VERSION: u32 = 1;
 
+/// Read exactly `N` little-endian bytes from `buf` at `pos`, or return an error
+/// if the buffer is too short.
+fn read_le_bytes<const N: usize>(buf: &[u8], pos: usize) -> Result<[u8; N]> {
+    buf.get(pos..pos + N)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| {
+            ScryLearnError::InvalidParameter(format!(
+                ".scry file truncated at offset {pos} (need {N} bytes)"
+            ))
+        })
+}
+
 /// A memory-mapped dataset backed by a `.scry` binary file.
 ///
 /// Data is not loaded into memory — the OS pages in columns on demand.
@@ -97,8 +109,7 @@ impl MmapDataset {
         let mut pos = 4;
 
         // Version
-        // SAFETY: `buf[pos..pos + 4]` is exactly 4 bytes, matching [u8; 4].
-        let version = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
+        let version = u32::from_le_bytes(read_le_bytes::<4>(buf, pos)?);
         pos += 4;
         if version != VERSION {
             return Err(ScryLearnError::InvalidParameter(format!(
@@ -107,11 +118,9 @@ impl MmapDataset {
         }
 
         // n_rows, n_cols
-        // SAFETY: `buf[pos..pos + 8]` is exactly 8 bytes, matching [u8; 8].
-        let n_rows = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap()) as usize;
+        let n_rows = u64::from_le_bytes(read_le_bytes::<8>(buf, pos)?) as usize;
         pos += 8;
-        // SAFETY: `buf[pos..pos + 8]` is exactly 8 bytes, matching [u8; 8].
-        let n_cols = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap()) as usize;
+        let n_cols = u64::from_le_bytes(read_le_bytes::<8>(buf, pos)?) as usize;
         pos += 8;
 
         if n_cols == 0 {
@@ -121,18 +130,11 @@ impl MmapDataset {
         }
 
         // n_feature_names
-        // SAFETY: `buf[pos..pos + 8]` is exactly 8 bytes, matching [u8; 8].
-        let n_feature_names = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap()) as usize;
+        let n_feature_names = u64::from_le_bytes(read_le_bytes::<8>(buf, pos)?) as usize;
         pos += 8;
 
         // target_name
-        if pos + 2 > buf.len() {
-            return Err(ScryLearnError::InvalidParameter(
-                "file truncated reading target name length".into(),
-            ));
-        }
-        // SAFETY: `buf[pos..pos + 2]` is exactly 2 bytes, matching [u8; 2].
-        let target_name_len = u16::from_le_bytes(buf[pos..pos + 2].try_into().unwrap()) as usize;
+        let target_name_len = u16::from_le_bytes(read_le_bytes::<2>(buf, pos)?) as usize;
         pos += 2;
         if pos + target_name_len > buf.len() {
             return Err(ScryLearnError::InvalidParameter(
@@ -150,13 +152,7 @@ impl MmapDataset {
         let mut feature_names = Vec::with_capacity(n_feature_names.min(10_000));
         let mut name_lens = Vec::with_capacity(n_feature_names.min(10_000));
         for _ in 0..n_feature_names {
-            if pos + 2 > buf.len() {
-                return Err(ScryLearnError::InvalidParameter(
-                    "file truncated reading feature name lengths".into(),
-                ));
-            }
-            // SAFETY: `buf[pos..pos + 2]` is exactly 2 bytes, matching [u8; 2].
-            let len = u16::from_le_bytes(buf[pos..pos + 2].try_into().unwrap()) as usize;
+            let len = u16::from_le_bytes(read_le_bytes::<2>(buf, pos)?) as usize;
             pos += 2;
             name_lens.push(len);
         }

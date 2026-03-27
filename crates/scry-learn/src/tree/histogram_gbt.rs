@@ -291,7 +291,7 @@ impl HistTree {
                         if idx < feat_edges.len() {
                             feat_edges[idx]
                         } else if !feat_edges.is_empty() {
-                            *feat_edges.last().unwrap()
+                            feat_edges[feat_edges.len() - 1]
                         } else {
                             0.0
                         }

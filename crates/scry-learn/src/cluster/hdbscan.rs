@@ -151,7 +151,7 @@ impl Hdbscan {
 
         // Step 4: Sort MST edges by weight to get single-linkage ordering.
         let mut sorted_edges = mst;
-        sorted_edges.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        sorted_edges.sort_by(|a, b| a.2.total_cmp(&b.2));
 
         // Step 5: Build single-linkage hierarchy and condense.
         let (labels, n_clusters, outlier_scores) =
@@ -201,7 +201,7 @@ fn core_distances(dist: &[Vec<f64>], k: usize) -> Vec<f64> {
     let mut core = Vec::with_capacity(n);
     for i in 0..n {
         let mut dists: Vec<f64> = (0..n).filter(|&j| j != i).map(|j| dist[i][j]).collect();
-        dists.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+        dists.sort_unstable_by(|a, b| a.total_cmp(b));
         let kth = (k - 1).min(dists.len() - 1);
         core.push(dists[kth]);
     }

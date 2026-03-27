@@ -284,7 +284,7 @@ impl BayesSearchCV {
                 .map(|r| r.mean_score)
                 .filter(|s| s.is_finite())
                 .collect();
-            scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            scores.sort_by(|a, b| a.total_cmp(b));
 
             let n_good = ((scores.len() as f64 * self.gamma).ceil() as usize).max(1);
             let threshold = scores[scores.len().saturating_sub(n_good)];
