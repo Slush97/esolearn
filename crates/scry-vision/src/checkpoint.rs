@@ -4,11 +4,15 @@
 //! Provides dtype-agnostic tensor loading from safetensors files.
 //! Requires `feature = "safetensors"`.
 
+use std::cell::RefCell;
+
 use scry_llm::backend::MathBackend;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
 use crate::error::{Result, VisionError};
+use crate::nn::batchnorm::BatchNorm2d;
+use crate::nn::conv2d::Conv2d;
 
 /// Load a named tensor from a safetensors file, with dtype auto-detection.
 ///
@@ -80,6 +84,62 @@ pub fn transpose_2d(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         }
     }
     out
+}
+
+/// Load a [`Conv2d`] layer from safetensors.
+///
+/// Loads `{prefix}.weight` with shape `[out_ch, in_ch, kh, kw]`.
+/// Bias is left at zero — PyTorch ResNet convolutions use `bias=False`
+/// because the following BatchNorm absorbs the bias.
+pub fn load_conv2d<B: MathBackend>(
+    tensors: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    in_channels: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride: usize,
+    padding: usize,
+) -> Result<Conv2d<B>> {
+    let weight_key = format!("{prefix}.weight");
+    let weight = load_tensor(
+        tensors,
+        &weight_key,
+        &[out_channels, in_channels, kernel_h, kernel_w],
+    )?;
+    Ok(Conv2d {
+        weight,
+        bias: Tensor::from_vec(vec![0.0; out_channels], Shape::new(&[out_channels])),
+        in_channels,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride,
+        padding,
+        workspace: RefCell::new(Vec::new()),
+    })
+}
+
+/// Load a [`BatchNorm2d`] layer from safetensors.
+///
+/// Loads `{prefix}.weight`, `{prefix}.bias`, `{prefix}.running_mean`,
+/// and `{prefix}.running_var`, each with shape `[num_features]`.
+/// Silently ignores `num_batches_tracked` (PyTorch bookkeeping).
+pub fn load_batchnorm2d<B: MathBackend>(
+    tensors: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    num_features: usize,
+    eps: f32,
+) -> Result<BatchNorm2d<B>> {
+    let shape = &[num_features];
+    Ok(BatchNorm2d {
+        weight: load_tensor(tensors, &format!("{prefix}.weight"), shape)?,
+        bias: load_tensor(tensors, &format!("{prefix}.bias"), shape)?,
+        running_mean: load_tensor(tensors, &format!("{prefix}.running_mean"), shape)?,
+        running_var: load_tensor(tensors, &format!("{prefix}.running_var"), shape)?,
+        num_features,
+        eps,
+    })
 }
 
 /// Convert little-endian f16 bytes to f32.

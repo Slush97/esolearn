@@ -23,7 +23,7 @@ pub mod yolo;
 
 pub use arcface::ArcFaceEmbedder;
 pub use clip::{ClipConfig, ClipEmbedder, ClipVisual};
-pub use resnet::{ResNet, ResNetConfig};
+pub use resnet::{ResNet, ResNetClassifier, ResNetConfig};
 pub use scrfd::ScrfdDetector;
 pub use vit::{Vit, VitConfig};
 pub use yolo::YoloDetector;
