@@ -3,6 +3,8 @@ pub mod cpu;
 pub mod cuda;
 #[cfg(feature = "cuda")]
 pub mod kernels;
+#[cfg(feature = "scry-gpu")]
+pub mod scry_gpu;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 

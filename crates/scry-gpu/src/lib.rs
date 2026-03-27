@@ -48,6 +48,7 @@ mod dispatch;
 mod error;
 mod kernel;
 mod shader;
+pub mod shaders;
 
 pub use batch::Batch;
 pub use buffer::{Buffer, GpuBuf};

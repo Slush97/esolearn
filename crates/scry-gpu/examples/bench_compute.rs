@@ -5,6 +5,7 @@
 
 use std::time::Instant;
 
+use scry_gpu::shaders::matmul::{COARSE_64X64, TILED_16X16};
 use scry_gpu::{Device, GpuBuf, Kernel};
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
@@ -134,150 +135,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     C[row * dims.N + col] = sum;
 }";
 
-/// Tiled matmul: 16×16 shared-memory tiles, 1 element per thread.
-const MATMUL_TILED_SHADER: &str = "\
-struct Dims { M: u32, N: u32, K: u32 }
-var<push_constant> dims: Dims;
+// TILED_16X16 moved to scry_gpu::shaders::matmul::TILED_16X16
 
-@group(0) @binding(0) var<storage, read> A: array<f32>;
-@group(0) @binding(1) var<storage, read> B: array<f32>;
-@group(0) @binding(2) var<storage, read_write> C: array<f32>;
-
-var<workgroup> tile_a: array<f32, 256>;
-var<workgroup> tile_b: array<f32, 256>;
-
-@compute @workgroup_size(16, 16)
-fn main(
-    @builtin(local_invocation_id) lid: vec3<u32>,
-    @builtin(workgroup_id) wid: vec3<u32>,
-) {
-    let row = wid.y * 16u + lid.y;
-    let col = wid.x * 16u + lid.x;
-    let lr = lid.y;
-    let lc = lid.x;
-
-    var sum = 0.0;
-    let num_tiles = (dims.K + 15u) / 16u;
-
-    for (var t = 0u; t < num_tiles; t++) {
-        let a_col = t * 16u + lc;
-        if row < dims.M && a_col < dims.K {
-            tile_a[lr * 16u + lc] = A[row * dims.K + a_col];
-        } else {
-            tile_a[lr * 16u + lc] = 0.0;
-        }
-
-        let b_row = t * 16u + lr;
-        if b_row < dims.K && col < dims.N {
-            tile_b[lr * 16u + lc] = B[b_row * dims.N + col];
-        } else {
-            tile_b[lr * 16u + lc] = 0.0;
-        }
-
-        workgroupBarrier();
-
-        for (var k = 0u; k < 16u; k++) {
-            sum += tile_a[lr * 16u + k] * tile_b[k * 16u + lc];
-        }
-
-        workgroupBarrier();
-    }
-
-    if row < dims.M && col < dims.N {
-        C[row * dims.N + col] = sum;
-    }
-}";
-
-/// Thread-coarsened matmul: 64×64 output tile, each thread computes 4×4.
-///
-/// Workgroup = 16×16 = 256 threads. Each thread owns a 4×4 output block.
-/// Shared memory tiles: A[64×(16+1)] + B[16×64] = ~8.5 KB.
-/// A tile padded to stride 17 to eliminate bank conflicts (17 is coprime
-/// with the 32-bank layout, so each row maps to a distinct bank).
-/// Arithmetic intensity: 16 FLOP/byte (4× over the simple tiled kernel).
-const MATMUL_COARSE_SHADER: &str = "\
-struct Dims { M: u32, N: u32, K: u32 }
-var<push_constant> dims: Dims;
-
-@group(0) @binding(0) var<storage, read> A: array<f32>;
-@group(0) @binding(1) var<storage, read> B: array<f32>;
-@group(0) @binding(2) var<storage, read_write> C: array<f32>;
-
-var<workgroup> sa: array<f32, 1088>;
-var<workgroup> sb: array<f32, 1024>;
-
-@compute @workgroup_size(16, 16)
-fn main(
-    @builtin(local_invocation_id) lid: vec3<u32>,
-    @builtin(local_invocation_index) li: u32,
-    @builtin(workgroup_id) wid: vec3<u32>,
-) {
-    let block_row = wid.y * 64u;
-    let block_col = wid.x * 64u;
-    let tr = lid.y * 4u;
-    let tc = lid.x * 4u;
-
-    var acc: array<f32, 16>;
-    for (var i = 0u; i < 16u; i++) { acc[i] = 0.0; }
-
-    let num_k_tiles = (dims.K + 15u) / 16u;
-
-    for (var kt = 0u; kt < num_k_tiles; kt++) {
-        // Load A tile [64×16] into padded layout (stride 17)
-        for (var x = 0u; x < 4u; x++) {
-            let flat = li * 4u + x;
-            let r = flat / 16u;
-            let c = flat % 16u;
-            let gr = block_row + r;
-            let gc = kt * 16u + c;
-            if gr < dims.M && gc < dims.K {
-                sa[r * 17u + c] = A[gr * dims.K + gc];
-            } else {
-                sa[r * 17u + c] = 0.0;
-            }
-        }
-
-        // Load B tile [16×64]
-        for (var x = 0u; x < 4u; x++) {
-            let flat = li * 4u + x;
-            let r = flat / 64u;
-            let c = flat % 64u;
-            let gr = kt * 16u + r;
-            let gc = block_col + c;
-            if gr < dims.K && gc < dims.N {
-                sb[flat] = B[gr * dims.N + gc];
-            } else {
-                sb[flat] = 0.0;
-            }
-        }
-
-        workgroupBarrier();
-
-        for (var k = 0u; k < 16u; k++) {
-            for (var i = 0u; i < 4u; i++) {
-                let a_val = sa[(tr + i) * 17u + k];
-                for (var j = 0u; j < 4u; j++) {
-                    acc[i * 4u + j] += a_val * sb[k * 64u + tc + j];
-                }
-            }
-        }
-
-        workgroupBarrier();
-    }
-
-    for (var i = 0u; i < 4u; i++) {
-        for (var j = 0u; j < 4u; j++) {
-            let gr = block_row + tr + i;
-            let gc = block_col + tc + j;
-            if gr < dims.M && gc < dims.N {
-                C[gr * dims.N + gc] = acc[i * 4u + j];
-            }
-        }
-    }
-}";
+// COARSE_64X64 moved to scry_gpu::shaders::matmul::COARSE_64X64
 
 /// Thread-coarsened matmul with L2 cache tiling: same 64×64 tile and 4×4
-/// thread coarsening as `MATMUL_COARSE_SHADER`, but workgroup IDs are
+/// thread coarsening as `COARSE_64X64`, but workgroup IDs are
 /// swizzled into 4-wide super-tiles so that adjacent workgroups share
 /// A-tile rows, keeping them hot in L2 cache. Within each super-tile
 /// (4 columns × grid_m rows), column index varies fastest.
@@ -666,13 +529,13 @@ fn bench_matmul(gpu: &Device) {
         },
         MatmulKernel {
             name: "tiled 16×16",
-            kernel: gpu.compile(MATMUL_TILED_SHADER).expect("compile tiled"),
+            kernel: gpu.compile(TILED_16X16).expect("compile tiled"),
             tile_m: 16,
             tile_n: 16,
         },
         MatmulKernel {
             name: "coarse 4×4",
-            kernel: gpu.compile(MATMUL_COARSE_SHADER).expect("compile coarse"),
+            kernel: gpu.compile(COARSE_64X64).expect("compile coarse"),
             tile_m: 64,
             tile_n: 64,
         },
