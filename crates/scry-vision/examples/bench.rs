@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Benchmark inference throughput for ResNet-18 and CLIP ViT-B/32.
 //!
-//! cargo run -p scry-vision --features safetensors --example bench --release
+//! Best results with BLAS enabled and thread contention avoided:
+//!
+//!   OPENBLAS_NUM_THREADS=1 cargo run -p scry-vision \
+//!     --features safetensors,blas --example bench --release
 //!
 //! Requires testdata/resnet18.safetensors and testdata/clip_vit_b32.safetensors
 
@@ -13,38 +16,60 @@ use scry_llm::backend::cpu::CpuBackend;
 use scry_vision::models::{ClipConfig, ClipEmbedder, ResNetClassifier, ResNetConfig};
 use scry_vision::pipeline::{Classify, Embed};
 
+fn bench<F: FnMut()>(warmup: usize, runs: usize, mut f: F) -> (f64, f64) {
+    for _ in 0..warmup {
+        f();
+    }
+    let t0 = Instant::now();
+    for _ in 0..runs {
+        f();
+    }
+    let total = t0.elapsed().as_secs_f64();
+    let per_call = total / runs as f64 * 1000.0;
+    let throughput = runs as f64 / total;
+    (per_call, throughput)
+}
+
 fn main() {
+    let blas = cfg!(any(feature = "blas", feature = "mkl"));
+    let blas_label = if cfg!(feature = "mkl") {
+        "MKL"
+    } else if cfg!(feature = "blas") {
+        "OpenBLAS"
+    } else {
+        "none (pure Rust)"
+    };
+
     println!("=== scry-vision inference benchmark ===\n");
-    println!("Backend: CPU (scry-llm CpuBackend)");
+    println!("BLAS:    {blas_label}");
+    println!("Threads: OPENBLAS_NUM_THREADS={}, RAYON_NUM_THREADS={}",
+        std::env::var("OPENBLAS_NUM_THREADS").unwrap_or_else(|_| "auto".into()),
+        rayon::current_num_threads());
+    if blas {
+        println!("Tip:     Set OPENBLAS_NUM_THREADS=1 to avoid rayon/BLAS contention");
+    } else {
+        println!("Tip:     Enable --features blas for 5-17x speedup via OpenBLAS");
+    }
     println!();
 
     // ── ResNet-18 ──
     let resnet_path = format!("{}/testdata/resnet18.safetensors", env!("CARGO_MANIFEST_DIR"));
     if Path::new(&resnet_path).exists() {
-        println!("--- ResNet-18 (ImageNet 1000-class) ---");
+        println!("--- ResNet-18 (ImageNet 1000-class, 224x224) ---");
 
         let t0 = Instant::now();
         let config = ResNetConfig::resnet18(1000);
         let classifier =
             ResNetClassifier::<CpuBackend>::from_safetensors(config, Path::new(&resnet_path))
                 .unwrap();
-        println!("  Load:      {:.0}ms", t0.elapsed().as_secs_f64() * 1000.0);
+        println!("  Load:       {:.0}ms", t0.elapsed().as_secs_f64() * 1000.0);
 
         let image = vec![128u8; 224 * 224 * 3];
-
-        // Warmup
-        let _ = classifier.classify(&image, 224, 224, 5).unwrap();
-
-        // Benchmark
-        let n = 10;
-        let t0 = Instant::now();
-        for _ in 0..n {
+        let (ms, ips) = bench(2, 10, || {
             let _ = classifier.classify(&image, 224, 224, 5).unwrap();
-        }
-        let total = t0.elapsed().as_secs_f64();
-        let per_image = total / n as f64 * 1000.0;
-        println!("  Inference: {:.1}ms/image ({n} runs, 224x224 RGB)", per_image);
-        println!("  Throughput: {:.1} images/sec\n", n as f64 / total);
+        });
+        println!("  Inference:  {:.1}ms/image", ms);
+        println!("  Throughput: {:.1} images/sec\n", ips);
     } else {
         println!("--- ResNet-18: SKIPPED (testdata/resnet18.safetensors not found) ---\n");
     }
@@ -52,37 +77,28 @@ fn main() {
     // ── CLIP ViT-B/32 ──
     let clip_path = format!("{}/testdata/clip_vit_b32.safetensors", env!("CARGO_MANIFEST_DIR"));
     if Path::new(&clip_path).exists() {
-        println!("--- CLIP ViT-B/32 (512-dim embedding) ---");
+        println!("--- CLIP ViT-B/32 (512-dim embedding, 224x224) ---");
 
         let t0 = Instant::now();
         let config = ClipConfig::vit_b32();
         let embedder =
             ClipEmbedder::<CpuBackend>::from_safetensors(config, Path::new(&clip_path)).unwrap();
-        println!("  Load:      {:.0}ms", t0.elapsed().as_secs_f64() * 1000.0);
+        println!("  Load:       {:.0}ms", t0.elapsed().as_secs_f64() * 1000.0);
 
         let image = vec![128u8; 224 * 224 * 3];
-
-        // Warmup
-        let _ = embedder.embed(&image, 224, 224).unwrap();
-
-        // Benchmark
-        let n = 5;
-        let t0 = Instant::now();
-        for _ in 0..n {
+        let (ms, ips) = bench(2, 10, || {
             let _ = embedder.embed(&image, 224, 224).unwrap();
-        }
-        let total = t0.elapsed().as_secs_f64();
-        let per_image = total / n as f64 * 1000.0;
-        println!("  Inference: {:.0}ms/image ({n} runs, 224x224 RGB)", per_image);
-        println!("  Throughput: {:.2} images/sec\n", n as f64 / total);
+        });
+        println!("  Inference:  {:.1}ms/image", ms);
+        println!("  Throughput: {:.2} images/sec\n", ips);
     } else {
         println!("--- CLIP ViT-B/32: SKIPPED (testdata/clip_vit_b32.safetensors not found) ---\n");
     }
 
     // ── Context ──
-    println!("--- For reference ---");
-    println!("  PyTorch ResNet-18 CPU:        ~30-50ms/image (with MKL)");
-    println!("  ONNX Runtime ResNet-18 CPU:   ~10-20ms/image");
-    println!("  PyTorch CLIP ViT-B/32 CPU:    ~200-400ms/image");
-    println!("  ONNX Runtime CLIP ViT-B/32:   ~100-200ms/image");
+    println!("--- External references (approximate) ---");
+    println!("  PyTorch + MKL   ResNet-18 CPU:     ~30-50ms");
+    println!("  ONNX Runtime    ResNet-18 CPU:     ~10-20ms");
+    println!("  PyTorch + MKL   CLIP ViT-B/32 CPU: ~200-400ms");
+    println!("  ONNX Runtime    CLIP ViT-B/32 CPU: ~100-200ms");
 }
