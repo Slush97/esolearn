@@ -13,6 +13,7 @@ categories = ["graphics", "science", "concurrency"]
 [features]
 default = ["vulkan"]
 vulkan = ["dep:ash", "dep:gpu-allocator"]
+bench-wgpu = ["dep:wgpu"]
 # metal = []  # future
 
 [dependencies]
@@ -29,8 +30,15 @@ bytemuck = { version = "1", features = ["derive"] }
 # Error handling
 thiserror = "2"
 
+# Optional: wgpu for backend comparison benchmarks
+wgpu = { version = "24", optional = true }
+
 [dev-dependencies]
 pollster = "0.4"
+
+[[example]]
+name = "bench_wgpu_compare"
+required-features = ["bench-wgpu"]
 
 [lints.rust]
 missing_docs = "warn"

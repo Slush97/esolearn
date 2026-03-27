@@ -276,6 +276,97 @@ fn main(
     }
 }";
 
+/// Thread-coarsened matmul with L2 cache tiling: same 64×64 tile and 4×4
+/// thread coarsening as `MATMUL_COARSE_SHADER`, but workgroup IDs are
+/// swizzled into 4-wide super-tiles so that adjacent workgroups share
+/// A-tile rows, keeping them hot in L2 cache. Within each super-tile
+/// (4 columns × grid_m rows), column index varies fastest.
+const MATMUL_COARSE_L2_SHADER: &str = "\
+struct Dims { M: u32, N: u32, K: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> A: array<f32>;
+@group(0) @binding(1) var<storage, read> B: array<f32>;
+@group(0) @binding(2) var<storage, read_write> C: array<f32>;
+
+var<workgroup> sa: array<f32, 1088>;
+var<workgroup> sb: array<f32, 1024>;
+
+@compute @workgroup_size(16, 16)
+fn main(
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(local_invocation_index) li: u32,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    // L2 cache tiling: remap wid into 4-wide super-tiles.
+    let grid_n = (dims.N + 63u) / 64u;
+    let grid_m = (dims.M + 63u) / 64u;
+    let linear = wid.x + wid.y * grid_n;
+    let super_col = linear / (4u * grid_m);
+    let local = linear % (4u * grid_m);
+    let w = min(4u, grid_n - super_col * 4u);
+    let block_row = (local / w) * 64u;
+    let block_col = (super_col * 4u + local % w) * 64u;
+    let tr = lid.y * 4u;
+    let tc = lid.x * 4u;
+
+    var acc: array<f32, 16>;
+    for (var i = 0u; i < 16u; i++) { acc[i] = 0.0; }
+
+    let num_k_tiles = (dims.K + 15u) / 16u;
+
+    for (var kt = 0u; kt < num_k_tiles; kt++) {
+        for (var x = 0u; x < 4u; x++) {
+            let flat = li * 4u + x;
+            let r = flat / 16u;
+            let c = flat % 16u;
+            let gr = block_row + r;
+            let gc = kt * 16u + c;
+            if gr < dims.M && gc < dims.K {
+                sa[r * 17u + c] = A[gr * dims.K + gc];
+            } else {
+                sa[r * 17u + c] = 0.0;
+            }
+        }
+
+        for (var x = 0u; x < 4u; x++) {
+            let flat = li * 4u + x;
+            let r = flat / 64u;
+            let c = flat % 64u;
+            let gr = kt * 16u + r;
+            let gc = block_col + c;
+            if gr < dims.K && gc < dims.N {
+                sb[flat] = B[gr * dims.N + gc];
+            } else {
+                sb[flat] = 0.0;
+            }
+        }
+
+        workgroupBarrier();
+
+        for (var k = 0u; k < 16u; k++) {
+            for (var i = 0u; i < 4u; i++) {
+                let a_val = sa[(tr + i) * 17u + k];
+                for (var j = 0u; j < 4u; j++) {
+                    acc[i * 4u + j] += a_val * sb[k * 64u + tc + j];
+                }
+            }
+        }
+
+        workgroupBarrier();
+    }
+
+    for (var i = 0u; i < 4u; i++) {
+        for (var j = 0u; j < 4u; j++) {
+            let gr = block_row + tr + i;
+            let gc = block_col + tc + j;
+            if gr < dims.M && gc < dims.N {
+                C[gr * dims.N + gc] = acc[i * 4u + j];
+            }
+        }
+    }
+}";
+
 /// Large-tile matmul: 128×128 output tile, 32×32 workgroup, 4×4 per thread.
 ///
 /// Same 16-accumulator register budget as the 64×64 coarsened kernel, but
@@ -582,6 +673,12 @@ fn bench_matmul(gpu: &Device) {
         MatmulKernel {
             name: "coarse 4×4",
             kernel: gpu.compile(MATMUL_COARSE_SHADER).expect("compile coarse"),
+            tile_m: 64,
+            tile_n: 64,
+        },
+        MatmulKernel {
+            name: "coarse+L2",
+            kernel: gpu.compile(MATMUL_COARSE_L2_SHADER).expect("compile coarse+L2"),
             tile_m: 64,
             tile_n: 64,
         },

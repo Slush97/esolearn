@@ -23,6 +23,11 @@ struct SharedState {
     device: ash::Device,
     queue: vk::Queue,
     cmd_pool: vk::CommandPool,
+    // Persistent dispatch resources — reused across calls to avoid
+    // Vulkan object create/destroy churn on every dispatch.
+    fence: vk::Fence,
+    cmd: vk::CommandBuffer,
+    desc_pool: vk::DescriptorPool,
     allocator: std::mem::ManuallyDrop<Mutex<gpu_allocator::vulkan::Allocator>>,
     // Must outlive device — dropped after ManuallyDrop'd allocator + destroy_device.
     instance: ash::Instance,
@@ -33,6 +38,9 @@ impl Drop for SharedState {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
+            self.device.destroy_descriptor_pool(self.desc_pool, None);
+            self.device.destroy_fence(self.fence, None);
+            // cmd is freed implicitly when cmd_pool is destroyed
             self.device.destroy_command_pool(self.cmd_pool, None);
             std::mem::ManuallyDrop::drop(&mut self.allocator);
             self.device.destroy_device(None);
@@ -43,51 +51,43 @@ impl Drop for SharedState {
 
 impl SharedState {
     /// Record a one-shot command buffer, submit it, and fence-wait.
+    ///
+    /// Reuses persistent fence and command buffer to avoid Vulkan object churn.
     fn one_shot_submit(&self, record: impl FnOnce(vk::CommandBuffer)) -> Result<()> {
         unsafe {
-            let cmd = self
-                .device
-                .allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::default()
-                        .command_pool(self.cmd_pool)
-                        .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_buffer_count(1),
-                )
-                .map_err(|e| GpuError::Backend(format!("allocate cmd buf: {e}")))?[0];
+            self.device
+                .reset_command_buffer(self.cmd, vk::CommandBufferResetFlags::empty())
+                .map_err(|e| GpuError::Backend(format!("reset cmd buf: {e}")))?;
 
             self.device
                 .begin_command_buffer(
-                    cmd,
+                    self.cmd,
                     &vk::CommandBufferBeginInfo::default()
                         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )
                 .map_err(|e| GpuError::Backend(format!("begin cmd buf: {e}")))?;
 
-            record(cmd);
+            record(self.cmd);
 
             self.device
-                .end_command_buffer(cmd)
+                .end_command_buffer(self.cmd)
                 .map_err(|e| GpuError::Backend(format!("end cmd buf: {e}")))?;
 
-            let fence = self
-                .device
-                .create_fence(&vk::FenceCreateInfo::default(), None)
-                .map_err(|e| GpuError::Backend(format!("create fence: {e}")))?;
+            self.device
+                .reset_fences(&[self.fence])
+                .map_err(|e| GpuError::Backend(format!("reset fence: {e}")))?;
 
             self.device
                 .queue_submit(
                     self.queue,
-                    &[vk::SubmitInfo::default().command_buffers(&[cmd])],
-                    fence,
+                    &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
+                    self.fence,
                 )
                 .map_err(|e| GpuError::Backend(format!("queue submit: {e}")))?;
 
             self.device
-                .wait_for_fences(&[fence], true, u64::MAX)
+                .wait_for_fences(&[self.fence], true, u64::MAX)
                 .map_err(|e| GpuError::Backend(format!("wait fence: {e}")))?;
-
-            self.device.destroy_fence(fence, None);
-            self.device.free_command_buffers(self.cmd_pool, &[cmd]);
         }
 
         Ok(())
@@ -498,31 +498,23 @@ impl Backend for VulkanBackend {
         let device = &self.state.device;
 
         unsafe {
-            // Ephemeral descriptor pool + set
-            let desc_pool = device
-                .create_descriptor_pool(
-                    &vk::DescriptorPoolCreateInfo::default()
-                        .max_sets(1)
-                        .pool_sizes(&[vk::DescriptorPoolSize {
-                            ty: vk::DescriptorType::STORAGE_BUFFER,
-                            descriptor_count: kernel.binding_count.max(1) as u32,
-                        }]),
-                    None,
+            // Reset persistent pool (safe: previous fence was waited on)
+            device
+                .reset_descriptor_pool(
+                    self.state.desc_pool,
+                    vk::DescriptorPoolResetFlags::empty(),
                 )
-                .map_err(|e| GpuError::Backend(format!("desc pool: {e}")))?;
+                .map_err(|e| GpuError::Backend(format!("reset desc pool: {e}")))?;
 
             let desc_set = device
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
-                        .descriptor_pool(desc_pool)
+                        .descriptor_pool(self.state.desc_pool)
                         .set_layouts(std::slice::from_ref(
                             &kernel.descriptor_set_layout,
                         )),
                 )
-                .map_err(|e| {
-                    device.destroy_descriptor_pool(desc_pool, None);
-                    GpuError::Backend(format!("alloc desc set: {e}"))
-                })?[0];
+                .map_err(|e| GpuError::Backend(format!("alloc desc set: {e}")))?[0];
 
             // Write buffer bindings
             let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
@@ -575,9 +567,6 @@ impl Backend for VulkanBackend {
 
                 device.cmd_dispatch(cmd, workgroups[0], workgroups[1], workgroups[2]);
             })?;
-
-            // Cleanup ephemeral descriptor pool (destroys its sets too)
-            device.destroy_descriptor_pool(desc_pool, None);
         }
 
         Ok(())
@@ -708,10 +697,39 @@ impl VulkanBackend {
             )
             .map_err(|e| GpuError::Backend(format!("cmd pool: {e}")))?;
 
+        // Persistent dispatch resources — reused across calls
+        let fence = device
+            .create_fence(&vk::FenceCreateInfo::default(), None)
+            .map_err(|e| GpuError::Backend(format!("fence: {e}")))?;
+
+        let cmd = device
+            .allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(cmd_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1),
+            )
+            .map_err(|e| GpuError::Backend(format!("cmd buf: {e}")))?[0];
+
+        let desc_pool = device
+            .create_descriptor_pool(
+                &vk::DescriptorPoolCreateInfo::default()
+                    .max_sets(1)
+                    .pool_sizes(&[vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::STORAGE_BUFFER,
+                        descriptor_count: 16,
+                    }]),
+                None,
+            )
+            .map_err(|e| GpuError::Backend(format!("desc pool: {e}")))?;
+
         let state = Arc::new(SharedState {
             device,
             queue,
             cmd_pool,
+            fence,
+            cmd,
+            desc_pool,
             allocator: std::mem::ManuallyDrop::new(Mutex::new(allocator)),
             instance,
             _entry: entry,
@@ -734,12 +752,42 @@ impl VulkanBackend {
 /// single command buffer, then submits them all at once with a single fence.
 pub struct VulkanBatch {
     cmd: vk::CommandBuffer,
-    pools: Vec<vk::DescriptorPool>,
+    desc_pool: vk::DescriptorPool,
+    overflow_pools: Vec<vk::DescriptorPool>,
+    sets_allocated: u32,
+    pool_capacity: u32,
     state: Arc<SharedState>,
     submitted: bool,
 }
 
+const BATCH_POOL_SETS: u32 = 64;
+const BATCH_POOL_DESCRIPTORS: u32 = BATCH_POOL_SETS * 16;
+
 impl VulkanBatch {
+    fn current_pool(&mut self) -> Result<vk::DescriptorPool> {
+        if self.sets_allocated < self.pool_capacity {
+            return Ok(self.desc_pool);
+        }
+        // Current pool exhausted — allocate overflow
+        let pool = unsafe {
+            self.state
+                .device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(BATCH_POOL_SETS)
+                        .pool_sizes(&[vk::DescriptorPoolSize {
+                            ty: vk::DescriptorType::STORAGE_BUFFER,
+                            descriptor_count: BATCH_POOL_DESCRIPTORS,
+                        }]),
+                    None,
+                )
+                .map_err(|e| GpuError::Backend(format!("batch overflow pool: {e}")))?
+        };
+        self.overflow_pools.push(pool);
+        self.sets_allocated = 0;
+        Ok(pool)
+    }
+
     pub fn record_dispatch(
         &mut self,
         kernel: &VulkanKernel,
@@ -747,35 +795,21 @@ impl VulkanBatch {
         workgroups: [u32; 3],
         push_constants: Option<&[u8]>,
     ) -> Result<()> {
+        let pool = self.current_pool()?;
         let device = &self.state.device;
 
         unsafe {
-            let desc_pool = device
-                .create_descriptor_pool(
-                    &vk::DescriptorPoolCreateInfo::default()
-                        .max_sets(1)
-                        .pool_sizes(&[vk::DescriptorPoolSize {
-                            ty: vk::DescriptorType::STORAGE_BUFFER,
-                            descriptor_count: kernel.binding_count.max(1) as u32,
-                        }]),
-                    None,
-                )
-                .map_err(|e| GpuError::Backend(format!("batch desc pool: {e}")))?;
-
             let desc_set = device
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
-                        .descriptor_pool(desc_pool)
+                        .descriptor_pool(pool)
                         .set_layouts(std::slice::from_ref(
                             &kernel.descriptor_set_layout,
                         )),
                 )
-                .map_err(|e| {
-                    device.destroy_descriptor_pool(desc_pool, None);
-                    GpuError::Backend(format!("batch alloc desc: {e}"))
-                })?[0];
+                .map_err(|e| GpuError::Backend(format!("batch alloc desc: {e}")))?[0];
 
-            self.pools.push(desc_pool);
+            self.sets_allocated += 1;
 
             let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
                 .iter()
@@ -858,23 +892,21 @@ impl VulkanBatch {
                 .end_command_buffer(self.cmd)
                 .map_err(|e| GpuError::Backend(format!("batch end cmd: {e}")))?;
 
-            let fence = device
-                .create_fence(&vk::FenceCreateInfo::default(), None)
-                .map_err(|e| GpuError::Backend(format!("batch fence: {e}")))?;
+            device
+                .reset_fences(&[self.state.fence])
+                .map_err(|e| GpuError::Backend(format!("batch reset fence: {e}")))?;
 
             device
                 .queue_submit(
                     self.state.queue,
                     &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
-                    fence,
+                    self.state.fence,
                 )
                 .map_err(|e| GpuError::Backend(format!("batch submit: {e}")))?;
 
             device
-                .wait_for_fences(&[fence], true, u64::MAX)
+                .wait_for_fences(&[self.state.fence], true, u64::MAX)
                 .map_err(|e| GpuError::Backend(format!("batch wait: {e}")))?;
-
-            device.destroy_fence(fence, None);
         }
 
         self.submitted = true;
@@ -887,7 +919,8 @@ impl Drop for VulkanBatch {
         unsafe {
             let device = &self.state.device;
             device.free_command_buffers(self.state.cmd_pool, &[self.cmd]);
-            for pool in &self.pools {
+            device.destroy_descriptor_pool(self.desc_pool, None);
+            for pool in &self.overflow_pools {
                 device.destroy_descriptor_pool(*pool, None);
             }
         }
@@ -919,9 +952,26 @@ impl VulkanBackend {
                 .map_err(|e| GpuError::Backend(format!("batch begin cmd: {e}")))?;
         }
 
+        let desc_pool = unsafe {
+            device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(BATCH_POOL_SETS)
+                        .pool_sizes(&[vk::DescriptorPoolSize {
+                            ty: vk::DescriptorType::STORAGE_BUFFER,
+                            descriptor_count: BATCH_POOL_DESCRIPTORS,
+                        }]),
+                    None,
+                )
+                .map_err(|e| GpuError::Backend(format!("batch desc pool: {e}")))?
+        };
+
         Ok(VulkanBatch {
             cmd,
-            pools: Vec::new(),
+            desc_pool,
+            overflow_pools: Vec::new(),
+            sets_allocated: 0,
+            pool_capacity: BATCH_POOL_SETS,
             state: Arc::clone(&self.state),
             submitted: false,
         })
