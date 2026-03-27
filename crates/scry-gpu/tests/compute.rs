@@ -370,6 +370,281 @@ fn single_element_buffer() {
     assert_eq!(result, vec![84.0]);
 }
 
+// ── Batch dispatch ──
+
+const ADD_ONE_SHADER: &str = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] + 1.0;
+    }
+}";
+
+#[test]
+fn batch_single_dispatch() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[1.0f32, 2.0, 3.0, 4.0]).unwrap();
+    let output = gpu.alloc::<f32>(4).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 4).unwrap();
+    batch.submit().unwrap();
+
+    let result: Vec<f32> = output.download().unwrap();
+    assert_eq!(result, vec![2.0, 4.0, 6.0, 8.0]);
+}
+
+#[test]
+fn batch_multiple_independent_dispatches() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let in1 = gpu.upload(&[1.0f32, 2.0]).unwrap();
+    let out1 = gpu.alloc::<f32>(2).unwrap();
+    let in2 = gpu.upload(&[10.0f32, 20.0, 30.0]).unwrap();
+    let out2 = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&in1, &out1], 2).unwrap();
+    batch.run(&kernel, &[&in2, &out2], 3).unwrap();
+    batch.submit().unwrap();
+
+    assert_eq!(out1.download().unwrap(), vec![2.0, 4.0]);
+    assert_eq!(out2.download().unwrap(), vec![20.0, 40.0, 60.0]);
+}
+
+#[test]
+fn batch_chained_with_barrier() {
+    // Dispatch A writes intermediate, dispatch B reads it.
+    // Without a barrier this would be a data race.
+    let gpu = gpu();
+    let double = gpu.compile(DOUBLE_SHADER).expect("compile double");
+    let add_one = gpu.compile(ADD_ONE_SHADER).expect("compile add_one");
+
+    let input = gpu.upload(&[1.0f32, 2.0, 3.0]).unwrap();
+    let mid = gpu.alloc::<f32>(3).unwrap();
+    let output = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&double, &[&input, &mid], 3).unwrap();
+    batch.barrier();
+    batch.run(&add_one, &[&mid, &output], 3).unwrap();
+    batch.submit().unwrap();
+
+    // input * 2 + 1 = [3.0, 5.0, 7.0]
+    let result: Vec<f32> = output.download().unwrap();
+    assert_eq!(result, vec![3.0, 5.0, 7.0]);
+}
+
+#[test]
+fn batch_three_stage_pipeline() {
+    // Three chained dispatches: double → double → add_one
+    let gpu = gpu();
+    let double = gpu.compile(DOUBLE_SHADER).expect("compile double");
+    let add_one = gpu.compile(ADD_ONE_SHADER).expect("compile add_one");
+
+    let input = gpu.upload(&[1.0f32, 5.0, 10.0]).unwrap();
+    let mid1 = gpu.alloc::<f32>(3).unwrap();
+    let mid2 = gpu.alloc::<f32>(3).unwrap();
+    let output = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&double, &[&input, &mid1], 3).unwrap();
+    batch.barrier();
+    batch.run(&double, &[&mid1, &mid2], 3).unwrap();
+    batch.barrier();
+    batch.run(&add_one, &[&mid2, &output], 3).unwrap();
+    batch.submit().unwrap();
+
+    // (input * 2) * 2 + 1 = [5.0, 21.0, 41.0]
+    let result: Vec<f32> = output.download().unwrap();
+    assert_eq!(result, vec![5.0, 21.0, 41.0]);
+}
+
+#[test]
+fn batch_reduction_correctness() {
+    // Multi-pass reduction with barriers: sum of 1024 ones should be 1024.
+    let gpu = gpu();
+
+    let reduce_shader = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+var<workgroup> scratch: array<f32, 256>;
+
+@compute @workgroup_size(256)
+fn main(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    let i = gid.x;
+    scratch[lid.x] = select(0.0, input[i], i < arrayLength(&input));
+    workgroupBarrier();
+
+    for (var stride = 128u; stride > 0u; stride >>= 1u) {
+        if lid.x < stride {
+            scratch[lid.x] += scratch[lid.x + stride];
+        }
+        workgroupBarrier();
+    }
+
+    if lid.x == 0u {
+        output[wid.x] = scratch[0];
+    }
+}";
+
+    let kernel = gpu.compile(reduce_shader).expect("compile reduce");
+
+    let n: u32 = 1024;
+    let data: Vec<f32> = vec![1.0; n as usize];
+    let input = gpu.upload(&data).unwrap();
+
+    // 1024 / 256 = 4 workgroups → 4 partial sums
+    let pass1 = gpu.alloc::<f32>(4).unwrap();
+    // 4 / 256 → 1 workgroup → 1 result
+    let pass2 = gpu.alloc::<f32>(1).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &pass1], n).unwrap();
+    batch.barrier();
+    batch.run(&kernel, &[&pass1, &pass2], 4).unwrap();
+    batch.submit().unwrap();
+
+    let result = pass2.download().unwrap();
+    assert!((result[0] - 1024.0).abs() < 0.01, "expected 1024.0, got {}", result[0]);
+}
+
+#[test]
+fn batch_with_push_constants() {
+    let gpu = gpu();
+
+    let shader = "\
+struct Params { scale: f32 }
+var<push_constant> params: Params;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] * params.scale;
+    }
+}";
+
+    let kernel = gpu.compile(shader).unwrap();
+    let input = gpu.upload(&[1.0f32, 2.0, 3.0]).unwrap();
+    let out1 = gpu.alloc::<f32>(3).unwrap();
+    let out2 = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch
+        .run_with_push_constants(&kernel, &[&input, &out1], 3, &10.0f32.to_ne_bytes())
+        .unwrap();
+    batch
+        .run_with_push_constants(&kernel, &[&input, &out2], 3, &0.5f32.to_ne_bytes())
+        .unwrap();
+    batch.submit().unwrap();
+
+    assert_eq!(out1.download().unwrap(), vec![10.0, 20.0, 30.0]);
+    assert_eq!(out2.download().unwrap(), vec![0.5, 1.0, 1.5]);
+}
+
+#[test]
+fn batch_with_run_configured() {
+    let gpu = gpu();
+
+    let shader = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+@compute @workgroup_size(2)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] + 100.0;
+    }
+}";
+
+    let kernel = gpu.compile(shader).unwrap();
+    let input = gpu.upload(&[1.0f32, 2.0]).unwrap();
+    let output = gpu.alloc::<f32>(2).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run_configured(&kernel, &[&input, &output], [1, 1, 1], None).unwrap();
+    batch.submit().unwrap();
+
+    assert_eq!(output.download().unwrap(), vec![101.0, 102.0]);
+}
+
+#[test]
+fn batch_binding_mismatch() {
+    let gpu = gpu();
+
+    // DOUBLE_SHADER expects 2 bindings.
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+    let buf = gpu.alloc::<f32>(4).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    let result = batch.run(&kernel, &[&buf], 4);
+    match result {
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("mismatch"), "expected binding mismatch error, got: {msg}");
+        }
+        Ok(_) => panic!("expected binding mismatch error, but got Ok"),
+    }
+}
+
+#[test]
+fn batch_drop_without_submit() {
+    // Creating a batch, recording dispatches, and dropping without submit
+    // must not panic or leak. This is a safety/hygiene check.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[1.0f32, 2.0]).unwrap();
+    let output = gpu.alloc::<f32>(2).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 2).unwrap();
+    drop(batch); // intentional: no submit()
+
+    // If we got here without panicking, the test passes.
+    // Verify the GPU is still usable after the dropped batch.
+    let out2 = gpu.alloc::<f32>(2).unwrap();
+    gpu.run(&kernel, &[&input, &out2], 2).unwrap();
+    assert_eq!(out2.download().unwrap(), vec![2.0, 4.0]);
+}
+
+#[test]
+fn batch_fluent_api() {
+    // Verify the builder-style chaining works.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[5.0f32]).unwrap();
+    let mid = gpu.alloc::<f32>(1).unwrap();
+    let output = gpu.alloc::<f32>(1).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch
+        .run(&kernel, &[&input, &mid], 1).unwrap()
+        .barrier()
+        .run(&kernel, &[&mid, &output], 1).unwrap();
+    batch.submit().unwrap();
+
+    assert_eq!(output.download().unwrap(), vec![20.0]); // 5 * 2 * 2
+}
+
 // ── Push constants ──
 
 #[test]
