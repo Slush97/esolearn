@@ -2,14 +2,14 @@
 //! Compute acceleration backends for linear algebra operations.
 //!
 //! Provides a [`ComputeBackend`] abstraction with CPU and optional GPU
-//! implementations. The GPU backend uses wgpu compute shaders for
-//! matrix multiplication and pairwise distance computation.
+//! implementations. GPU backends (scry-gpu or wgpu) accelerate matrix
+//! multiplication and pairwise distance computation.
 //!
 //! # Runtime auto-detection
 //!
-//! Use [`auto()`] to get the fastest available backend. With the `gpu`
-//! feature enabled, this tries to initialize wgpu and falls back to CPU
-//! if no suitable GPU adapter is found.
+//! Use [`auto()`] to get the fastest available backend. With the `scry-gpu`
+//! feature, this uses Vulkan compute via scry-gpu. With `gpu`, it falls
+//! back to wgpu. Without either, it returns [`CpuBackend`].
 //!
 //! ```ignore
 //! use scry_learn::accel;
@@ -21,10 +21,14 @@
 mod cpu;
 #[cfg(feature = "gpu")]
 mod gpu;
+#[cfg(feature = "scry-gpu")]
+mod scry_gpu;
 
 pub use cpu::CpuBackend;
 #[cfg(feature = "gpu")]
 pub use gpu::GpuBackend;
+#[cfg(feature = "scry-gpu")]
+pub use self::scry_gpu::ScryGpuBackend;
 
 /// Linear algebra compute backend.
 ///
@@ -129,6 +133,15 @@ pub trait ComputeBackend {
 /// and falls back to [`CpuBackend`] if no GPU is available.
 /// Without the `gpu` feature, always returns [`CpuBackend`].
 pub fn auto() -> Box<dyn ComputeBackend> {
+    #[cfg(feature = "scry-gpu")]
+    {
+        match ScryGpuBackend::new() {
+            Ok(gpu) => return Box::new(gpu),
+            Err(_e) => {
+                // Silently fall back to next backend
+            }
+        }
+    }
     #[cfg(feature = "gpu")]
     {
         match GpuBackend::new() {
