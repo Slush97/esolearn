@@ -1,0 +1,52 @@
+[package]
+name = "scry-gpu"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Lightweight GPU compute — dispatch shaders without the graphics baggage"
+license.workspace = true
+keywords = ["gpu", "compute", "vulkan", "gpgpu"]
+categories = ["graphics", "science", "concurrency"]
+
+[features]
+default = ["vulkan"]
+vulkan = ["dep:ash", "dep:gpu-allocator"]
+# metal = []  # future
+
+[dependencies]
+# Vulkan backend
+ash = { version = "0.38", optional = true, default-features = false, features = ["linked", "debug"] }
+gpu-allocator = { version = "0.27", optional = true, default-features = false, features = ["vulkan"] }
+
+# Shader compilation (WGSL → SPIR-V)
+naga = { version = "24", features = ["wgsl-in", "spv-out"] }
+
+# Safe reinterpret casts for buffer upload/download
+bytemuck = { version = "1", features = ["derive"] }
+
+# Error handling
+thiserror = "2"
+
+[dev-dependencies]
+pollster = "0.4"
+
+[lints.rust]
+missing_docs = "warn"
+unreachable_pub = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+redundant_pub_crate = "allow"
