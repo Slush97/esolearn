@@ -239,7 +239,7 @@ impl KMeans {
                             best_idx = i;
                         }
                     }
-                    new_centroids[c] = rows[best_idx].clone();
+                    new_centroids[c].clone_from(&rows[best_idx]);
                 }
             }
 

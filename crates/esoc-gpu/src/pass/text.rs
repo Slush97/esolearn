@@ -29,7 +29,7 @@ impl TextPass {
         (w, h)
     }
 
-    /// Convert a TextMark to a rect instance for placeholder rendering.
+    /// Convert a `TextMark` to a rect instance for placeholder rendering.
     pub fn text_to_rect(
         position: [f32; 2],
         text: &str,

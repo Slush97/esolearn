@@ -15,7 +15,7 @@ pub struct RectInstance {
     pub fill_color: [f32; 4],
     /// Stroke RGBA.
     pub stroke_color: [f32; 4],
-    /// corner_radius, stroke_width, 0, 0.
+    /// `corner_radius`, `stroke_width`, 0, 0.
     pub params: [f32; 4],
 }
 
@@ -116,7 +116,7 @@ impl RectPass {
                             },
                         ],
                     }],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -126,7 +126,7 @@ impl RectPass {
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,

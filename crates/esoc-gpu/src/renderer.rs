@@ -275,6 +275,7 @@ impl Renderer {
         (rects, points, lines, rules)
     }
 
+    #[allow(clippy::unused_self)]
     fn collect_mark(
         &self,
         mark: &Mark,
@@ -339,6 +340,7 @@ impl Renderer {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn collect_batch(
         &self,
         batch: &MarkBatch,

@@ -9,13 +9,13 @@ use crate::pass::ViewportUniforms;
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct PointInstance {
-    /// cx, cy, size, shape_type.
+    /// cx, cy, size, `shape_type`.
     pub center_size: [f32; 4],
     /// Fill RGBA.
     pub fill_color: [f32; 4],
     /// Stroke RGBA.
     pub stroke_color: [f32; 4],
-    /// stroke_width, 0, 0, 0.
+    /// `stroke_width`, 0, 0, 0.
     pub params: [f32; 4],
 }
 
@@ -116,7 +116,7 @@ impl PointPass {
                             },
                         ],
                     }],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -126,7 +126,7 @@ impl PointPass {
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,

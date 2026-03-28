@@ -11,7 +11,7 @@ use crate::pass::ViewportUniforms;
 pub struct LineInstance {
     /// x0, y0, x1, y1.
     pub endpoints: [f32; 4],
-    /// width, dash_offset, total_len, 0.
+    /// width, `dash_offset`, `total_len`, 0.
     pub params: [f32; 4],
     /// Line color RGBA.
     pub color: [f32; 4],
@@ -109,7 +109,7 @@ impl LinePass {
                             },
                         ],
                     }],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
@@ -119,7 +119,7 @@ impl LinePass {
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
