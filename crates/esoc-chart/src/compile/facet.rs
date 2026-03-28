@@ -35,10 +35,7 @@ pub struct PanelRect {
 /// Compute facet panels from chart layers.
 ///
 /// Collects unique facet values, filters each layer's data per panel.
-pub fn compute_panels(
-    facet: &Facet,
-    layers: &[ResolvedLayer],
-) -> Vec<FacetPanel> {
+pub fn compute_panels(facet: &Facet, layers: &[ResolvedLayer]) -> Vec<FacetPanel> {
     // Collect unique facet values from all layers
     let mut unique_facets: Vec<String> = Vec::new();
     for layer in layers {
@@ -322,11 +319,7 @@ mod tests {
             .into_iter()
             .map(String::from)
             .collect::<Vec<_>>();
-        let layer = make_layer_with_facets(
-            (0..12)
-                .map(|i| facets[i % 6].clone())
-                .collect(),
-        );
+        let layer = make_layer_with_facets((0..12).map(|i| facets[i % 6].clone()).collect());
 
         let panels = compute_panels(&Facet::Wrap { ncol: 3 }, &[layer]);
         assert_eq!(panels.len(), 6);

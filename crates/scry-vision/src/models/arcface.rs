@@ -48,7 +48,11 @@ impl Embed for ArcFaceEmbedder {
         let img = ImageBuffer::from_raw(image.to_vec(), width, height, 3)?;
 
         // Resize to model input size
-        let resize = Resize::new(self.input_size, self.input_size, InterpolationMode::Bilinear);
+        let resize = Resize::new(
+            self.input_size,
+            self.input_size,
+            InterpolationMode::Bilinear,
+        );
         let resized = resize.apply(&img)?;
 
         // Normalize: scale to 0..1, then ImageNet-like normalization

@@ -234,10 +234,7 @@ mod tests {
         let score = match_template(&img, &tmpl, TemplateMatchMethod::CCorrNormed).unwrap();
         let (bx, by, bv) = find_best_match(&score, TemplateMatchMethod::CCorrNormed);
         assert_eq!((bx, by), (5, 5));
-        assert!(
-            bv > 0.99,
-            "NCC at exact match should be ~1.0, got {bv}"
-        );
+        assert!(bv > 0.99, "NCC at exact match should be ~1.0, got {bv}");
     }
 
     #[test]

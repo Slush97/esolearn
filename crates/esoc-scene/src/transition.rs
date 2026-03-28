@@ -49,10 +49,7 @@ pub struct SceneDiff {
 }
 
 /// Diff two sets of keyed node IDs.
-pub fn diff_by_key(
-    old: &[(MarkKey, NodeId)],
-    new: &[(MarkKey, NodeId)],
-) -> SceneDiff {
+pub fn diff_by_key(old: &[(MarkKey, NodeId)], new: &[(MarkKey, NodeId)]) -> SceneDiff {
     use std::collections::HashMap;
 
     let old_map: HashMap<&MarkKey, NodeId> = old.iter().map(|(k, id)| (k, *id)).collect();
@@ -83,7 +80,12 @@ mod tests {
 
     #[test]
     fn easing_endpoints() {
-        for easing in [Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut] {
+        for easing in [
+            Easing::Linear,
+            Easing::EaseIn,
+            Easing::EaseOut,
+            Easing::EaseInOut,
+        ] {
             assert!((easing.apply(0.0)).abs() < 1e-6, "{easing:?} at 0");
             assert!((easing.apply(1.0) - 1.0).abs() < 1e-6, "{easing:?} at 1");
         }
@@ -92,14 +94,50 @@ mod tests {
     #[test]
     fn diff_enter_update_exit() {
         let old = vec![
-            (MarkKey::Index(0), NodeId { index: 0, generation: 0 }),
-            (MarkKey::Index(1), NodeId { index: 1, generation: 0 }),
-            (MarkKey::Index(2), NodeId { index: 2, generation: 0 }),
+            (
+                MarkKey::Index(0),
+                NodeId {
+                    index: 0,
+                    generation: 0,
+                },
+            ),
+            (
+                MarkKey::Index(1),
+                NodeId {
+                    index: 1,
+                    generation: 0,
+                },
+            ),
+            (
+                MarkKey::Index(2),
+                NodeId {
+                    index: 2,
+                    generation: 0,
+                },
+            ),
         ];
         let new = vec![
-            (MarkKey::Index(1), NodeId { index: 10, generation: 0 }),
-            (MarkKey::Index(2), NodeId { index: 11, generation: 0 }),
-            (MarkKey::Index(3), NodeId { index: 12, generation: 0 }),
+            (
+                MarkKey::Index(1),
+                NodeId {
+                    index: 10,
+                    generation: 0,
+                },
+            ),
+            (
+                MarkKey::Index(2),
+                NodeId {
+                    index: 11,
+                    generation: 0,
+                },
+            ),
+            (
+                MarkKey::Index(3),
+                NodeId {
+                    index: 12,
+                    generation: 0,
+                },
+            ),
         ];
 
         let diff = diff_by_key(&old, &new);

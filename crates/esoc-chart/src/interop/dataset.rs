@@ -18,8 +18,16 @@ impl DatasetExt for scry_learn::dataset::Dataset {
         let x = &self.features[x_feature];
         let y = &self.features[y_feature];
 
-        let x_name = self.feature_names.get(x_feature).cloned().unwrap_or_default();
-        let y_name = self.feature_names.get(y_feature).cloned().unwrap_or_default();
+        let x_name = self
+            .feature_names
+            .get(x_feature)
+            .cloned()
+            .unwrap_or_default();
+        let y_name = self
+            .feature_names
+            .get(y_feature)
+            .cloned()
+            .unwrap_or_default();
 
         if let Some(labels) = &self.class_labels {
             let class_labels: Vec<String> = self

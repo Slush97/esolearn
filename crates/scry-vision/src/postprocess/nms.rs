@@ -281,12 +281,7 @@ mod tests {
             det(0.0, 0.0, 10.0, 10.0, 0, 0.9),
             det(1.0, 1.0, 11.0, 11.0, 0, 0.8),
         ];
-        let result = soft_nms(
-            &dets,
-            SoftNmsMethod::Gaussian { sigma: 0.5 },
-            0.3,
-            0.0,
-        );
+        let result = soft_nms(&dets, SoftNmsMethod::Gaussian { sigma: 0.5 }, 0.3, 0.0);
         assert_eq!(result.len(), 2);
         assert!((result[0].confidence - 0.9).abs() < 1e-6);
         assert!(result[1].confidence < 0.8);

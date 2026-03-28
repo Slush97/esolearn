@@ -99,30 +99,39 @@ impl SeriesRenderer for ErrorBarSeries {
 
             // Vertical error bar
             canvas.add(DrawElement::line(
-                p_top.x, p_top.y, p_bot.x, p_bot.y,
+                p_top.x,
+                p_top.y,
+                p_bot.x,
+                p_bot.y,
                 stroke.clone(),
                 Layer::Data,
             ));
 
             // Top cap
             canvas.add(DrawElement::line(
-                p_top.x - self.cap_width / 2.0, p_top.y,
-                p_top.x + self.cap_width / 2.0, p_top.y,
+                p_top.x - self.cap_width / 2.0,
+                p_top.y,
+                p_top.x + self.cap_width / 2.0,
+                p_top.y,
                 stroke.clone(),
                 Layer::Data,
             ));
 
             // Bottom cap
             canvas.add(DrawElement::line(
-                p_bot.x - self.cap_width / 2.0, p_bot.y,
-                p_bot.x + self.cap_width / 2.0, p_bot.y,
+                p_bot.x - self.cap_width / 2.0,
+                p_bot.y,
+                p_bot.x + self.cap_width / 2.0,
+                p_bot.y,
                 stroke.clone(),
                 Layer::Data,
             ));
 
             // Center dot
             canvas.add(DrawElement::circle(
-                p_center.x, p_center.y, 3.0,
+                p_center.x,
+                p_center.y,
+                3.0,
                 Fill::Solid(color),
                 Layer::Data,
             ));

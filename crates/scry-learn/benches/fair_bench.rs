@@ -48,7 +48,7 @@ use std::path::PathBuf;
 /// **Rayon usage audit (2025-02):**
 /// - scry-learn: uses `par_iter` in RF, LogReg, KNN, KMeans, SVM, HistGBT
 ///   (all via global pool — degrades to sequential iteration under 1 thread,
-///    with ~2-5µs overhead per rayon dispatch)
+///   with ~2-5µs overhead per rayon dispatch)
 /// - smartcore 0.4: no rayon / no par_iter — purely sequential
 /// - linfa-trees 0.8: rayon in Cargo.toml but no par_iter calls in source
 ///
@@ -862,7 +862,7 @@ fn bench_kmeans_train(c: &mut Criterion) {
             // linfa KMeans doesn't expose inertia directly — check label counts as proxy
             let linfa_labels = linfa_km.predict(&linfa_ds);
             let mut counts = vec![0usize; KM_K];
-            for &l in linfa_labels.iter() {
+            for &l in &linfa_labels {
                 if l < KM_K {
                     counts[l] += 1;
                 }

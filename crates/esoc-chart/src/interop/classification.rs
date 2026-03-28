@@ -55,7 +55,10 @@ impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
         }
 
         grouped_bar(&categories, &groups, &values)
-            .title(format!("Classification Report (accuracy: {:.3})", self.accuracy))
+            .title(format!(
+                "Classification Report (accuracy: {:.3})",
+                self.accuracy
+            ))
             .x_label("Class")
             .y_label("Score")
             .theme(theme)
@@ -65,8 +68,6 @@ impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
 }
 
 /// Create a classification report figure.
-pub fn classification_report_figure(
-    report: &scry_learn::metrics::ClassificationReport,
-) -> Chart {
+pub fn classification_report_figure(report: &scry_learn::metrics::ClassificationReport) -> Chart {
     report.figure()
 }

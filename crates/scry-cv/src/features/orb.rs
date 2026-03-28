@@ -89,7 +89,8 @@ impl Orb {
         let pyr = GaussianPyramid::build(img, self.n_levels, self.scale_factor, sigma)?;
 
         // Distribute features across levels (more at finer scales)
-        let features_per_level = distribute_features(self.n_features, pyr.n_levels(), self.scale_factor);
+        let features_per_level =
+            distribute_features(self.n_features, pyr.n_levels(), self.scale_factor);
 
         let mut all_kps = Vec::new();
         let mut all_desc = Vec::new();
@@ -198,8 +199,8 @@ fn distribute_features(n_features: usize, n_levels: usize, scale_factor: f32) ->
 
     let factor = 1.0 / scale_factor;
     let mut n_per_level = Vec::with_capacity(n_levels);
-    let mut n_desired = n_features as f64 * (1.0 - factor as f64)
-        / (1.0 - (factor as f64).powi(n_levels as i32));
+    let mut n_desired =
+        n_features as f64 * (1.0 - factor as f64) / (1.0 - (factor as f64).powi(n_levels as i32));
 
     for _ in 0..n_levels - 1 {
         n_per_level.push(n_desired.round() as usize);

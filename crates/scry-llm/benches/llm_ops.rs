@@ -276,8 +276,8 @@ fn gemv_bench(c: &mut Criterion) {
 fn gpu_ops(c: &mut Criterion) {
     use scry_llm::backend::cuda::{init_gpu, CudaBackend};
 
-    init_gpu(0);
     type Gpu = CudaBackend;
+    init_gpu(0);
 
     let mut group = c.benchmark_group("gpu_ops");
 

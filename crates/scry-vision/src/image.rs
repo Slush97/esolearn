@@ -76,17 +76,15 @@ impl ImageBuffer {
         if x >= self.width || y >= self.height || channel >= self.channels {
             return None;
         }
-        let idx =
-            (y as usize * self.width as usize + x as usize) * self.channels as usize
-                + channel as usize;
+        let idx = (y as usize * self.width as usize + x as usize) * self.channels as usize
+            + channel as usize;
         Some(self.data[idx])
     }
 
     /// Set the pixel value at (x, y) for a given channel.
     pub fn set_pixel(&mut self, x: u32, y: u32, channel: u8, value: u8) {
-        let idx =
-            (y as usize * self.width as usize + x as usize) * self.channels as usize
-                + channel as usize;
+        let idx = (y as usize * self.width as usize + x as usize) * self.channels as usize
+            + channel as usize;
         self.data[idx] = value;
     }
 

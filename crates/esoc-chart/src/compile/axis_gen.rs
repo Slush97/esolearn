@@ -200,7 +200,7 @@ pub fn generate_axes(
     let axis_stroke = StrokeStyle::solid(theme.foreground, theme.axis_width);
     let frame = Node::with_mark(Mark::Rule(RuleMark {
         segments: vec![
-            ([0.0, 0.0], [0.0, plot_h]),     // left
+            ([0.0, 0.0], [0.0, plot_h]),       // left
             ([0.0, plot_h], [plot_w, plot_h]), // bottom
         ],
         stroke: axis_stroke,
@@ -348,17 +348,22 @@ pub fn generate_axes(
     // X axis label
     if let Some(label) = x_label {
         let title_gap = theme.label_font_size * 1.2; // font-relative spacing
-        // Push the axis title below rotated category labels when present
+                                                     // Push the axis title below rotated category labels when present
         let x_label_y_offset = if let Some(cats) = x_categories {
             let cat_ticks: Vec<f64> = (0..cats.len()).map(|i| i as f64).collect();
             let cat_labels: Vec<String> = cats.to_vec();
             let strat = choose_x_label_strategy_for_categories(
-                &cat_labels, &cat_ticks, &x_scale, theme.tick_font_size, 4.0,
+                &cat_labels,
+                &cat_ticks,
+                &x_scale,
+                theme.tick_font_size,
+                4.0,
             );
             if matches!(strat, LabelStrategy::Horizontal) {
                 theme.tick_font_size + theme.label_font_size + title_gap
             } else {
-                let max_label_w = cats.iter()
+                let max_label_w = cats
+                    .iter()
                     .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
                     .fold(0.0_f32, f32::max);
                 let rotated_h = max_label_w * 0.71 * 1.3;
@@ -368,10 +373,7 @@ pub fn generate_axes(
             theme.tick_font_size + theme.label_font_size + title_gap
         };
         let text = Node::with_mark(Mark::Text(TextMark {
-            position: [
-                plot_x + plot_w * 0.5,
-                plot_y + plot_h + x_label_y_offset,
-            ],
+            position: [plot_x + plot_w * 0.5, plot_y + plot_h + x_label_y_offset],
             text: label.to_string(),
             font: FontStyle {
                 family: theme.font_family.clone(),
@@ -390,22 +392,23 @@ pub fn generate_axes(
     // Y axis label (rotated)
     if let Some(label) = y_label {
         let y_label_x = if let Some(cats) = y_categories {
-            let max_cat_w = cats.iter()
+            let max_cat_w = cats
+                .iter()
                 .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
                 .fold(0.0_f32, f32::max);
             plot_x - max_cat_w - theme.label_font_size - 5.0
         } else {
             // Compute label offset from actual tick label widths to avoid overlap
-            let max_tick_w = y_ticks.iter()
-                .map(|&t| layout::estimate_text_width(&y_scale.format_tick(t), theme.tick_font_size))
+            let max_tick_w = y_ticks
+                .iter()
+                .map(|&t| {
+                    layout::estimate_text_width(&y_scale.format_tick(t), theme.tick_font_size)
+                })
                 .fold(0.0_f32, f32::max);
             plot_x - max_tick_w - theme.label_font_size * 0.5 - y_tick_gap
         };
         let text = Node::with_mark(Mark::Text(TextMark {
-            position: [
-                y_label_x,
-                plot_y + plot_h * 0.5,
-            ],
+            position: [y_label_x, plot_y + plot_h * 0.5],
             text: label.to_string(),
             font: FontStyle {
                 family: theme.font_family.clone(),
@@ -478,7 +481,7 @@ mod tests {
             domain: (0.0, 100.0),
             range: (0.0, 200.0), // Very narrow
         };
-        let ticks: Vec<f64> = (0..=20).map(|i| i as f64 * 5.0).collect();
+        let ticks: Vec<f64> = (0..=20).map(|i| f64::from(i) * 5.0).collect();
         let strategy = choose_x_label_strategy(&ticks, &scale, 11.0, 4.0);
         // With 200px and 21 ticks, horizontal won't fit
         assert!(!matches!(strategy, LabelStrategy::Horizontal));
@@ -515,10 +518,20 @@ mod tests {
 
         let before = scene.len();
         generate_axes(
-            &mut scene, plot_id, root, &bounds,
-            400.0, 300.0, 50.0, 50.0, &theme,
-            Some("X"), Some("Y"), GridAxes::HorizontalOnly,
-            None, None,
+            &mut scene,
+            plot_id,
+            root,
+            &bounds,
+            400.0,
+            300.0,
+            50.0,
+            50.0,
+            &theme,
+            Some("X"),
+            Some("Y"),
+            GridAxes::HorizontalOnly,
+            None,
+            None,
         );
         // Should have added nodes (axes, ticks, labels, grid)
         assert!(scene.len() > before);

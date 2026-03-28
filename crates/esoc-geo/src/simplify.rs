@@ -105,10 +105,7 @@ mod tests {
 
     #[test]
     fn two_points_unchanged() {
-        let points = vec![
-            GeoPoint::new(0.0, 0.0),
-            GeoPoint::new(5.0, 5.0),
-        ];
+        let points = vec![GeoPoint::new(0.0, 0.0), GeoPoint::new(5.0, 5.0)];
         let result = simplify(&points, 1.0);
         assert_eq!(result.len(), 2);
     }

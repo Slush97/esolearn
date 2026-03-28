@@ -40,17 +40,26 @@ fn main() -> Result<()> {
     let mut lr = LogisticRegression::new();
     lr.fit(&train).expect("LR fit");
     let lr_proba = lr.predict_proba(&test_rows).expect("LR proba");
-    let lr_scores: Vec<f64> = lr_proba.iter().map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] }).collect();
+    let lr_scores: Vec<f64> = lr_proba
+        .iter()
+        .map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] })
+        .collect();
 
     let mut rf = RandomForestClassifier::new().n_estimators(50).seed(42);
     rf.fit(&train).expect("RF fit");
     let rf_proba = rf.predict_proba(&test_rows).expect("RF proba");
-    let rf_scores: Vec<f64> = rf_proba.iter().map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] }).collect();
+    let rf_scores: Vec<f64> = rf_proba
+        .iter()
+        .map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] })
+        .collect();
 
     let mut knn = KnnClassifier::new().k(5);
     knn.fit(&train).expect("KNN fit");
     let knn_proba = knn.predict_proba(&test_rows).expect("KNN proba");
-    let knn_scores: Vec<f64> = knn_proba.iter().map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] }).collect();
+    let knn_scores: Vec<f64> = knn_proba
+        .iter()
+        .map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] })
+        .collect();
 
     // ── Compute ROC curves ───────────────────────────────────────────
     let roc_lr = roc_curve(&test.target, &lr_scores);
@@ -103,16 +112,25 @@ fn main() -> Result<()> {
 }
 
 fn to_row_major(cols: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    if cols.is_empty() { return vec![]; }
+    if cols.is_empty() {
+        return vec![];
+    }
     let n_samples = cols[0].len();
-    (0..n_samples).map(|i| cols.iter().map(|col| col[i]).collect()).collect()
+    (0..n_samples)
+        .map(|i| cols.iter().map(|col| col[i]).collect())
+        .collect()
 }
 
 struct SimpleRng(u64);
 impl SimpleRng {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
     fn uniform(&mut self) -> f64 {

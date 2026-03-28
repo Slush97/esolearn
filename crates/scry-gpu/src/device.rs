@@ -362,7 +362,7 @@ impl Device {
     }
 
     /// Which backend this device is using.
-    pub fn backend_kind(&self) -> BackendKind {
+    pub const fn backend_kind(&self) -> BackendKind {
         match &self.inner {
             #[cfg(feature = "vulkan")]
             DeviceInner::Vulkan(_) => BackendKind::Vulkan,
@@ -393,7 +393,8 @@ impl Device {
             #[cfg(feature = "vulkan")]
             DeviceInner::Vulkan(b) => {
                 #[allow(irrefutable_let_patterns)]
-                let BackendBuffer::Vulkan(vk_src) = src else {
+                let BackendBuffer::Vulkan(vk_src) = src
+                else {
                     unreachable!("Vulkan backend received non-Vulkan buffer");
                 };
                 let buf = b.copy_buffer(vk_src, size)?;
@@ -402,7 +403,8 @@ impl Device {
             #[cfg(feature = "cuda")]
             DeviceInner::Cuda(b) => {
                 #[allow(irrefutable_let_patterns)]
-                let BackendBuffer::Cuda(cuda_src) = src else {
+                let BackendBuffer::Cuda(cuda_src) = src
+                else {
                     unreachable!("CUDA backend received non-CUDA buffer");
                 };
                 let buf = b.copy_buffer(cuda_src, size)?;
@@ -496,7 +498,8 @@ impl Device {
             #[cfg(feature = "vulkan")]
             DeviceInner::Vulkan(b) => {
                 #[allow(irrefutable_let_patterns)]
-                let BackendKernel::Vulkan(vk_kernel) = &kernel.inner else {
+                let BackendKernel::Vulkan(vk_kernel) = &kernel.inner
+                else {
                     return Err(GpuError::BackendUnavailable(
                         "kernel was not compiled for Vulkan".into(),
                     ));

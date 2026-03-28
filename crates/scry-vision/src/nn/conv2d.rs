@@ -120,7 +120,14 @@ impl<B: MathBackend> Conv2d<B> {
         stride: usize,
         padding: usize,
     ) -> Self {
-        Self::new(in_channels, out_channels, kernel_size, kernel_size, stride, padding)
+        Self::new(
+            in_channels,
+            out_channels,
+            kernel_size,
+            kernel_size,
+            stride,
+            padding,
+        )
     }
 
     /// Whether this conv qualifies for Winograd F(2×2, 3×3).
@@ -185,8 +192,10 @@ impl<B: MathBackend> Conv2d<B> {
             }
         }
 
-        let col_storage =
-            B::from_vec(col[..needed].to_vec(), &Shape::new(&[col_rows, spatial_out]));
+        let col_storage = B::from_vec(
+            col[..needed].to_vec(),
+            &Shape::new(&[col_rows, spatial_out]),
+        );
 
         // Weight [out_ch, in_ch, kH, kW] has same flat layout as [out_ch, in_ch*kH*kW]
         let out_data = B::matmul(
@@ -239,17 +248,11 @@ impl<B: MathBackend> Conv2d<B> {
         {
             let mut cache = self.winograd_weight.borrow_mut();
             if cache.is_none() {
-                let u_flat = precompute_winograd_weights(
-                    &self.weight.to_vec(),
-                    c_out,
-                    c_in,
-                );
+                let u_flat = precompute_winograd_weights(&self.weight.to_vec(), c_out, c_in);
                 let oc_ic = c_out * c_in;
                 let u_shape = Shape::new(&[c_out, c_in]);
                 let storages: Vec<B::Storage> = (0..16)
-                    .map(|p| {
-                        B::from_vec(u_flat[p * oc_ic..(p + 1) * oc_ic].to_vec(), &u_shape)
-                    })
+                    .map(|p| B::from_vec(u_flat[p * oc_ic..(p + 1) * oc_ic].to_vec(), &u_shape))
                     .collect();
                 *cache = Some(storages);
             }
@@ -296,8 +299,7 @@ impl<B: MathBackend> Conv2d<B> {
                     // B = [[1,0,0,0],[0,1,-1,1],[-1,1,1,0],[0,0,0,-1]]
                     let mut tmp = [0.0f32; 16];
                     for i in 0..4 {
-                        let (d0, d1, d2, d3) =
-                            (d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]);
+                        let (d0, d1, d2, d3) = (d[i * 4], d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3]);
                         tmp[i * 4] = d0 - d2;
                         tmp[i * 4 + 1] = d1 + d2;
                         tmp[i * 4 + 2] = d2 - d1;
@@ -307,8 +309,7 @@ impl<B: MathBackend> Conv2d<B> {
                     // V = Bᵀ · tmp  →  scatter to v_bufs[pos][ic * num_tiles + tile]
                     let v_base = ic * num_tiles + tile_idx;
                     for j in 0..4 {
-                        let (t0, t1, t2, t3) =
-                            (tmp[j], tmp[4 + j], tmp[8 + j], tmp[12 + j]);
+                        let (t0, t1, t2, t3) = (tmp[j], tmp[4 + j], tmp[8 + j], tmp[12 + j]);
                         v_bufs[j][v_base] = t0 - t2;
                         v_bufs[4 + j][v_base] = t1 + t2;
                         v_bufs[8 + j][v_base] = t2 - t1;
@@ -325,15 +326,7 @@ impl<B: MathBackend> Conv2d<B> {
         for p in 0..16 {
             let v_vec = std::mem::take(&mut v_bufs[p]);
             let v_s = B::from_vec(v_vec, &v_shape);
-            let result = B::matmul(
-                &u_storages[p],
-                &v_s,
-                c_out,
-                c_in,
-                num_tiles,
-                false,
-                false,
-            );
+            let result = B::matmul(&u_storages[p], &v_s, c_out, c_in, num_tiles, false, false);
             m_bufs.push(B::into_vec(result));
         }
 

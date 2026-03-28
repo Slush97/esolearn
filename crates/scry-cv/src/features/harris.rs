@@ -96,6 +96,9 @@ mod tests {
             .iter()
             .map(|v| v.abs())
             .fold(0.0f32, f32::max);
-        assert!(max_abs < 1e-5, "flat image should have ~zero response: {max_abs}");
+        assert!(
+            max_abs < 1e-5,
+            "flat image should have ~zero response: {max_abs}"
+        );
     }
 }

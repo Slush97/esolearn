@@ -27,8 +27,7 @@ pub fn box_blur(img: &ImageBuf<f32, Gray>, radius: u32) -> Result<ImageBuf<f32, 
             let y0 = (y - r).max(0) as u32;
             let x1 = (x + r).min(w as i32 - 1) as u32;
             let y1 = (y + r).min(h as i32 - 1) as u32;
-            out[y as usize * w as usize + x as usize] =
-                sat.rect_mean(x0, y0, x1, y1) as f32;
+            out[y as usize * w as usize + x as usize] = sat.rect_mean(x0, y0, x1, y1) as f32;
         }
     }
 

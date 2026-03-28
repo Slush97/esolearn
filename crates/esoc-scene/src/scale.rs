@@ -143,7 +143,11 @@ impl Scale {
                 };
                 range.0 + (range.1 - range.0) * t as f32
             }
-            Self::Power { domain, range, exponent } => {
+            Self::Power {
+                domain,
+                range,
+                exponent,
+            } => {
                 let pow_val = value.max(0.0).powf(*exponent);
                 let pow_min = domain.0.max(0.0).powf(*exponent);
                 let pow_max = domain.1.max(0.0).powf(*exponent);
@@ -154,7 +158,11 @@ impl Scale {
                 };
                 range.0 + (range.1 - range.0) * t as f32
             }
-            Self::Symlog { domain, range, constant } => {
+            Self::Symlog {
+                domain,
+                range,
+                constant,
+            } => {
                 let symlog = |v: f64| v.signum() * (v.abs() / constant).ln_1p();
                 let sl_val = symlog(value);
                 let sl_min = symlog(domain.0);
@@ -246,7 +254,11 @@ impl Scale {
                 let sqrt_val = sqrt_min + (sqrt_max - sqrt_min) * f64::from(t);
                 sqrt_val * sqrt_val
             }
-            Self::Power { domain, range, exponent } => {
+            Self::Power {
+                domain,
+                range,
+                exponent,
+            } => {
                 let t = if (range.1 - range.0).abs() < 1e-10 {
                     0.5
                 } else {
@@ -257,7 +269,11 @@ impl Scale {
                 let pow_val = pow_min + (pow_max - pow_min) * f64::from(t);
                 pow_val.powf(1.0 / exponent)
             }
-            Self::Symlog { domain, range, constant } => {
+            Self::Symlog {
+                domain,
+                range,
+                constant,
+            } => {
                 let symlog = |v: f64| v.signum() * (v.abs() / constant).ln_1p();
                 let t = if (range.1 - range.0).abs() < 1e-10 {
                     0.5
@@ -276,12 +292,14 @@ impl Scale {
     /// Generate nice tick positions.
     pub fn ticks(&self, target_count: usize) -> Vec<f64> {
         match self {
-            Self::Linear { domain, .. } => nice_ticks_linear(domain.0, domain.1, target_count),
+            Self::Linear { domain, .. }
+            | Self::Sqrt { domain, .. }
+            | Self::Power { domain, .. }
+            | Self::Symlog { domain, .. } => nice_ticks_linear(domain.0, domain.1, target_count),
             Self::Log { domain, base, .. } => nice_ticks_log(domain.0, domain.1, *base),
             Self::Band { domain, .. } => (0..domain.len()).map(|i| i as f64).collect(),
-            Self::Time { domain, .. } => nice_ticks_linear(domain.0 as f64, domain.1 as f64, target_count),
-            Self::Sqrt { domain, .. } | Self::Power { domain, .. } | Self::Symlog { domain, .. } => {
-                nice_ticks_linear(domain.0, domain.1, target_count)
+            Self::Time { domain, .. } => {
+                nice_ticks_linear(domain.0 as f64, domain.1 as f64, target_count)
             }
             Self::Ordinal { domain, .. } => (0..domain.len()).map(|i| i as f64).collect(),
         }
@@ -610,7 +628,9 @@ mod tests {
             assert!(
                 t >= domain.0 - 1e-9 && t <= domain.1 + 1e-9,
                 "tick {} outside niced domain [{}, {}]",
-                t, domain.0, domain.1,
+                t,
+                domain.0,
+                domain.1,
             );
         }
     }

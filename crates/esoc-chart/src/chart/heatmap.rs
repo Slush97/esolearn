@@ -111,11 +111,7 @@ impl SeriesRenderer for HeatmapSeries {
                 // Annotation
                 if self.annotate {
                     let center = transform.to_pixel(c as f64, y);
-                    let text_color = if t > 0.5 {
-                        Color::BLACK
-                    } else {
-                        Color::WHITE
-                    };
+                    let text_color = if t > 0.5 { Color::BLACK } else { Color::WHITE };
                     let font = FontStyle {
                         family: theme.font_family.clone(),
                         size: theme.tick_font_size,

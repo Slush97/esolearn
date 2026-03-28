@@ -12,7 +12,9 @@ mod sealed {
 // ── Channel layout ──
 
 /// Describes the number and semantics of channels in an image.
-pub trait ChannelLayout: sealed::Sealed + Copy + Clone + fmt::Debug + Send + Sync + 'static {
+pub trait ChannelLayout:
+    sealed::Sealed + Copy + Clone + fmt::Debug + Send + Sync + 'static
+{
     /// Number of channels (1, 3, or 4).
     const CHANNELS: usize;
     /// Human-readable name for error messages.

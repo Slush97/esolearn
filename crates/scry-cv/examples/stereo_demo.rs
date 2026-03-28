@@ -81,7 +81,10 @@ fn main() {
     }
     if center_count > 0 {
         let center_mean = center_sum / center_count as f64;
-        println!("  center mean:    {center_mean:.2} (error: {:.2})", (center_mean - known_disparity as f64).abs());
+        println!(
+            "  center mean:    {center_mean:.2} (error: {:.2})",
+            (center_mean - known_disparity as f64).abs()
+        );
     }
 }
 

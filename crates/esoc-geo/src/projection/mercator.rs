@@ -16,7 +16,9 @@ impl Projection for Mercator {
     fn project(&self, lon: f64, lat: f64) -> (f64, f64) {
         let lat_clamped = lat.clamp(-MAX_LAT, MAX_LAT);
         let x = lon.to_radians();
-        let y = (lat_clamped.to_radians() * 0.5 + std::f64::consts::FRAC_PI_4).tan().ln();
+        let y = (lat_clamped.to_radians() * 0.5 + std::f64::consts::FRAC_PI_4)
+            .tan()
+            .ln();
         (x, y)
     }
 
@@ -45,8 +47,14 @@ mod tests {
         for &(lon, lat) in &[(45.0, 30.0), (-120.0, -45.0), (0.0, 85.0), (180.0, 0.0)] {
             let (x, y) = proj.project(lon, lat);
             let (lon2, lat2) = proj.invert(x, y);
-            assert!((lon2 - lon).abs() < 1e-6, "lon roundtrip failed for ({lon}, {lat})");
-            assert!((lat2 - lat).abs() < 1e-4, "lat roundtrip failed for ({lon}, {lat})");
+            assert!(
+                (lon2 - lon).abs() < 1e-6,
+                "lon roundtrip failed for ({lon}, {lat})"
+            );
+            assert!(
+                (lat2 - lat).abs() < 1e-4,
+                "lat roundtrip failed for ({lon}, {lat})"
+            );
         }
     }
 
@@ -55,7 +63,10 @@ mod tests {
         let proj = Mercator;
         let (_, y90) = proj.project(0.0, 90.0);
         let (_, y85) = proj.project(0.0, MAX_LAT);
-        assert!((y90 - y85).abs() < 1e-6, "90° should be clamped to 85.0511°");
+        assert!(
+            (y90 - y85).abs() < 1e-6,
+            "90° should be clamped to 85.0511°"
+        );
     }
 
     #[test]

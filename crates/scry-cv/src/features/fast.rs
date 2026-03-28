@@ -47,8 +47,7 @@ pub fn detect_fast9(img: &ImageBuf<f32, Gray>, threshold: f32) -> Vec<KeyPoint> 
             let p0 = data[(y + CIRCLE[0].1) as usize * w as usize + (x + CIRCLE[0].0) as usize];
             let p4 = data[(y + CIRCLE[4].1) as usize * w as usize + (x + CIRCLE[4].0) as usize];
             let p8 = data[(y + CIRCLE[8].1) as usize * w as usize + (x + CIRCLE[8].0) as usize];
-            let p12 =
-                data[(y + CIRCLE[12].1) as usize * w as usize + (x + CIRCLE[12].0) as usize];
+            let p12 = data[(y + CIRCLE[12].1) as usize * w as usize + (x + CIRCLE[12].0) as usize];
 
             // At least 3 of {0,4,8,12} must be above hi or below lo
             let n_above = (p0 > hi) as u8 + (p4 > hi) as u8 + (p8 > hi) as u8 + (p12 > hi) as u8;
@@ -60,10 +59,7 @@ pub fn detect_fast9(img: &ImageBuf<f32, Gray>, threshold: f32) -> Vec<KeyPoint> 
 
             // Full 16-pixel test: check for 9 contiguous pixels
             if let Some(score) = fast9_score(data, w, x, y, hi, lo) {
-                corners.push(
-                    KeyPoint::new(x as f32, y as f32)
-                        .with_response(score),
-                );
+                corners.push(KeyPoint::new(x as f32, y as f32).with_response(score));
             }
         }
     }

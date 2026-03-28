@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Standalone line chart — no feature flags needed.
 
-use esoc_chart::v2::*;
+use esoc_chart::v2::{line, Chart, Layer, MarkType};
 
 fn main() -> esoc_chart::error::Result<()> {
     // Sine and cosine waves
-    let x: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();
+    let x: Vec<f64> = (0..100).map(|i| f64::from(i) * 0.1).collect();
     let y_sin: Vec<f64> = x.iter().map(|&xi| xi.sin()).collect();
     let y_cos: Vec<f64> = x.iter().map(|&xi| xi.cos()).collect();
 

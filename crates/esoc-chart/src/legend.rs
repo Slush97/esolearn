@@ -68,19 +68,13 @@ pub fn render_legend(
 
     // Position the legend box
     let (bx, by) = match position {
-        LegendPosition::UpperRight => (
-            plot_area.right() - box_width - 10.0,
-            plot_area.y + 10.0,
-        ),
+        LegendPosition::UpperRight => (plot_area.right() - box_width - 10.0, plot_area.y + 10.0),
         LegendPosition::UpperLeft => (plot_area.x + 10.0, plot_area.y + 10.0),
         LegendPosition::LowerRight => (
             plot_area.right() - box_width - 10.0,
             plot_area.bottom() - box_height - 10.0,
         ),
-        LegendPosition::LowerLeft => (
-            plot_area.x + 10.0,
-            plot_area.bottom() - box_height - 10.0,
-        ),
+        LegendPosition::LowerLeft => (plot_area.x + 10.0, plot_area.bottom() - box_height - 10.0),
     };
 
     // Background box

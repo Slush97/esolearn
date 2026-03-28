@@ -4,8 +4,8 @@
 use std::fmt::Write;
 
 use esoc_scene::mark::{
-    ArcMark, AreaMark, LineMark, Mark, MarkBatch, PathCommand, PathMark, PointMark,
-    RectMark, RuleMark, TextAnchor, TextMark,
+    ArcMark, AreaMark, LineMark, Mark, MarkBatch, PathCommand, PathMark, PointMark, RectMark,
+    RuleMark, TextAnchor, TextMark,
 };
 use esoc_scene::node::NodeContent;
 use esoc_scene::style::{FillStyle, LineCap, LineJoin, MarkerShape, StrokeStyle};
@@ -78,11 +78,7 @@ pub fn save_scene_svg(scene: &SceneGraph, width: f32, height: f32, path: &str) -
 
 /// Render a scene graph to PNG bytes (requires `png` feature).
 #[cfg(feature = "png")]
-pub fn render_scene_png(
-    scene: &SceneGraph,
-    width: f32,
-    height: f32,
-) -> Result<Vec<u8>> {
+pub fn render_scene_png(scene: &SceneGraph, width: f32, height: f32) -> Result<Vec<u8>> {
     let svg_str = render_scene_svg(scene, width, height)?;
     let opt = crate::usvg_options_with_fonts();
     let tree = resvg::usvg::Tree::from_str(&svg_str, &opt)
@@ -102,12 +98,7 @@ pub fn render_scene_png(
 
 /// Save a scene graph as a PNG file (requires `png` feature).
 #[cfg(feature = "png")]
-pub fn save_scene_png(
-    scene: &SceneGraph,
-    width: f32,
-    height: f32,
-    path: &str,
-) -> Result<()> {
+pub fn save_scene_png(scene: &SceneGraph, width: f32, height: f32, path: &str) -> Result<()> {
     let bytes = render_scene_png(scene, width, height)?;
     std::fs::write(path, bytes)?;
     Ok(())
@@ -201,7 +192,10 @@ fn write_line(w: &mut String, l: &LineMark, transform: Affine2D, pad: &str) -> R
         .collect::<Vec<_>>()
         .join(" ");
     let stroke_attrs = stroke_attrs(&l.stroke);
-    writeln!(w, r#"{pad}<polyline points="{pts}" fill="none"{stroke_attrs}/>"#)?;
+    writeln!(
+        w,
+        r#"{pad}<polyline points="{pts}" fill="none"{stroke_attrs}/>"#
+    )?;
     Ok(())
 }
 
@@ -285,16 +279,21 @@ fn write_point_at(
             writeln!(
                 w,
                 r#"{pad}<rect x="{}" y="{}" width="{size}" height="{size}" fill="{fill_str}"{stroke_str}/>"#,
-                pos[0] - r, pos[1] - r,
+                pos[0] - r,
+                pos[1] - r,
             )?;
         }
         MarkerShape::Diamond => {
             let pts = format!(
                 "{},{} {},{} {},{} {},{}",
-                pos[0], pos[1] - r,
-                pos[0] + r, pos[1],
-                pos[0], pos[1] + r,
-                pos[0] - r, pos[1],
+                pos[0],
+                pos[1] - r,
+                pos[0] + r,
+                pos[1],
+                pos[0],
+                pos[1] + r,
+                pos[0] - r,
+                pos[1],
             );
             writeln!(
                 w,
@@ -304,9 +303,12 @@ fn write_point_at(
         MarkerShape::TriangleUp => {
             let pts = format!(
                 "{},{} {},{} {},{}",
-                pos[0], pos[1] - r,
-                pos[0] + r, pos[1] + r,
-                pos[0] - r, pos[1] + r,
+                pos[0],
+                pos[1] - r,
+                pos[0] + r,
+                pos[1] + r,
+                pos[0] - r,
+                pos[1] + r,
             );
             writeln!(
                 w,
@@ -352,10 +354,7 @@ fn write_text(w: &mut String, t: &TextMark, transform: Affine2D, pad: &str) -> R
     let pos = transform.apply(t.position);
     let fill_str = fill_svg(&t.fill);
     let rotation = if t.angle.abs() > 0.01 {
-        format!(
-            r#" transform="rotate({},{},{})""#,
-            t.angle, pos[0], pos[1]
-        )
+        format!(r#" transform="rotate({},{},{})""#, t.angle, pos[0], pos[1])
     } else {
         String::new()
     };

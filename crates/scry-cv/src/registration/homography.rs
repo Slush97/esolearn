@@ -100,9 +100,8 @@ pub fn estimate_dlt(pairs: &[PointPair]) -> Option<Homography> {
 
     // Denormalize: H = T_dst^{-1} * H_norm * T_src
     let h_normalized = [
-        h_norm[0], h_norm[1], h_norm[2],
-        h_norm[3], h_norm[4], h_norm[5],
-        h_norm[6], h_norm[7], h_norm[8],
+        h_norm[0], h_norm[1], h_norm[2], h_norm[3], h_norm[4], h_norm[5], h_norm[6], h_norm[7],
+        h_norm[8],
     ];
 
     let h = denormalize_homography(&h_normalized, &t_src, &t_dst);
@@ -113,31 +112,33 @@ pub fn estimate_dlt(pairs: &[PointPair]) -> Option<Homography> {
     }
     let inv = 1.0 / h[8];
     let data = [
-        h[0] * inv, h[1] * inv, h[2] * inv,
-        h[3] * inv, h[4] * inv, h[5] * inv,
-        h[6] * inv, h[7] * inv, 1.0,
+        h[0] * inv,
+        h[1] * inv,
+        h[2] * inv,
+        h[3] * inv,
+        h[4] * inv,
+        h[5] * inv,
+        h[6] * inv,
+        h[7] * inv,
+        1.0,
     ];
 
     Some(Homography { data })
 }
 
 /// Estimate homography with RANSAC for outlier rejection.
-pub fn find_homography(
-    pairs: &[PointPair],
-    config: &RansacConfig,
-) -> Result<HomographyResult> {
+pub fn find_homography(pairs: &[PointPair], config: &RansacConfig) -> Result<HomographyResult> {
     if pairs.len() < 4 {
         return Err(ScryVisionError::InsufficientData(
             "need at least 4 point correspondences for homography".into(),
         ));
     }
 
-    let result: RansacResult<Homography> = ransac(pairs, config).ok_or(
-        ScryVisionError::ConvergenceFailure {
+    let result: RansacResult<Homography> =
+        ransac(pairs, config).ok_or(ScryVisionError::ConvergenceFailure {
             iterations: config.max_iterations as usize,
             tolerance: config.threshold,
-        },
-    )?;
+        })?;
 
     Ok(HomographyResult {
         h: result.model,
@@ -158,11 +159,7 @@ fn normalize_points(
     let cx: f64 = pts.iter().map(|p| p.0).sum::<f64>() / n;
     let cy: f64 = pts.iter().map(|p| p.1).sum::<f64>() / n;
 
-    let avg_dist: f64 = pts
-        .iter()
-        .map(|p| (p.0 - cx).hypot(p.1 - cy))
-        .sum::<f64>()
-        / n;
+    let avg_dist: f64 = pts.iter().map(|p| (p.0 - cx).hypot(p.1 - cy)).sum::<f64>() / n;
 
     let s = if avg_dist > 1e-10 {
         std::f64::consts::SQRT_2 / avg_dist
@@ -189,9 +186,15 @@ fn denormalize_homography(h: &[f64; 9], t_src: &[f64; 9], t_dst: &[f64; 9]) -> [
     let ty = t_dst[5];
     let inv_s = if s.abs() > 1e-12 { 1.0 / s } else { 1.0 };
     let t_dst_inv = [
-        inv_s, 0.0, -tx * inv_s,
-        0.0, inv_s, -ty * inv_s,
-        0.0, 0.0, 1.0,
+        inv_s,
+        0.0,
+        -tx * inv_s,
+        0.0,
+        inv_s,
+        -ty * inv_s,
+        0.0,
+        0.0,
+        1.0,
     ];
 
     let tmp = mat3_mul(h, t_src);
@@ -202,8 +205,7 @@ fn mat3_mul(a: &[f64; 9], b: &[f64; 9]) -> [f64; 9] {
     let mut c = [0.0f64; 9];
     for i in 0..3 {
         for j in 0..3 {
-            c[i * 3 + j] =
-                a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+            c[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
         }
     }
     c
@@ -266,10 +268,22 @@ mod tests {
     #[test]
     fn identity_homography() {
         let pairs: Vec<PointPair> = vec![
-            PointPair { src: (0.0, 0.0), dst: (0.0, 0.0) },
-            PointPair { src: (100.0, 0.0), dst: (100.0, 0.0) },
-            PointPair { src: (100.0, 100.0), dst: (100.0, 100.0) },
-            PointPair { src: (0.0, 100.0), dst: (0.0, 100.0) },
+            PointPair {
+                src: (0.0, 0.0),
+                dst: (0.0, 0.0),
+            },
+            PointPair {
+                src: (100.0, 0.0),
+                dst: (100.0, 0.0),
+            },
+            PointPair {
+                src: (100.0, 100.0),
+                dst: (100.0, 100.0),
+            },
+            PointPair {
+                src: (0.0, 100.0),
+                dst: (0.0, 100.0),
+            },
         ];
         let h = estimate_dlt(&pairs).unwrap();
 
@@ -279,7 +293,10 @@ mod tests {
             assert!(
                 (tx - p.dst.0).abs() < 1.0 && (ty - p.dst.1).abs() < 1.0,
                 "identity H should map ({},{}) to ({},{}), got ({tx},{ty})",
-                p.src.0, p.src.1, p.dst.0, p.dst.1
+                p.src.0,
+                p.src.1,
+                p.dst.0,
+                p.dst.1
             );
         }
     }
@@ -289,10 +306,22 @@ mod tests {
         let tx_off = 10.0;
         let ty_off = 20.0;
         let pairs: Vec<PointPair> = vec![
-            PointPair { src: (0.0, 0.0), dst: (tx_off, ty_off) },
-            PointPair { src: (100.0, 0.0), dst: (100.0 + tx_off, ty_off) },
-            PointPair { src: (100.0, 100.0), dst: (100.0 + tx_off, 100.0 + ty_off) },
-            PointPair { src: (0.0, 100.0), dst: (tx_off, 100.0 + ty_off) },
+            PointPair {
+                src: (0.0, 0.0),
+                dst: (tx_off, ty_off),
+            },
+            PointPair {
+                src: (100.0, 0.0),
+                dst: (100.0 + tx_off, ty_off),
+            },
+            PointPair {
+                src: (100.0, 100.0),
+                dst: (100.0 + tx_off, 100.0 + ty_off),
+            },
+            PointPair {
+                src: (0.0, 100.0),
+                dst: (tx_off, 100.0 + ty_off),
+            },
         ];
         let h = estimate_dlt(&pairs).unwrap();
 
@@ -317,8 +346,14 @@ mod tests {
             })
             .collect();
         // Add outliers
-        pairs.push(PointPair { src: (50.0, 50.0), dst: (200.0, 300.0) });
-        pairs.push(PointPair { src: (80.0, 80.0), dst: (-100.0, -200.0) });
+        pairs.push(PointPair {
+            src: (50.0, 50.0),
+            dst: (200.0, 300.0),
+        });
+        pairs.push(PointPair {
+            src: (80.0, 80.0),
+            dst: (-100.0, -200.0),
+        });
 
         let config = RansacConfig {
             max_iterations: 500,
@@ -328,10 +363,20 @@ mod tests {
         };
 
         let result = find_homography(&pairs, &config).unwrap();
-        assert!(result.n_inliers >= 8, "should have >= 8 inliers, got {}", result.n_inliers);
+        assert!(
+            result.n_inliers >= 8,
+            "should have >= 8 inliers, got {}",
+            result.n_inliers
+        );
 
         // The RANSAC should at least reject the obvious outliers
-        assert!(!result.inlier_mask[20], "outlier at index 20 should be rejected");
-        assert!(!result.inlier_mask[21], "outlier at index 21 should be rejected");
+        assert!(
+            !result.inlier_mask[20],
+            "outlier at index 20 should be rejected"
+        );
+        assert!(
+            !result.inlier_mask[21],
+            "outlier at index 21 should be rejected"
+        );
     }
 }

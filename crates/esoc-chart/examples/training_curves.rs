@@ -4,7 +4,8 @@
 //! This is a common visualization in ML: watching loss and accuracy
 //! converge over training epochs.
 
-use esoc_chart::prelude::*;
+use esoc_chart::prelude::{Figure, Result};
+use esoc_color::Color;
 
 fn main() -> Result<()> {
     // ── Simulate training curves ─────────────────────────────────────
@@ -52,12 +53,12 @@ fn main() -> Result<()> {
     ax.x_label("Epoch").y_label("Loss");
     ax.line(&epochs, &train_loss)
         .label("Train Loss")
-        .color(Color::from_hex("#1f77b4").unwrap())
+        .color(Color::from_hex("#1f77b4").unwrap().into())
         .width(2.0)
         .done();
     ax.line(&epochs, &val_loss)
         .label("Val Loss")
-        .color(Color::from_hex("#ff7f0e").unwrap())
+        .color(Color::from_hex("#ff7f0e").unwrap().into())
         .width(2.0)
         .dash(&[8.0, 4.0])
         .done();
@@ -74,12 +75,12 @@ fn main() -> Result<()> {
     ax2.x_label("Epoch").y_label("Accuracy").y_range(0.4, 1.05);
     ax2.line(&epochs, &train_acc)
         .label("Train Accuracy")
-        .color(Color::from_hex("#2ca02c").unwrap())
+        .color(Color::from_hex("#2ca02c").unwrap().into())
         .width(2.0)
         .done();
     ax2.line(&epochs, &val_acc)
         .label("Val Accuracy")
-        .color(Color::from_hex("#d62728").unwrap())
+        .color(Color::from_hex("#d62728").unwrap().into())
         .width(2.0)
         .dash(&[8.0, 4.0])
         .done();
@@ -92,9 +93,14 @@ fn main() -> Result<()> {
 
 struct SimpleRng(u64);
 impl SimpleRng {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
     fn uniform(&mut self) -> f64 {

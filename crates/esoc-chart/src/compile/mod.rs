@@ -55,13 +55,18 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                     if v < 0.0 {
                         return Err(ChartError::InvalidData {
                             layer: i,
-                            detail: format!("treemap values must be non-negative, got {v} at index {j}"),
+                            detail: format!(
+                                "treemap values must be non-negative, got {v} at index {j}"
+                            ),
                         });
                     }
                     if v.is_nan() || v.is_infinite() {
                         return Err(ChartError::InvalidData {
                             layer: i,
-                            detail: format!("treemap y_data contains {} at index {j}", if v.is_nan() { "NaN" } else { "Inf" }),
+                            detail: format!(
+                                "treemap y_data contains {} at index {j}",
+                                if v.is_nan() { "NaN" } else { "Inf" }
+                            ),
                         });
                     }
                 }
@@ -87,7 +92,11 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                 if fv.len() != n {
                     return Err(ChartError::InvalidData {
                         layer: i,
-                        detail: format!("facet_values has {} elements but data has {}", fv.len(), n),
+                        detail: format!(
+                            "facet_values has {} elements but data has {}",
+                            fv.len(),
+                            n
+                        ),
                     });
                 }
             }
@@ -97,7 +106,11 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
             if eb.len() != y.len() {
                 return Err(ChartError::InvalidData {
                     layer: i,
-                    detail: format!("error_bars has {} elements but y_data has {}", eb.len(), y.len()),
+                    detail: format!(
+                        "error_bars has {} elements but y_data has {}",
+                        eb.len(),
+                        y.len()
+                    ),
                 });
             }
         }
@@ -107,7 +120,11 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                 if v.is_nan() || v.is_infinite() {
                     return Err(ChartError::InvalidData {
                         layer: i,
-                        detail: format!("x_data contains {} at index {}", if v.is_nan() { "NaN" } else { "Inf" }, j),
+                        detail: format!(
+                            "x_data contains {} at index {}",
+                            if v.is_nan() { "NaN" } else { "Inf" },
+                            j
+                        ),
                     });
                 }
             }
@@ -117,7 +134,11 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                 if v.is_nan() || v.is_infinite() {
                     return Err(ChartError::InvalidData {
                         layer: i,
-                        detail: format!("y_data contains {} at index {}", if v.is_nan() { "NaN" } else { "Inf" }, j),
+                        detail: format!(
+                            "y_data contains {} at index {}",
+                            if v.is_nan() { "NaN" } else { "Inf" },
+                            j
+                        ),
                     });
                 }
             }
@@ -175,8 +196,16 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
         if !has_bar_or_area {
             let x_range = data_bounds.x_max - data_bounds.x_min;
             let y_range = data_bounds.y_max - data_bounds.y_min;
-            let pad_x = if x_range.abs() < 1e-12 { 1.0 } else { x_range * 0.05 };
-            let pad_y = if y_range.abs() < 1e-12 { 1.0 } else { y_range * 0.05 };
+            let pad_x = if x_range.abs() < 1e-12 {
+                1.0
+            } else {
+                x_range * 0.05
+            };
+            let pad_y = if y_range.abs() < 1e-12 {
+                1.0
+            } else {
+                y_range * 0.05
+            };
             data_bounds.x_min -= pad_x;
             data_bounds.x_max += pad_x;
             data_bounds.y_min -= pad_y;
@@ -273,32 +302,47 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     }
 
     // Background
-    let bg_node = Node::with_mark(esoc_scene::mark::Mark::Rect(
-        esoc_scene::mark::RectMark {
-            bounds: esoc_scene::bounds::BoundingBox::new(0.0, 0.0, chart.width, chart.height),
-            fill: esoc_scene::style::FillStyle::Solid(theme.background),
-            stroke: esoc_scene::style::StrokeStyle {
-                width: 0.0,
-                ..Default::default()
-            },
-            corner_radius: 0.0,
+    let bg_node = Node::with_mark(esoc_scene::mark::Mark::Rect(esoc_scene::mark::RectMark {
+        bounds: esoc_scene::bounds::BoundingBox::new(0.0, 0.0, chart.width, chart.height),
+        fill: esoc_scene::style::FillStyle::Solid(theme.background),
+        stroke: esoc_scene::style::StrokeStyle {
+            width: 0.0,
+            ..Default::default()
         },
-    ))
+        corner_radius: 0.0,
+    }))
     .z_order(-10);
     scene.insert_child(root, bg_node);
 
     // Check if faceting is needed
-    let has_facets = !matches!(chart.facet, Facet::None)
-        && resolved.iter().any(|l| l.facet_values.is_some());
+    let has_facets =
+        !matches!(chart.facet, Facet::None) && resolved.iter().any(|l| l.facet_values.is_some());
 
     if has_facets {
         compile_faceted(
-            chart, &mut scene, root, &resolved, &data_bounds, plot_x, plot_y, plot_w, plot_h,
+            chart,
+            &mut scene,
+            root,
+            &resolved,
+            &data_bounds,
+            plot_x,
+            plot_y,
+            plot_w,
+            plot_h,
         )?;
     } else {
         compile_single_panel(
-            chart, &mut scene, root, &resolved, &data_bounds, plot_x, plot_y, plot_w, plot_h,
-            is_flipped, margins.legend_placement,
+            chart,
+            &mut scene,
+            root,
+            &resolved,
+            &data_bounds,
+            plot_x,
+            plot_y,
+            plot_w,
+            plot_h,
+            is_flipped,
+            margins.legend_placement,
         )?;
     }
 
@@ -308,8 +352,8 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
         let lines = layout::wrap_text(title, max_chars, 2);
         for (i, line) in lines.iter().enumerate() {
             let y = theme.title_font_size + 4.0 + i as f32 * theme.title_font_size * 1.2;
-            let title_node = Node::with_mark(esoc_scene::mark::Mark::Text(
-                esoc_scene::mark::TextMark {
+            let title_node =
+                Node::with_mark(esoc_scene::mark::Mark::Text(esoc_scene::mark::TextMark {
                     position: [chart.width * 0.5, y],
                     text: line.clone(),
                     font: esoc_scene::style::FontStyle {
@@ -321,9 +365,8 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
                     fill: esoc_scene::style::FillStyle::Solid(theme.foreground),
                     angle: 0.0,
                     anchor: esoc_scene::mark::TextAnchor::Middle,
-                },
-            ))
-            .z_order(10);
+                }))
+                .z_order(10);
             scene.insert_child(root, title_node);
         }
     }
@@ -331,15 +374,18 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     // Subtitle
     if let Some(subtitle) = &chart.subtitle {
         annotation::generate_subtitle(
-            &mut scene, root, subtitle, chart.width, theme.title_font_size, theme,
+            &mut scene,
+            root,
+            subtitle,
+            chart.width,
+            theme.title_font_size,
+            theme,
         );
     }
 
     // Caption
     if let Some(caption) = &chart.caption {
-        annotation::generate_caption(
-            &mut scene, root, caption, chart.width, chart.height, theme,
-        );
+        annotation::generate_caption(&mut scene, root, caption, chart.width, chart.height, theme);
     }
 
     Ok(scene)
@@ -358,7 +404,7 @@ fn generate_heatmap_axes(
     plot_w: f32,
     plot_h: f32,
 ) {
-    use esoc_scene::mark::{Mark, TextMark, TextAnchor};
+    use esoc_scene::mark::{Mark, TextAnchor, TextMark};
     use esoc_scene::style::{FillStyle, FontStyle};
 
     let theme = &chart.theme;
@@ -439,10 +485,7 @@ fn generate_heatmap_axes(
     // Y axis label (rotated)
     if let Some(label) = &chart.y_label {
         let text = Node::with_mark(Mark::Text(TextMark {
-            position: [
-                plot_x - theme.tick_font_size * 3.5,
-                plot_y + plot_h * 0.5,
-            ],
+            position: [plot_x - theme.tick_font_size * 3.5, plot_y + plot_h * 0.5],
             text: label.clone(),
             font: FontStyle {
                 family: theme.font_family.clone(),
@@ -512,20 +555,36 @@ fn compile_single_panel(
 
         // Extract category labels from bar layers for x-axis labeling
         let bar_categories: Option<Vec<String>> = if all_bar {
-            resolved
-                .iter()
-                .find_map(|l| l.categories.clone())
+            resolved.iter().find_map(|l| l.categories.clone())
         } else {
             None
         };
 
         // When flipped, categories belong on the y-axis, not x-axis
-        let x_cats = if is_flipped && all_bar { None } else { bar_categories.as_deref() };
-        let y_cats = if is_flipped && all_bar { bar_categories.as_deref() } else { None };
+        let x_cats = if is_flipped && all_bar {
+            None
+        } else {
+            bar_categories.as_deref()
+        };
+        let y_cats = if is_flipped && all_bar {
+            bar_categories.as_deref()
+        } else {
+            None
+        };
 
         axis_gen::generate_axes(
-            scene, plot_id, root, data_bounds, plot_w, plot_h, plot_x, plot_y, theme,
-            x_label, y_label, grid_axes,
+            scene,
+            plot_id,
+            root,
+            data_bounds,
+            plot_w,
+            plot_h,
+            plot_x,
+            plot_y,
+            theme,
+            x_label,
+            y_label,
+            grid_axes,
             x_cats,
             y_cats,
         );
@@ -534,7 +593,14 @@ fn compile_single_panel(
     let total_layers = resolved.len();
     for resolved_layer in resolved {
         mark_gen::generate_layer_marks_flipped(
-            scene, plot_id, resolved_layer, data_bounds, plot_w, plot_h, theme, is_flipped,
+            scene,
+            plot_id,
+            resolved_layer,
+            data_bounds,
+            plot_w,
+            plot_h,
+            theme,
+            is_flipped,
             total_layers,
         )?;
     }
@@ -567,8 +633,16 @@ fn compile_single_panel(
     // Annotations
     if !chart.annotations.is_empty() && !is_pie {
         annotation::generate_annotations(
-            scene, plot_id, root, &chart.annotations, data_bounds, plot_w, plot_h,
-            plot_x, plot_y, theme,
+            scene,
+            plot_id,
+            root,
+            &chart.annotations,
+            data_bounds,
+            plot_w,
+            plot_h,
+            plot_x,
+            plot_y,
+            theme,
         );
     }
 
@@ -600,7 +674,8 @@ fn compile_faceted(
     let strip_h = theme.tick_font_size + 6.0;
     // Account for strip labels in available height
     let effective_h = plot_h - (strip_h * panels.len().div_ceil(ncol) as f32);
-    let layout = facet::compute_facet_layout(panels.len(), ncol, plot_w, effective_h.max(100.0), gap);
+    let layout =
+        facet::compute_facet_layout(panels.len(), ncol, plot_w, effective_h.max(100.0), gap);
 
     // Plot area container
     let plot_container = Node::container().transform(Affine2D::translate(plot_x, plot_y));
@@ -631,9 +706,10 @@ fn compile_faceted(
         let show_y = is_left_col;
 
         // Detect if panel layers are all-bar for grid axes and category labels
-        let panel_all_bar = panel.layers.iter().all(|l| {
-            matches!(l.mark, crate::grammar::layer::MarkType::Bar)
-        });
+        let panel_all_bar = panel
+            .layers
+            .iter()
+            .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar));
         let panel_grid_axes = if panel_all_bar {
             axis_gen::GridAxes::HorizontalOnly
         } else {
@@ -656,8 +732,16 @@ fn compile_faceted(
             0.0,
             0.0,
             &facet_theme,
-            if show_x { chart.x_label.as_deref() } else { None },
-            if show_y { chart.y_label.as_deref() } else { None },
+            if show_x {
+                chart.x_label.as_deref()
+            } else {
+                None
+            },
+            if show_y {
+                chart.y_label.as_deref()
+            } else {
+                None
+            },
             panel_grid_axes,
             panel_bar_categories.as_deref(),
             None,
@@ -667,7 +751,13 @@ fn compile_faceted(
         let panel_total_layers = panel.layers.len();
         for layer in &panel.layers {
             mark_gen::generate_layer_marks(
-                scene, panel_id, layer, &panel_bounds, rect.w, rect.h, theme,
+                scene,
+                panel_id,
+                layer,
+                &panel_bounds,
+                rect.w,
+                rect.h,
+                theme,
                 panel_total_layers,
             )?;
         }
@@ -710,13 +800,22 @@ fn compute_resolved_data_bounds(layers: &[ResolvedLayer]) -> Result<DataBounds> 
         if let Some(data) = layers.first().and_then(|l| l.heatmap_data.as_ref()) {
             let rows = data.len();
             let cols = data.first().map_or(0, |r| r.len());
-            return Ok(DataBounds::new(-0.5, cols as f64 - 0.5, -0.5, rows as f64 - 0.5));
+            return Ok(DataBounds::new(
+                -0.5,
+                cols as f64 - 0.5,
+                -0.5,
+                rows as f64 - 0.5,
+            ));
         }
         return Ok(DataBounds::new(0.0, 1.0, 0.0, 1.0));
     }
 
-    let mut bounds =
-        DataBounds::new(f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let mut bounds = DataBounds::new(
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    );
     let mut has_data = false;
 
     for layer in layers {
@@ -809,7 +908,11 @@ mod tests {
         let result = compile_chart(&chart);
         assert!(matches!(
             result,
-            Err(ChartError::DimensionMismatch { layer: 0, x_len: 3, y_len: 2 })
+            Err(ChartError::DimensionMismatch {
+                layer: 0,
+                x_len: 3,
+                y_len: 2
+            })
         ));
     }
 
@@ -821,7 +924,11 @@ mod tests {
             .with_y(vec![5.0, 10.0, 15.0]);
         let resolved = stat_transform::resolve_layer(&layer, 0).unwrap();
         let bounds = compute_resolved_data_bounds(&[resolved]).unwrap();
-        assert!(bounds.y_min <= 0.0, "bar chart should include y=0, got y_min={}", bounds.y_min);
+        assert!(
+            bounds.y_min <= 0.0,
+            "bar chart should include y=0, got y_min={}",
+            bounds.y_min
+        );
     }
 
     #[test]
@@ -947,8 +1054,7 @@ mod tests {
 
     #[test]
     fn heatmap_inf_returns_error() {
-        let layer = Layer::new(MarkType::Heatmap)
-            .with_heatmap_data(vec![vec![1.0, f64::INFINITY]]);
+        let layer = Layer::new(MarkType::Heatmap).with_heatmap_data(vec![vec![1.0, f64::INFINITY]]);
         let chart = Chart::new().layer(layer);
         let result = compile_chart(&chart);
         assert!(matches!(result, Err(ChartError::InvalidData { .. })));
@@ -993,9 +1099,17 @@ mod tests {
         let resolved = stat_transform::resolve_layer(&layer, 0).unwrap();
         let bounds = compute_resolved_data_bounds(&[resolved]).unwrap();
         // y_max should be at least 20+3=23
-        assert!(bounds.y_max >= 23.0, "bounds should include error bar extent, got y_max={}", bounds.y_max);
+        assert!(
+            bounds.y_max >= 23.0,
+            "bounds should include error bar extent, got y_max={}",
+            bounds.y_max
+        );
         // y_min should be at most 10-5=5 (but bar chart zero-includes to 0)
-        assert!(bounds.y_min <= 5.0, "bounds should include error bar extent, got y_min={}", bounds.y_min);
+        assert!(
+            bounds.y_min <= 5.0,
+            "bounds should include error bar extent, got y_min={}",
+            bounds.y_min
+        );
     }
 
     #[test]

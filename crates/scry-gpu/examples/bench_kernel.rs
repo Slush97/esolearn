@@ -74,15 +74,9 @@ fn bench_at_size(gpu: &Device, n: usize) {
 
     let speedup = oneshot_per.as_nanos() as f64 / cached_per.as_nanos() as f64;
 
-    println!(
-        "  one-shot dispatch():  {:>8.2?} / iter  (total: {oneshot_total:.2?})",
-        oneshot_per
-    );
-    println!("  compile() once:       {:>8.2?}", compile_time);
-    println!(
-        "  cached run():         {:>8.2?} / iter  (total: {cached_total:.2?})",
-        cached_per
-    );
+    println!("  one-shot dispatch():  {oneshot_per:>8.2?} / iter  (total: {oneshot_total:.2?})");
+    println!("  compile() once:       {compile_time:>8.2?}");
+    println!("  cached run():         {cached_per:>8.2?} / iter  (total: {cached_total:.2?})");
     println!("  speedup:              {speedup:.2}x");
     println!();
 }

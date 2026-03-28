@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Scatter plot with color-coded categories — no feature flags needed.
 
-use esoc_chart::v2::*;
+use esoc_chart::v2::scatter;
 
 fn main() -> esoc_chart::error::Result<()> {
     // Three clusters of points

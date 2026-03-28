@@ -5,4 +5,4 @@ pub mod contour;
 pub mod labeling;
 
 pub use contour::{find_contours, Contour};
-pub use labeling::{connected_components, ComponentStats, Connectivity, ConnectedComponents};
+pub use labeling::{connected_components, ComponentStats, ConnectedComponents, Connectivity};

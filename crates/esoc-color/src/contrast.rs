@@ -44,6 +44,7 @@ pub fn text_color_on(bg: Color) -> Color {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

@@ -8,7 +8,11 @@
 /// in each local neighborhood (0 < bandwidth <= 1).
 ///
 /// Returns an error if `x_data` and `y_data` have different lengths.
-pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> crate::error::Result<(Vec<f64>, Vec<f64>)> {
+pub fn compute_loess(
+    x_data: &[f64],
+    y_data: &[f64],
+    bandwidth: f64,
+) -> crate::error::Result<(Vec<f64>, Vec<f64>)> {
     if x_data.is_empty() || y_data.is_empty() {
         return Ok((vec![], vec![]));
     }
@@ -26,7 +30,11 @@ pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> crate::e
 
     // Sort by x for output
     let mut indices: Vec<usize> = (0..n).collect();
-    indices.sort_by(|&a, &b| x_data[a].partial_cmp(&x_data[b]).unwrap_or(std::cmp::Ordering::Equal));
+    indices.sort_by(|&a, &b| {
+        x_data[a]
+            .partial_cmp(&x_data[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut x_out = Vec::with_capacity(n);
     let mut y_out = Vec::with_capacity(n);
@@ -35,9 +43,7 @@ pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> crate::e
         let xi = x_data[i];
 
         // Find k nearest neighbors by x distance
-        let mut dists: Vec<(usize, f64)> = (0..n)
-            .map(|j| (j, (x_data[j] - xi).abs()))
-            .collect();
+        let mut dists: Vec<(usize, f64)> = (0..n).map(|j| (j, (x_data[j] - xi).abs())).collect();
         dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         let dists = &dists[..neighbors];
 
@@ -62,10 +68,26 @@ pub fn compute_loess(x_data: &[f64], y_data: &[f64], bandwidth: f64) -> crate::e
             continue;
         }
 
-        let sum_wx: f64 = dists.iter().zip(weights.iter()).map(|(&(j, _), &w)| w * x_data[j]).sum();
-        let sum_wy: f64 = dists.iter().zip(weights.iter()).map(|(&(j, _), &w)| w * y_data[j]).sum();
-        let sum_wxx: f64 = dists.iter().zip(weights.iter()).map(|(&(j, _), &w)| w * x_data[j] * x_data[j]).sum();
-        let sum_wxy: f64 = dists.iter().zip(weights.iter()).map(|(&(j, _), &w)| w * x_data[j] * y_data[j]).sum();
+        let sum_wx: f64 = dists
+            .iter()
+            .zip(weights.iter())
+            .map(|(&(j, _), &w)| w * x_data[j])
+            .sum();
+        let sum_wy: f64 = dists
+            .iter()
+            .zip(weights.iter())
+            .map(|(&(j, _), &w)| w * y_data[j])
+            .sum();
+        let sum_wxx: f64 = dists
+            .iter()
+            .zip(weights.iter())
+            .map(|(&(j, _), &w)| w * x_data[j] * x_data[j])
+            .sum();
+        let sum_wxy: f64 = dists
+            .iter()
+            .zip(weights.iter())
+            .map(|(&(j, _), &w)| w * x_data[j] * y_data[j])
+            .sum();
 
         let mean_x = sum_wx / sum_w;
         let mean_y = sum_wy / sum_w;
@@ -94,16 +116,16 @@ mod tests {
 
     #[test]
     fn linear_data_near_linear_output() {
-        let x: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..20).map(f64::from).collect();
         let y: Vec<f64> = x.iter().map(|&xi| 2.0 * xi + 1.0).collect();
-        let (_x_out, y_out) = compute_loess(&x, &y, 0.5).unwrap();
+        let (x_out, y_out) = compute_loess(&x, &y, 0.5).unwrap();
         // For perfectly linear data, LOESS should produce near-linear output
         for (i, &yi) in y_out.iter().enumerate() {
-            let expected = 2.0 * _x_out[i] + 1.0;
+            let expected = 2.0 * x_out[i] + 1.0;
             assert!(
                 (yi - expected).abs() < 0.5,
                 "At x={}, expected ~{}, got {}",
-                _x_out[i],
+                x_out[i],
                 expected,
                 yi
             );

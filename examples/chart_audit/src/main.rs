@@ -253,8 +253,9 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
     {
         let x = vec![1.0, 2.5, 3.0, 4.5, 5.0, 6.5, 7.0, 8.0, 9.0, 10.0];
         let y = vec![3.2, 5.1, 4.8, 7.3, 6.9, 9.1, 8.5, 11.0, 10.2, 12.8];
-        let cats = vec!["Train", "Train", "Train", "Train", "Train",
-                        "Test", "Test", "Test", "Test", "Test"];
+        let cats = vec![
+            "Train", "Train", "Train", "Train", "Train", "Test", "Test", "Test", "Test", "Test",
+        ];
         let chart = scatter(&x, &y)
             .color_by(&cats)
             .title("Dark Theme Scatter")
@@ -269,9 +270,16 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
     {
         let x: Vec<f64> = (0..30).map(|i| i as f64).collect();
         let y: Vec<f64> = x.iter().map(|v| (v * 0.3).sin() * 20.0 + 50.0).collect();
-        let cats: Vec<String> = x.iter().map(|v| {
-            if *v < 15.0 { "Sensor A".into() } else { "Sensor B".into() }
-        }).collect();
+        let cats: Vec<String> = x
+            .iter()
+            .map(|v| {
+                if *v < 15.0 {
+                    "Sensor A".into()
+                } else {
+                    "Sensor B".into()
+                }
+            })
+            .collect();
         let chart = line(&x, &y)
             .color_by(&cats)
             .title("Multi-Series Line")
@@ -317,7 +325,9 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
     // Subtitle + caption
     {
         let x: Vec<f64> = (0..12).map(|i| i as f64 + 1.0).collect();
-        let y = vec![42.0, 45.0, 48.0, 52.0, 55.0, 60.0, 58.0, 62.0, 65.0, 68.0, 72.0, 75.0];
+        let y = vec![
+            42.0, 45.0, 48.0, 52.0, 55.0, 60.0, 58.0, 62.0, 65.0, 68.0, 72.0, 75.0,
+        ];
         let chart = Chart::new()
             .layer(Layer::new(MarkType::Line).with_x(x).with_y(y))
             .title("Monthly Active Users")
@@ -332,19 +342,29 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
     // Large scatter (many points)
     {
         let n = 200;
-        let x: Vec<f64> = (0..n).map(|i| {
-            let t = i as f64 / n as f64;
-            t * 100.0 + (i as f64 * 0.7).sin() * 15.0
-        }).collect();
-        let y: Vec<f64> = (0..n).map(|i| {
-            let t = i as f64 / n as f64;
-            t * 80.0 + (i as f64 * 1.3).cos() * 20.0 + 10.0
-        }).collect();
-        let cats: Vec<String> = (0..n).map(|i| {
-            if i % 3 == 0 { "Cluster A".into() }
-            else if i % 3 == 1 { "Cluster B".into() }
-            else { "Cluster C".into() }
-        }).collect();
+        let x: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                t * 100.0 + (i as f64 * 0.7).sin() * 15.0
+            })
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / n as f64;
+                t * 80.0 + (i as f64 * 1.3).cos() * 20.0 + 10.0
+            })
+            .collect();
+        let cats: Vec<String> = (0..n)
+            .map(|i| {
+                if i % 3 == 0 {
+                    "Cluster A".into()
+                } else if i % 3 == 1 {
+                    "Cluster B".into()
+                } else {
+                    "Cluster C".into()
+                }
+            })
+            .collect();
         let chart = scatter(&x, &y)
             .color_by(&cats)
             .title("Dense Scatter (200 pts)")
@@ -357,10 +377,14 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
 
     // Faceted scatter
     {
-        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0];
+        let x = vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+        ];
         let y = vec![2.0, 4.0, 3.0, 5.0, 7.0, 6.0, 1.0, 3.0, 5.0, 4.0, 6.0, 8.0];
-        let facets = vec!["2024", "2024", "2024", "2024", "2024", "2024",
-                          "2025", "2025", "2025", "2025", "2025", "2025"];
+        let facets = vec![
+            "2024", "2024", "2024", "2024", "2024", "2024", "2025", "2025", "2025", "2025", "2025",
+            "2025",
+        ];
         let chart = scatter(&x, &y)
             .facet_wrap(&facets, 2)
             .title("Faceted Scatter")
@@ -386,7 +410,9 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
 
     // Donut with many slices
     {
-        let labels = vec!["Chrome", "Safari", "Firefox", "Edge", "Opera", "Samsung", "Other"];
+        let labels = vec![
+            "Chrome", "Safari", "Firefox", "Edge", "Opera", "Samsung", "Other",
+        ];
         let values = vec![64.0, 19.0, 3.5, 5.0, 2.5, 2.0, 4.0];
         let chart = pie_labeled(&labels, &values)
             .donut(0.4)
@@ -398,15 +424,32 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
 
     // Area with categories
     {
-        let x: Vec<f64> = (0..20).map(|i| i as f64).collect::<Vec<_>>()
-            .iter().cloned().cycle().take(40).collect();
-        let y: Vec<f64> = (0..40).map(|i| {
-            if i < 20 { (i as f64 * 0.3).sin() * 5.0 + 15.0 }
-            else { ((i - 20) as f64 * 0.3).cos() * 4.0 + 10.0 }
-        }).collect();
-        let cats: Vec<String> = (0..40).map(|i| {
-            if i < 20 { "Upload".into() } else { "Download".into() }
-        }).collect();
+        let x: Vec<f64> = (0..20)
+            .map(|i| i as f64)
+            .collect::<Vec<_>>()
+            .iter()
+            .cloned()
+            .cycle()
+            .take(40)
+            .collect();
+        let y: Vec<f64> = (0..40)
+            .map(|i| {
+                if i < 20 {
+                    (i as f64 * 0.3).sin() * 5.0 + 15.0
+                } else {
+                    ((i - 20) as f64 * 0.3).cos() * 4.0 + 10.0
+                }
+            })
+            .collect();
+        let cats: Vec<String> = (0..40)
+            .map(|i| {
+                if i < 20 {
+                    "Upload".into()
+                } else {
+                    "Download".into()
+                }
+            })
+            .collect();
         let chart = area(&x, &y)
             .color_by(&cats)
             .title("Network Traffic")
@@ -419,12 +462,16 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
 
     // Heatmap (larger, no annotations)
     {
-        let data: Vec<Vec<f64>> = (0..8).map(|r| {
-            (0..8).map(|c| {
-                let dist = ((r as f64 - 3.5).powi(2) + (c as f64 - 3.5).powi(2)).sqrt();
-                (4.0 - dist).max(0.0)
-            }).collect()
-        }).collect();
+        let data: Vec<Vec<f64>> = (0..8)
+            .map(|r| {
+                (0..8)
+                    .map(|c| {
+                        let dist = ((r as f64 - 3.5).powi(2) + (c as f64 - 3.5).powi(2)).sqrt();
+                        (4.0 - dist).max(0.0)
+                    })
+                    .collect()
+            })
+            .collect();
         let rows: Vec<String> = (0..8).map(|i| format!("R{}", i + 1)).collect();
         let cols: Vec<String> = (0..8).map(|i| format!("C{}", i + 1)).collect();
         let chart = heatmap(data)
@@ -542,9 +589,7 @@ fn main() {
         .build()
         .expect("build HTTP client");
 
-    let mut report = AuditReport {
-        charts: Vec::new(),
-    };
+    let mut report = AuditReport { charts: Vec::new() };
     let mut errors: HashMap<String, String> = HashMap::new();
 
     for (name, path) in &manifest {
@@ -570,9 +615,12 @@ fn main() {
 
     // Print summary
     if !report.charts.is_empty() {
-        let avg: f64 =
-            report.charts.iter().map(|c| c.overall_score as f64).sum::<f64>()
-                / report.charts.len() as f64;
+        let avg: f64 = report
+            .charts
+            .iter()
+            .map(|c| c.overall_score as f64)
+            .sum::<f64>()
+            / report.charts.len() as f64;
         println!("\n── Summary ──");
         println!("  Charts reviewed: {}", report.charts.len());
         println!("  Average score:   {avg:.1}/10");

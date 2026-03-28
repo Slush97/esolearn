@@ -31,9 +31,7 @@ fn char_width_factor(c: char) -> f32 {
 
 /// Estimate rendered text width using per-character width factors (sans-serif).
 pub fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    text.chars()
-        .map(|c| char_width_factor(c) * font_size)
-        .sum()
+    text.chars().map(|c| char_width_factor(c) * font_size).sum()
 }
 
 /// Compute adaptive tick count from axis pixel length.
@@ -45,9 +43,11 @@ pub fn target_tick_count(axis_length_px: f32, min_spacing: f32) -> usize {
 /// Compute margins based on chart properties and actual data bounds.
 pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     // Treemap: minimal margins (no axes), only title/legend
-    let is_treemap = chart.layers.iter().all(|l| {
-        matches!(l.mark, crate::grammar::layer::MarkType::Treemap)
-    }) && !chart.layers.is_empty();
+    let is_treemap = chart
+        .layers
+        .iter()
+        .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Treemap))
+        && !chart.layers.is_empty();
     if is_treemap {
         return compute_treemap_margins(chart);
     }
@@ -71,15 +71,17 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
 
     // ── Bottom margin ──
     // For bar charts with category labels, account for rotated label height.
-    let has_bar = chart.layers.iter().any(|l| {
-        matches!(l.mark, crate::grammar::layer::MarkType::Bar)
-    });
+    let has_bar = chart
+        .layers
+        .iter()
+        .any(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar));
     let rotated_label_extra = if has_bar {
         if let Some(cats) = chart.layers.iter().find_map(|l| l.categories.as_ref()) {
             // Estimate whether labels will need rotation by checking if they
             // fit horizontally in the available plot width
             let plot_w_approx = chart.width * 0.7; // rough estimate after margins
-            let total_label_w: f32 = cats.iter()
+            let total_label_w: f32 = cats
+                .iter()
                 .map(|c| estimate_text_width(c, chart.theme.tick_font_size) + 4.0)
                 .sum();
             if total_label_w > plot_w_approx {
@@ -97,7 +99,11 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     } else {
         0.0
     };
-    let caption_extra = if has_caption { chart.theme.tick_font_size + 10.0 } else { 0.0 };
+    let caption_extra = if has_caption {
+        chart.theme.tick_font_size + 10.0
+    } else {
+        0.0
+    };
     let tick_size = 5.0;
     let tick_pad = 2.0;
     // Match the title_gap used in axis_gen for x-label placement (label_font_size * 1.2),
@@ -105,7 +111,14 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     let title_pad = chart.theme.label_font_size * 1.2;
     let descender = chart.theme.label_font_size * 0.35;
     let bottom = if has_x_label {
-        tick_size + tick_pad + chart.theme.tick_font_size + title_pad + chart.theme.label_font_size + descender + rotated_label_extra + caption_extra
+        tick_size
+            + tick_pad
+            + chart.theme.tick_font_size
+            + title_pad
+            + chart.theme.label_font_size
+            + descender
+            + rotated_label_extra
+            + caption_extra
     } else {
         tick_size + tick_pad + chart.theme.tick_font_size + rotated_label_extra + caption_extra
     };
@@ -127,15 +140,30 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     let tick_mark_size = 5.0;
     let tick_label_pad = 2.0;
     let axis_title_pad = if has_y_label { 4.0 } else { 0.0 };
-    let axis_title_height = if has_y_label { chart.theme.label_font_size } else { 0.0 };
-    let label_extra = if has_y_label { chart.theme.label_font_size } else { 0.0 };
-    let left = tick_mark_size + tick_label_pad + max_y_label_width + axis_title_pad + axis_title_height + label_extra + 5.0;
+    let axis_title_height = if has_y_label {
+        chart.theme.label_font_size
+    } else {
+        0.0
+    };
+    let label_extra = if has_y_label {
+        chart.theme.label_font_size
+    } else {
+        0.0
+    };
+    let left = tick_mark_size
+        + tick_label_pad
+        + max_y_label_width
+        + axis_title_pad
+        + axis_title_height
+        + label_extra
+        + 5.0;
 
     // ── Right margin — measure legend labels ──
     // Match the suppression condition in legend_gen: single-layer bar charts suppress legends
     let has_legend = (chart.layers.iter().any(|l| l.categories.is_some())
         || chart.layers.len() > 1)
-        && !(chart.layers.len() == 1 && matches!(chart.layers[0].mark, crate::grammar::layer::MarkType::Bar));
+        && !(chart.layers.len() == 1
+            && matches!(chart.layers[0].mark, crate::grammar::layer::MarkType::Bar));
     // Heatmap gradient legend needs right margin even when has_legend is false
     let is_heatmap = chart.layers.iter().all(|l| {
         matches!(l.mark, crate::grammar::layer::MarkType::Heatmap) && l.heatmap_data.is_some()
@@ -182,7 +210,9 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         let entry_gap = 16.0;
         let entry_widths: Vec<f32> = all_labels
             .iter()
-            .map(|l| swatch + 4.0 + estimate_text_width(l, chart.theme.legend_font_size) + entry_gap)
+            .map(|l| {
+                swatch + 4.0 + estimate_text_width(l, chart.theme.legend_font_size) + entry_gap
+            })
             .collect();
         let available_w = chart.width - left - 10.0;
         let mut rows = 1_usize;
@@ -382,7 +412,11 @@ fn compute_treemap_margins(chart: &Chart) -> Margins {
         right,
         bottom,
         left: 10.0,
-        legend_placement: if has_legend { LegendPlacement::Right } else { LegendPlacement::None },
+        legend_placement: if has_legend {
+            LegendPlacement::Right
+        } else {
+            LegendPlacement::None
+        },
     }
 }
 
@@ -412,10 +446,8 @@ mod tests {
     fn labels_increase_margins() {
         let bounds = DataBounds::new(0.0, 10.0, 0.0, 100.0);
         let no_labels = compute_margins(&simple_chart(), &bounds);
-        let with_labels = compute_margins(
-            &simple_chart().x_label("X axis").y_label("Y axis"),
-            &bounds,
-        );
+        let with_labels =
+            compute_margins(&simple_chart().x_label("X axis").y_label("Y axis"), &bounds);
         assert!(with_labels.bottom > no_labels.bottom);
     }
 

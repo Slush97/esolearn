@@ -81,8 +81,7 @@ impl<B: MathBackend> PatchEmbedding<B> {
         }
 
         // Linear projection: patches[num_patches, patch_len] @ proj^T → [num_patches, embed_dim]
-        let patches_storage =
-            B::from_vec(patches, &Shape::new(&[num_patches, patch_len]));
+        let patches_storage = B::from_vec(patches, &Shape::new(&[num_patches, patch_len]));
         let out_data = B::matmul(
             &patches_storage,
             &self.proj.data,

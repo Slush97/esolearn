@@ -16,7 +16,8 @@ use crate::image::{Gray, ImageBuf};
 /// Trait for dense optical flow algorithms.
 pub trait DenseOpticalFlow {
     /// Compute dense flow between two consecutive grayscale frames.
-    fn calc(&mut self, prev: &ImageBuf<f32, Gray>, next: &ImageBuf<f32, Gray>) -> Result<FlowField>;
+    fn calc(&mut self, prev: &ImageBuf<f32, Gray>, next: &ImageBuf<f32, Gray>)
+        -> Result<FlowField>;
 }
 
 /// Trait for sparse optical flow algorithms.

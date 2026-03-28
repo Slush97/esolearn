@@ -39,14 +39,26 @@ pub struct Mask {
 /// Takes raw RGB image bytes and returns bounding boxes with class IDs and
 /// confidence scores.
 pub trait Detect {
-    fn detect(&self, image: &[u8], width: u32, height: u32, conf_threshold: f32) -> Result<Vec<Detection>>;
+    fn detect(
+        &self,
+        image: &[u8],
+        width: u32,
+        height: u32,
+        conf_threshold: f32,
+    ) -> Result<Vec<Detection>>;
 }
 
 /// Image classification pipeline.
 ///
 /// Takes raw RGB image bytes and returns top-k `(class_id, score)` predictions.
 pub trait Classify {
-    fn classify(&self, image: &[u8], width: u32, height: u32, top_k: usize) -> Result<Vec<Classification>>;
+    fn classify(
+        &self,
+        image: &[u8],
+        width: u32,
+        height: u32,
+        top_k: usize,
+    ) -> Result<Vec<Classification>>;
 }
 
 /// Image embedding pipeline.
@@ -60,5 +72,6 @@ pub trait Embed {
 ///
 /// Takes raw RGB image bytes and a prompt, returns a binary mask.
 pub trait Segment {
-    fn segment(&self, image: &[u8], width: u32, height: u32, prompt: SegmentPrompt) -> Result<Mask>;
+    fn segment(&self, image: &[u8], width: u32, height: u32, prompt: SegmentPrompt)
+        -> Result<Mask>;
 }

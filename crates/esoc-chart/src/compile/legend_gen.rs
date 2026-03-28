@@ -42,17 +42,21 @@ pub struct GradientLegend {
 /// Deduplicates categories across layers that share the same categorical mapping.
 pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<LegendSpec> {
     // Check for heatmap layers — generate gradient legend
-    let is_heatmap = layers.iter().all(|l| {
-        matches!(l.mark, crate::grammar::layer::MarkType::Heatmap)
-    });
+    let is_heatmap = layers
+        .iter()
+        .all(|l| matches!(l.mark, crate::grammar::layer::MarkType::Heatmap));
     if is_heatmap {
         if let Some(data) = layers.first().and_then(|l| l.heatmap_data.as_ref()) {
             let mut v_min = f64::INFINITY;
             let mut v_max = f64::NEG_INFINITY;
             for row in data {
                 for &v in row {
-                    if v < v_min { v_min = v; }
-                    if v > v_max { v_max = v; }
+                    if v < v_min {
+                        v_min = v;
+                    }
+                    if v > v_max {
+                        v_max = v;
+                    }
                 }
             }
             if v_min < v_max {
@@ -89,7 +93,10 @@ pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<Legend
             .iter()
             .enumerate()
             .map(|(i, layer)| LegendEntry {
-                label: layer.label.clone().unwrap_or_else(|| format!("Series {}", i + 1)),
+                label: layer
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("Series {}", i + 1)),
                 color: theme.palette.get(i),
             })
             .collect();
@@ -110,12 +117,7 @@ pub fn collect_legends(layers: &[ResolvedLayer], theme: &NewTheme) -> Vec<Legend
 
     // Single-layer bar charts: categories are already shown as x-axis labels,
     // so a legend would just duplicate them. Suppress it.
-    if layers.len() == 1
-        && matches!(
-            layers[0].mark,
-            crate::grammar::layer::MarkType::Bar
-        )
-    {
+    if layers.len() == 1 && matches!(layers[0].mark, crate::grammar::layer::MarkType::Bar) {
         return vec![];
     }
 
@@ -163,7 +165,10 @@ pub fn generate_legends(
             let bar_h = plot_h;
             let n_steps = 64_usize;
             let step_h = bar_h / n_steps as f32;
-            let color_scale = theme.color_scale.clone().unwrap_or_else(esoc_color::ColorScale::viridis);
+            let color_scale = theme
+                .color_scale
+                .clone()
+                .unwrap_or_else(esoc_color::ColorScale::viridis);
 
             // Draw gradient steps
             for i in 0..n_steps {
@@ -172,9 +177,13 @@ pub fn generate_legends(
                 let rect = Node::with_mark(Mark::Rect(RectMark {
                     bounds: BoundingBox::new(bar_x, bar_y + i as f32 * step_h, bar_w, step_h + 0.5),
                     fill: FillStyle::Solid(color),
-                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    stroke: StrokeStyle {
+                        width: 0.0,
+                        ..Default::default()
+                    },
                     corner_radius: 0.0,
-                })).z_order(10);
+                }))
+                .z_order(10);
                 scene.insert_child(root_id, rect);
             }
 
@@ -184,12 +193,17 @@ pub fn generate_legends(
                 fill: FillStyle::Solid(esoc_color::Color::TRANSPARENT),
                 stroke: StrokeStyle::solid(theme.foreground.with_alpha(0.4), 0.5),
                 corner_radius: 0.0,
-            })).z_order(10);
+            }))
+            .z_order(10);
             scene.insert_child(root_id, outline);
 
             // Compute nice tick values for the colorbar
             let fmt = |v: f64| -> String {
-                if (v - v.round()).abs() < 1e-9 { format!("{}", v as i64) } else { format!("{v:.1}") }
+                if (v - v.round()).abs() < 1e-9 {
+                    format!("{}", v as i64)
+                } else {
+                    format!("{v:.1}")
+                }
             };
             let tick_count = 5_usize;
             let label_x = bar_x + bar_w + 6.0;
@@ -202,9 +216,13 @@ pub fn generate_legends(
                 let tick = Node::with_mark(Mark::Rect(RectMark {
                     bounds: BoundingBox::new(bar_x + bar_w, ty - 0.25, 4.0, 0.5),
                     fill: FillStyle::Solid(theme.foreground.with_alpha(0.5)),
-                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    stroke: StrokeStyle {
+                        width: 0.0,
+                        ..Default::default()
+                    },
                     corner_radius: 0.0,
-                })).z_order(10);
+                }))
+                .z_order(10);
                 scene.insert_child(root_id, tick);
 
                 // Tick label
@@ -214,11 +232,14 @@ pub fn generate_legends(
                     font: FontStyle {
                         family: theme.font_family.clone(),
                         size: theme.tick_font_size,
-                        weight: 400, italic: false,
+                        weight: 400,
+                        italic: false,
                     },
                     fill: FillStyle::Solid(theme.foreground),
-                    angle: 0.0, anchor: TextAnchor::Start,
-                })).z_order(10);
+                    angle: 0.0,
+                    anchor: TextAnchor::Start,
+                }))
+                .z_order(10);
                 scene.insert_child(root_id, label);
             }
 
@@ -334,7 +355,8 @@ pub fn generate_legends_bottom(
         }
 
         for entry in &legend.entries {
-            let label_w = crate::compile::layout::estimate_text_width(&entry.label, theme.legend_font_size);
+            let label_w =
+                crate::compile::layout::estimate_text_width(&entry.label, theme.legend_font_size);
             let entry_w = swatch_size + 4.0 + label_w + entry_gap;
 
             // Wrap to next row if needed
@@ -420,7 +442,11 @@ mod tests {
         let layers = vec![make_resolved(cats, 0)];
         let legends = collect_legends(&layers, &theme);
         assert_eq!(legends.len(), 1);
-        let labels: Vec<&str> = legends[0].entries.iter().map(|e| e.label.as_str()).collect();
+        let labels: Vec<&str> = legends[0]
+            .entries
+            .iter()
+            .map(|e| e.label.as_str())
+            .collect();
         assert_eq!(labels, vec!["A", "B", "C"]);
     }
 
@@ -459,7 +485,10 @@ mod tests {
         let mut layer = make_resolved(Some(vec!["A".into(), "B".into()]), 0);
         layer.mark = MarkType::Bar;
         let legends = collect_legends(&[layer], &theme);
-        assert!(legends.is_empty(), "single-layer bar should suppress legend");
+        assert!(
+            legends.is_empty(),
+            "single-layer bar should suppress legend"
+        );
     }
 
     #[test]

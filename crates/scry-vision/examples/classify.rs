@@ -15,12 +15,26 @@ use scry_vision::pipeline::Classify;
 
 // ImageNet class labels for a few well-known classes
 const SAMPLE_LABELS: &[(u32, &str)] = &[
-    (0, "tench"), (1, "goldfish"), (65, "sea snake"), (207, "golden retriever"),
-    (208, "Labrador retriever"), (281, "tabby cat"), (285, "Egyptian cat"),
-    (291, "lion"), (340, "zebra"), (386, "African elephant"),
-    (463, "bucket"), (574, "golf ball"), (717, "pickup truck"),
-    (757, "red wine"), (804, "ski"), (852, "tennis ball"),
-    (937, "broccoli"), (947, "mushroom"), (954, "banana"), (999, "toilet tissue"),
+    (0, "tench"),
+    (1, "goldfish"),
+    (65, "sea snake"),
+    (207, "golden retriever"),
+    (208, "Labrador retriever"),
+    (281, "tabby cat"),
+    (285, "Egyptian cat"),
+    (291, "lion"),
+    (340, "zebra"),
+    (386, "African elephant"),
+    (463, "bucket"),
+    (574, "golf ball"),
+    (717, "pickup truck"),
+    (757, "red wine"),
+    (804, "ski"),
+    (852, "tennis ball"),
+    (937, "broccoli"),
+    (947, "mushroom"),
+    (954, "banana"),
+    (999, "toilet tissue"),
 ];
 
 fn label_for(class_id: u32) -> String {
@@ -33,7 +47,10 @@ fn label_for(class_id: u32) -> String {
 
 fn main() {
     let model_path = std::env::var("RESNET_MODEL_PATH").unwrap_or_else(|_| {
-        format!("{}/testdata/resnet18.safetensors", env!("CARGO_MANIFEST_DIR"))
+        format!(
+            "{}/testdata/resnet18.safetensors",
+            env!("CARGO_MANIFEST_DIR")
+        )
     });
     let path = Path::new(&model_path);
 
@@ -56,9 +73,9 @@ fn main() {
     println!("=== Solid red image (224x224) ===");
     let mut red_image = vec![0u8; 224 * 224 * 3];
     for i in 0..(224 * 224) {
-        red_image[i * 3] = 255;     // R
-        red_image[i * 3 + 1] = 0;   // G
-        red_image[i * 3 + 2] = 0;   // B
+        red_image[i * 3] = 255; // R
+        red_image[i * 3 + 1] = 0; // G
+        red_image[i * 3 + 2] = 0; // B
     }
     run_classify(&classifier, &red_image, 224, 224);
 
@@ -79,9 +96,13 @@ fn main() {
         for x in 0..224 {
             let i = (y * 224 + x) * 3;
             if (y / 16) % 2 == 0 {
-                striped[i] = 200; striped[i + 1] = 180; striped[i + 2] = 50;
+                striped[i] = 200;
+                striped[i + 1] = 180;
+                striped[i + 2] = 50;
             } else {
-                striped[i] = 30; striped[i + 1] = 60; striped[i + 2] = 150;
+                striped[i] = 30;
+                striped[i + 1] = 60;
+                striped[i + 2] = 150;
             }
         }
     }
@@ -98,8 +119,17 @@ fn main() {
     let top = results[0].score;
     let bottom = results.last().unwrap().score;
     let max_class = results[0].class_id;
-    println!("  Top class: {} (id={}, score={:.4})", label_for(max_class), max_class, top);
-    println!("  Bottom class: id={}, score={:.6}", results.last().unwrap().class_id, bottom);
+    println!(
+        "  Top class: {} (id={}, score={:.4})",
+        label_for(max_class),
+        max_class,
+        top
+    );
+    println!(
+        "  Bottom class: id={}, score={:.6}",
+        results.last().unwrap().class_id,
+        bottom
+    );
     println!("  Top/bottom ratio: {:.0}x", top / bottom.max(1e-10));
     println!("  -> Model is producing discriminative predictions (not uniform)");
 }
@@ -110,7 +140,12 @@ fn run_classify(classifier: &ResNetClassifier<CpuBackend>, image: &[u8], w: u32,
     let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
 
     for r in &results {
-        println!("  {:>4} {:>25} -> {:.2}%", r.class_id, label_for(r.class_id), r.score * 100.0);
+        println!(
+            "  {:>4} {:>25} -> {:.2}%",
+            r.class_id,
+            label_for(r.class_id),
+            r.score * 100.0
+        );
     }
     println!("  ({:.0}ms)\n", elapsed);
 }

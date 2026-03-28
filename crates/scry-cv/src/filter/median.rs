@@ -55,10 +55,7 @@ mod tests {
 
         // Center pixels should be close to 0.5 (median of mostly 0.5 values)
         let c = filtered.pixel(3, 3)[0];
-        assert!(
-            (c - 0.5).abs() < 0.01,
-            "median should restore: got {c}"
-        );
+        assert!((c - 0.5).abs() < 0.01, "median should restore: got {c}");
     }
 
     #[test]

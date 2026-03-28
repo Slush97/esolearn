@@ -57,10 +57,7 @@ pub trait RansacModel: Clone {
 }
 
 /// Run RANSAC on a dataset, returning the best model and inlier mask.
-pub fn ransac<M: RansacModel>(
-    data: &[M::Point],
-    config: &RansacConfig,
-) -> Option<RansacResult<M>>
+pub fn ransac<M: RansacModel>(data: &[M::Point], config: &RansacConfig) -> Option<RansacResult<M>>
 where
     M::Point: Clone,
 {
@@ -116,11 +113,9 @@ where
             // Adaptive iteration count
             let inlier_ratio = n_inliers as f64 / n as f64;
             if inlier_ratio > 0.0 {
-                let p_fail =
-                    1.0 - inlier_ratio.powi(M::MIN_SAMPLES as i32);
+                let p_fail = 1.0 - inlier_ratio.powi(M::MIN_SAMPLES as i32);
                 if p_fail > 0.0 && p_fail < 1.0 {
-                    let new_max =
-                        ((1.0 - config.confidence).ln() / p_fail.ln()).ceil() as u32;
+                    let new_max = ((1.0 - config.confidence).ln() / p_fail.ln()).ceil() as u32;
                     adaptive_max = adaptive_max.min(new_max.max(10));
                 }
             }
@@ -207,6 +202,10 @@ mod tests {
             "intercept should be ~1.0, got {}",
             result.model.b
         );
-        assert!(result.n_inliers >= 48, "should have >= 48 inliers, got {}", result.n_inliers);
+        assert!(
+            result.n_inliers >= 48,
+            "should have >= 48 inliers, got {}",
+            result.n_inliers
+        );
     }
 }

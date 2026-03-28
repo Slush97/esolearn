@@ -81,7 +81,7 @@ fn scrfd_two_faces_output() -> Vec<f32> {
     output
 }
 
-/// Create an ArcFace mock that returns a known 512-dim embedding.
+/// Create an `ArcFace` mock that returns a known 512-dim embedding.
 fn arcface_mock(embedding: Vec<f32>) -> ArcFaceEmbedder {
     ArcFaceEmbedder::new(Box::new(MockModel { output: embedding }), 112, 512)
 }
@@ -109,8 +109,14 @@ fn full_pipeline_detect_crop_embed_compare() {
     let face_a = &dets[0];
     let cx_a = (face_a.bbox.x1 + face_a.bbox.x2) / 2.0;
     let cy_a = (face_a.bbox.y1 + face_a.bbox.y2) / 2.0;
-    assert!((cx_a - 200.0).abs() < 2.0, "face A cx={cx_a}, expected ~200");
-    assert!((cy_a - 200.0).abs() < 2.0, "face A cy={cy_a}, expected ~200");
+    assert!(
+        (cx_a - 200.0).abs() < 2.0,
+        "face A cx={cx_a}, expected ~200"
+    );
+    assert!(
+        (cy_a - 200.0).abs() < 2.0,
+        "face A cy={cy_a}, expected ~200"
+    );
 
     // ── Step 2: Crop face regions ────────────────────────────────────────
     let img = ImageBuffer::from_raw(image_data.clone(), w, h, 3).unwrap();
@@ -222,13 +228,14 @@ fn embedding_normalization_invariant() {
 /// Crop a face region from an image using a detection bbox.
 ///
 /// Clamps to image bounds — the same logic cloudbox-vision would use.
-fn crop_from_bbox(
-    img: &ImageBuffer,
-    det: &scry_vision::pipeline::Detection,
-) -> ImageBuffer {
+fn crop_from_bbox(img: &ImageBuffer, det: &scry_vision::pipeline::Detection) -> ImageBuffer {
+    #[allow(clippy::cast_sign_loss)]
     let x = (det.bbox.x1.max(0.0) as u32).min(img.width - 1);
+    #[allow(clippy::cast_sign_loss)]
     let y = (det.bbox.y1.max(0.0) as u32).min(img.height - 1);
+    #[allow(clippy::cast_sign_loss)]
     let x2 = (det.bbox.x2.max(0.0) as u32).min(img.width);
+    #[allow(clippy::cast_sign_loss)]
     let y2 = (det.bbox.y2.max(0.0) as u32).min(img.height);
     let w = x2.saturating_sub(x).max(1);
     let h = y2.saturating_sub(y).max(1);

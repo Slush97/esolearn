@@ -46,7 +46,10 @@ fn main() -> Result<()> {
     ax.x_label("x").y_label("y");
 
     for ci in 0..3 {
-        let (sx, sy): (Vec<f64>, Vec<f64>) = f0.iter().zip(f1.iter()).zip(target.iter())
+        let (sx, sy): (Vec<f64>, Vec<f64>) = f0
+            .iter()
+            .zip(f1.iter())
+            .zip(target.iter())
             .filter(|(_, &t)| t as usize == ci)
             .map(|((x, y), _)| (*x, *y))
             .unzip();
@@ -68,7 +71,10 @@ fn main() -> Result<()> {
     ax2.x_label("x").y_label("y");
 
     for ci in 0..3_usize {
-        let (sx, sy): (Vec<f64>, Vec<f64>) = f0.iter().zip(f1.iter()).zip(labels.iter())
+        let (sx, sy): (Vec<f64>, Vec<f64>) = f0
+            .iter()
+            .zip(f1.iter())
+            .zip(labels.iter())
             .filter(|&(_, &l)| l == ci)
             .map(|((x, y), _)| (*x, *y))
             .unzip();
@@ -85,16 +91,25 @@ fn main() -> Result<()> {
 }
 
 fn to_row_major(cols: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    if cols.is_empty() { return vec![]; }
+    if cols.is_empty() {
+        return vec![];
+    }
     let n_samples = cols[0].len();
-    (0..n_samples).map(|i| cols.iter().map(|col| col[i]).collect()).collect()
+    (0..n_samples)
+        .map(|i| cols.iter().map(|col| col[i]).collect())
+        .collect()
 }
 
 struct SimpleRng(u64);
 impl SimpleRng {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
     fn uniform(&mut self) -> f64 {

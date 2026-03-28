@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn basic_boxplot() {
         let cats: Vec<String> = vec!["A".into(); 9];
-        let data: Vec<f64> = (1..=9).map(|x| x as f64).collect();
+        let data: Vec<f64> = (1..=9).map(f64::from).collect();
         let summaries = compute_boxplot(&cats, &data).unwrap();
         assert_eq!(summaries.len(), 1);
         let s = &summaries[0];
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn outlier_detection() {
         let mut cats = vec!["A".into(); 10];
-        let mut data: Vec<f64> = (1..=10).map(|x| x as f64).collect();
+        let mut data: Vec<f64> = (1..=10).map(f64::from).collect();
         // Add an outlier
         cats.push("A".into());
         data.push(100.0);
@@ -141,7 +141,14 @@ mod tests {
 
     #[test]
     fn multi_category() {
-        let cats = vec!["A".into(), "B".into(), "A".into(), "B".into(), "A".into(), "B".into()];
+        let cats = vec![
+            "A".into(),
+            "B".into(),
+            "A".into(),
+            "B".into(),
+            "A".into(),
+            "B".into(),
+        ];
         let data = vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0];
         let summaries = compute_boxplot(&cats, &data).unwrap();
         assert_eq!(summaries.len(), 2);

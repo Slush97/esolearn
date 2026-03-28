@@ -47,10 +47,7 @@ fn main() -> Result<()> {
 
         let ax = fig.add_axes();
         ax.x_label(&feature_names[i]).y_label("Count");
-        ax.histogram(feat)
-            .label(&feature_names[i])
-            .bins(25)
-            .done();
+        ax.histogram(feat).label(&feature_names[i]).bins(25).done();
 
         let path = format!("hist_{}.svg", feature_names[i].to_lowercase());
         fig.save_svg(&path)?;
@@ -58,9 +55,7 @@ fn main() -> Result<()> {
     }
 
     // ── 2. Box plots of all features ─────────────────────────────────
-    let mut fig = Figure::new()
-        .size(600.0, 450.0)
-        .title("Feature Box Plots");
+    let mut fig = Figure::new().size(600.0, 450.0).title("Feature Box Plots");
 
     let ax = fig.add_axes();
     ax.x_label("Feature").y_label("Value");
@@ -76,9 +71,14 @@ fn main() -> Result<()> {
 
 struct SimpleRng(u64);
 impl SimpleRng {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
     fn uniform(&mut self) -> f64 {

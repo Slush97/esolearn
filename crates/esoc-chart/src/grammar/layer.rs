@@ -93,7 +93,9 @@ impl Layer {
     }
 
     /// Add an X encoding.
-    #[deprecated(note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead.")]
+    #[deprecated(
+        note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead."
+    )]
     pub fn encode_x(mut self, mut enc: Encoding) -> Self {
         enc.channel = crate::grammar::encoding::Channel::X;
         self.encodings.push(enc);
@@ -101,7 +103,9 @@ impl Layer {
     }
 
     /// Add a Y encoding.
-    #[deprecated(note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead.")]
+    #[deprecated(
+        note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead."
+    )]
     pub fn encode_y(mut self, mut enc: Encoding) -> Self {
         enc.channel = crate::grammar::encoding::Channel::Y;
         self.encodings.push(enc);
@@ -109,7 +113,9 @@ impl Layer {
     }
 
     /// Add a color encoding.
-    #[deprecated(note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead.")]
+    #[deprecated(
+        note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead."
+    )]
     pub fn encode_color(mut self, mut enc: Encoding) -> Self {
         enc.channel = crate::grammar::encoding::Channel::Color;
         self.encodings.push(enc);
@@ -117,7 +123,9 @@ impl Layer {
     }
 
     /// Add a size encoding.
-    #[deprecated(note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead.")]
+    #[deprecated(
+        note = "Encoding-based API is not yet wired into the compile pipeline. Use with_x/with_y/with_categories instead."
+    )]
     pub fn encode_size(mut self, mut enc: Encoding) -> Self {
         enc.channel = crate::grammar::encoding::Channel::Size;
         self.encodings.push(enc);

@@ -33,7 +33,9 @@ impl<B: MathBackend, F: ForwardFn<B>> NativeModel<B, F> {
     }
 }
 
-impl<B: MathBackend + Send + Sync + 'static, F: ForwardFn<B> + 'static> VisionModel for NativeModel<B, F> {
+impl<B: MathBackend + Send + Sync + 'static, F: ForwardFn<B> + 'static> VisionModel
+    for NativeModel<B, F>
+{
     fn forward(&self, input: &[f32], input_shape: &[usize]) -> Result<Vec<f32>> {
         let tensor = Tensor::<B>::from_vec(input.to_vec(), Shape::new(input_shape));
         let output = self.model.forward(tensor);

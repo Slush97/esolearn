@@ -48,13 +48,14 @@ pub fn sturges_bins(n: usize) -> usize {
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
     #[test]
     fn bins_known_data() {
         // 9 values [1..9] into 3 bins: [1,2,3], [4,5,6], [7,8,9]
-        let data: Vec<f64> = (1..=9).map(|x| x as f64).collect();
+        let data: Vec<f64> = (1..=9).map(f64::from).collect();
         let (centers, counts) = compute_bins(&data, 3);
         assert_eq!(centers.len(), 3);
         assert_eq!(counts.len(), 3);

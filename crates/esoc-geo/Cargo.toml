@@ -23,6 +23,10 @@ esoc-color = { path = "../esoc-color" }
 esoc-scene = { path = "../esoc-scene" }
 esoc-gfx = { path = "../esoc-gfx" }
 
+[[example]]
+name = "geo_demo"
+required-features = ["bundled"]
+
 [lints.rust]
 missing_docs = "warn"
 unreachable_pub = "allow"

@@ -123,8 +123,7 @@ impl LineJoin {
 }
 
 /// Fill style.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub enum Fill {
     /// No fill.
     #[default]
@@ -145,7 +144,6 @@ impl Fill {
         }
     }
 }
-
 
 /// Text anchor position.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

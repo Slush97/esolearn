@@ -120,7 +120,10 @@ fn apply_stack(layers: &mut [ResolvedLayer]) {
             x_to_y.insert(layer.x_data[j].to_bits(), layer.y_data[j]);
         }
         let new_x: Vec<f64> = union_x.clone();
-        let new_y: Vec<f64> = union_x.iter().map(|k| *x_to_y.get(&k.to_bits()).unwrap_or(&0.0)).collect();
+        let new_y: Vec<f64> = union_x
+            .iter()
+            .map(|k| *x_to_y.get(&k.to_bits()).unwrap_or(&0.0))
+            .collect();
         let layer = &mut layers[si];
         layer.x_data = new_x;
         layer.y_data = new_y;
@@ -222,11 +225,12 @@ fn apply_dodge(layers: &mut [ResolvedLayer]) {
     }
 
     // Estimate spacing from first layer's x data
-    let spacing = if !layers[dodgeable[0]].x_data.is_empty() && layers[dodgeable[0]].x_data.len() > 1 {
-        (layers[dodgeable[0]].x_data[1] - layers[dodgeable[0]].x_data[0]).abs()
-    } else {
-        1.0
-    };
+    let spacing =
+        if !layers[dodgeable[0]].x_data.is_empty() && layers[dodgeable[0]].x_data.len() > 1 {
+            (layers[dodgeable[0]].x_data[1] - layers[dodgeable[0]].x_data[0]).abs()
+        } else {
+            1.0
+        };
 
     let sub_width = spacing * 0.8 / n_groups as f64;
 
@@ -253,7 +257,9 @@ fn apply_jitter(layer: &mut ResolvedLayer, x_amount: f64, y_amount: f64) {
 /// Simple deterministic pseudo-random value in [-0.5, 0.5] based on index and seed.
 fn deterministic_noise(index: usize, seed: usize) -> f64 {
     // Simple hash-based PRNG
-    let mut h = index.wrapping_mul(2_654_435_761).wrapping_add(seed.wrapping_mul(340_573_321));
+    let mut h = index
+        .wrapping_mul(2_654_435_761)
+        .wrapping_add(seed.wrapping_mul(340_573_321));
     h ^= h >> 16;
     h = h.wrapping_mul(0x045d_9f3b);
     h ^= h >> 16;
@@ -340,15 +346,22 @@ mod tests {
 
     #[test]
     fn jitter_displaces() {
-        let mut layer = make_layer(vec![1.0, 2.0, 3.0], Position::Jitter { x_amount: 0.1, y_amount: 0.1 }, 0);
+        let mut layer = make_layer(
+            vec![1.0, 2.0, 3.0],
+            Position::Jitter {
+                x_amount: 0.1,
+                y_amount: 0.1,
+            },
+            0,
+        );
         layer.mark = MarkType::Point; // Jitter is only valid for Point/Line
         let mut layers = vec![layer];
         let orig_x = layers[0].x_data.clone();
         apply_positions(&mut layers).unwrap();
 
         // Points should be displaced
-        for i in 0..3 {
-            assert!((layers[0].x_data[i] - orig_x[i]).abs() <= 0.05 + 1e-10);
+        for (i, orig) in orig_x.iter().enumerate() {
+            assert!((layers[0].x_data[i] - orig).abs() <= 0.05 + 1e-10);
         }
     }
 
@@ -441,7 +454,14 @@ mod tests {
     #[test]
     fn invalid_position_mark_combo_errors() {
         // Jitter + Heatmap should error
-        let mut layer = make_layer(vec![1.0], Position::Jitter { x_amount: 0.1, y_amount: 0.1 }, 0);
+        let mut layer = make_layer(
+            vec![1.0],
+            Position::Jitter {
+                x_amount: 0.1,
+                y_amount: 0.1,
+            },
+            0,
+        );
         layer.mark = MarkType::Heatmap;
         let result = apply_positions(&mut [layer]);
         assert!(result.is_err());

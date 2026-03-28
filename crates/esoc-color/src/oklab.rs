@@ -101,11 +101,7 @@ impl OkLab {
         } else {
             self.b.atan2(self.a).to_degrees().rem_euclid(360.0)
         };
-        OkLch {
-            l: self.l,
-            c,
-            h,
-        }
+        OkLch { l: self.l, c, h }
     }
 
     /// Linearly interpolate in `OKLab` space.

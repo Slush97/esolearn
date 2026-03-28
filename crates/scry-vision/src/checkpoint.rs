@@ -58,10 +58,7 @@ pub fn load_tensor_transposed<B: MathBackend>(
 }
 
 /// Load raw f32 data from a named tensor, with dtype auto-detection.
-pub fn load_f32(
-    tensors: &safetensors::SafeTensors<'_>,
-    name: &str,
-) -> Result<Vec<f32>> {
+pub fn load_f32(tensors: &safetensors::SafeTensors<'_>, name: &str) -> Result<Vec<f32>> {
     let t = tensors
         .tensor(name)
         .map_err(|_| VisionError::MissingWeight(name.to_string()))?;

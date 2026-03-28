@@ -214,9 +214,7 @@ impl SceneGraph {
 
         // Sort children indices by z_order without cloning
         let mut indices: Vec<usize> = (0..node.children.len()).collect();
-        indices.sort_by_key(|&i| {
-            self.get(node.children[i]).map_or(0, |n| n.z_order)
-        });
+        indices.sort_by_key(|&i| self.get(node.children[i]).map_or(0, |n| n.z_order));
 
         for i in indices {
             // Re-fetch node since we can't hold a reference across recursive calls

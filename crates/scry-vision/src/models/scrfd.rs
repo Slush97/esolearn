@@ -52,10 +52,7 @@ impl ScrfdDetector {
 
     /// Load from an ONNX model file. Auto-detects single vs multi-output format.
     #[cfg(feature = "onnx")]
-    pub fn from_onnx(
-        path: impl AsRef<std::path::Path>,
-        input_size: u32,
-    ) -> Result<Self> {
+    pub fn from_onnx(path: impl AsRef<std::path::Path>, input_size: u32) -> Result<Self> {
         let model = crate::model::OnnxModel::from_file(path)?;
         Ok(Self {
             inner: ScrfdInner::Multi(model),
@@ -77,9 +74,8 @@ impl ScrfdDetector {
 
         // InsightFace normalization: (pixel - 127.5) / 128.0
         let std_val = 128.0 / 255.0;
-        let tensor =
-            ToTensor::normalized([0.5, 0.5, 0.5], [std_val, std_val, std_val])
-                .apply::<CpuBackend>(&padded);
+        let tensor = ToTensor::normalized([0.5, 0.5, 0.5], [std_val, std_val, std_val])
+            .apply::<CpuBackend>(&padded);
 
         Ok((tensor.to_vec(), info))
     }
@@ -121,7 +117,13 @@ impl Detect for ScrfdDetector {
         detections = nms(&detections, self.iou_threshold, conf_threshold);
 
         let inv_scale = 1.0 / info.scale;
-        rescale_detections(&mut detections, inv_scale, inv_scale, info.pad_x, info.pad_y);
+        rescale_detections(
+            &mut detections,
+            inv_scale,
+            inv_scale,
+            info.pad_x,
+            info.pad_y,
+        );
 
         Ok(detections)
     }
@@ -162,9 +164,13 @@ fn decode_multi_output(
     let has_keypoints = outputs.len() >= 9;
 
     for (i, &stride) in strides.iter().enumerate() {
-        let scores = &outputs[i];       // [N, 1]
-        let bboxes = &outputs[3 + i];   // [N, 4]
-        let kps = if has_keypoints { Some(&outputs[6 + i]) } else { None };
+        let scores = &outputs[i]; // [N, 1]
+        let bboxes = &outputs[3 + i]; // [N, 4]
+        let kps = if has_keypoints {
+            Some(&outputs[6 + i])
+        } else {
+            None
+        };
 
         let grid_size = input_size / stride;
         let anchors_per_cell = 2; // SCRFD uses 2 anchors per grid cell

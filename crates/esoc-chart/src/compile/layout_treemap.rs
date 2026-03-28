@@ -70,10 +70,8 @@ pub fn squarified_layout(values: &[f64], container: BoundingBox) -> Vec<TreemapC
         }
 
         // Layout this strip
-        let strip_items: Vec<(usize, f64)> = strip
-            .iter()
-            .map(|&i| (items[i].0, areas[i]))
-            .collect();
+        let strip_items: Vec<(usize, f64)> =
+            strip.iter().map(|&i| (items[i].0, areas[i])).collect();
         let new_cells = layout_strip(&strip_items, strip_area, &mut remaining);
         cells.extend(new_cells);
 
@@ -241,7 +239,7 @@ mod tests {
     #[test]
     fn many_items() {
         let container = BoundingBox::new(0.0, 0.0, 800.0, 600.0);
-        let values: Vec<f64> = (1..=50).map(|i| i as f64).collect();
+        let values: Vec<f64> = (1..=50).map(f64::from).collect();
         let cells = squarified_layout(&values, container);
         assert_eq!(cells.len(), 50);
     }

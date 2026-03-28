@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Standalone bar chart — no feature flags needed.
 
-use esoc_chart::v2::*;
+use esoc_chart::v2::bar;
 
 fn main() -> esoc_chart::error::Result<()> {
     let languages = ["Rust", "Python", "TypeScript", "Go", "Java", "C++"];

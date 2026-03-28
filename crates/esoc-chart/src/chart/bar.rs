@@ -47,12 +47,14 @@ impl SeriesRenderer for BarSeries {
     fn data_bounds(&self) -> DataBounds {
         if self.horizontal {
             let y_min = self.x.iter().copied().fold(f64::INFINITY, f64::min) - self.bar_width / 2.0;
-            let y_max = self.x.iter().copied().fold(f64::NEG_INFINITY, f64::max) + self.bar_width / 2.0;
+            let y_max =
+                self.x.iter().copied().fold(f64::NEG_INFINITY, f64::max) + self.bar_width / 2.0;
             let x_max = self.heights.iter().copied().fold(0.0_f64, f64::max);
             DataBounds::new(0.0, x_max, y_min, y_max)
         } else {
             let x_min = self.x.iter().copied().fold(f64::INFINITY, f64::min) - self.bar_width / 2.0;
-            let x_max = self.x.iter().copied().fold(f64::NEG_INFINITY, f64::max) + self.bar_width / 2.0;
+            let x_max =
+                self.x.iter().copied().fold(f64::NEG_INFINITY, f64::max) + self.bar_width / 2.0;
             let y_max = self.heights.iter().copied().fold(0.0_f64, f64::max);
             DataBounds::new(x_min, x_max, 0.0, y_max)
         }

@@ -72,7 +72,11 @@ mod tests {
     fn gray_unchanged() {
         // Gray should look the same under all CVD types
         let gray = Color::GRAY;
-        for cvd in [CvdType::Protanopia, CvdType::Deuteranopia, CvdType::Tritanopia] {
+        for cvd in [
+            CvdType::Protanopia,
+            CvdType::Deuteranopia,
+            CvdType::Tritanopia,
+        ] {
             let sim = simulate(gray, cvd);
             assert!(
                 (sim.r - gray.r).abs() < 0.05,
@@ -94,7 +98,11 @@ mod tests {
     fn output_in_range() {
         let colors = [Color::RED, Color::GREEN, Color::BLUE, Color::WHITE];
         for c in colors {
-            for cvd in [CvdType::Protanopia, CvdType::Deuteranopia, CvdType::Tritanopia] {
+            for cvd in [
+                CvdType::Protanopia,
+                CvdType::Deuteranopia,
+                CvdType::Tritanopia,
+            ] {
                 let sim = simulate(c, cvd);
                 assert!(sim.r >= 0.0 && sim.r <= 1.0, "{cvd:?} r={}", sim.r);
                 assert!(sim.g >= 0.0 && sim.g <= 1.0, "{cvd:?} g={}", sim.g);

@@ -203,13 +203,7 @@ impl SgbmStereo {
     }
 
     /// Semi-global path aggregation across 8 directions.
-    fn aggregate(
-        &self,
-        cost: &[u16],
-        w: usize,
-        h: usize,
-        nd: usize,
-    ) -> Vec<u32> {
+    fn aggregate(&self, cost: &[u16], w: usize, h: usize, nd: usize) -> Vec<u32> {
         let n = w * h * nd;
         let mut sum = vec![0u32; n];
 

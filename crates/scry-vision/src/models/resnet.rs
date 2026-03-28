@@ -71,13 +71,7 @@ impl<B: MathBackend> BasicBlock<B> {
         let x = self.bn2.forward(&self.conv2.forward(&x));
 
         // Residual add
-        let out_data = B::add(
-            &x.data,
-            &identity.data,
-            &x.shape,
-            &identity.shape,
-            &x.shape,
-        );
+        let out_data = B::add(&x.data, &identity.data, &x.shape, &identity.shape, &x.shape);
         relu(&Tensor::new(out_data, x.shape))
     }
 }
@@ -135,13 +129,7 @@ impl<B: MathBackend> Bottleneck<B> {
         let x = relu(&self.bn2.forward(&self.conv2.forward(&x)));
         let x = self.bn3.forward(&self.conv3.forward(&x));
 
-        let out_data = B::add(
-            &x.data,
-            &identity.data,
-            &x.shape,
-            &identity.shape,
-            &x.shape,
-        );
+        let out_data = B::add(&x.data, &identity.data, &x.shape, &identity.shape, &x.shape);
         relu(&Tensor::new(out_data, x.shape))
     }
 }
@@ -186,19 +174,39 @@ pub struct ResNetConfig {
 
 impl ResNetConfig {
     pub fn resnet18(num_classes: usize) -> Self {
-        Self { layers: [2, 2, 2, 2], bottleneck: false, num_classes }
+        Self {
+            layers: [2, 2, 2, 2],
+            bottleneck: false,
+            num_classes,
+        }
     }
     pub fn resnet34(num_classes: usize) -> Self {
-        Self { layers: [3, 4, 6, 3], bottleneck: false, num_classes }
+        Self {
+            layers: [3, 4, 6, 3],
+            bottleneck: false,
+            num_classes,
+        }
     }
     pub fn resnet50(num_classes: usize) -> Self {
-        Self { layers: [3, 4, 6, 3], bottleneck: true, num_classes }
+        Self {
+            layers: [3, 4, 6, 3],
+            bottleneck: true,
+            num_classes,
+        }
     }
     pub fn resnet101(num_classes: usize) -> Self {
-        Self { layers: [3, 4, 23, 3], bottleneck: true, num_classes }
+        Self {
+            layers: [3, 4, 23, 3],
+            bottleneck: true,
+            num_classes,
+        }
     }
     pub fn resnet152(num_classes: usize) -> Self {
-        Self { layers: [3, 8, 36, 3], bottleneck: true, num_classes }
+        Self {
+            layers: [3, 8, 36, 3],
+            bottleneck: true,
+            num_classes,
+        }
     }
 }
 
@@ -289,7 +297,11 @@ impl<B: MathBackend> ResNet<B> {
 
     /// Feature dimension after global average pooling (before FC).
     pub fn feature_dim(&self) -> usize {
-        if self.config.bottleneck { 2048 } else { 512 }
+        if self.config.bottleneck {
+            2048
+        } else {
+            512
+        }
     }
 
     /// Forward pass: `[3, H, W]` → `[num_classes]` or `[feature_dim]`.
@@ -312,10 +324,7 @@ impl<B: MathBackend> ResNet<B> {
         // FC layer (if classification mode)
         if let (Some(weight), Some(bias)) = (&self.fc_weight, &self.fc_bias) {
             // features[1, feature_dim] @ weight[feature_dim, num_classes] + bias
-            let features_2d = B::from_vec(
-                features.to_vec(),
-                &Shape::new(&[1, feature_dim]),
-            );
+            let features_2d = B::from_vec(features.to_vec(), &Shape::new(&[1, feature_dim]));
             let logits = B::matmul(
                 &features_2d,
                 &weight.data,
@@ -351,21 +360,17 @@ impl<B: MathBackend> ResNet<B> {
     /// If `config.num_classes == 0`, the FC layer is skipped even if the file
     /// contains `fc.weight` / `fc.bias`. This lets you use a classification
     /// checkpoint as a feature extractor.
-    pub fn from_safetensors(
-        config: ResNetConfig,
-        path: &std::path::Path,
-    ) -> Result<Self> {
-        use crate::checkpoint::{load_batchnorm2d, load_conv2d, load_tensor, load_tensor_transposed};
+    pub fn from_safetensors(config: ResNetConfig, path: &std::path::Path) -> Result<Self> {
+        use crate::checkpoint::{
+            load_batchnorm2d, load_conv2d, load_tensor, load_tensor_transposed,
+        };
 
-        let file = std::fs::File::open(path).map_err(|e| {
-            VisionError::ModelLoad(format!("cannot open {}: {e}", path.display()))
-        })?;
-        let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| {
-            VisionError::ModelLoad(format!("mmap failed: {e}"))
-        })?;
-        let tensors = safetensors::SafeTensors::deserialize(&mmap).map_err(|e| {
-            VisionError::ModelLoad(format!("safetensors parse failed: {e}"))
-        })?;
+        let file = std::fs::File::open(path)
+            .map_err(|e| VisionError::ModelLoad(format!("cannot open {}: {e}", path.display())))?;
+        let mmap = unsafe { memmap2::Mmap::map(&file) }
+            .map_err(|e| VisionError::ModelLoad(format!("mmap failed: {e}")))?;
+        let tensors = safetensors::SafeTensors::deserialize(&mmap)
+            .map_err(|e| VisionError::ModelLoad(format!("safetensors parse failed: {e}")))?;
 
         let eps = 1e-5;
 
@@ -390,11 +395,7 @@ impl<B: MathBackend> ResNet<B> {
             if config.bottleneck {
                 let mut blocks = Vec::new();
                 for j in 0..num_blocks {
-                    let (blk_in, blk_stride) = if j == 0 {
-                        (in_ch, stride)
-                    } else {
-                        (out_ch, 1)
-                    };
+                    let (blk_in, blk_stride) = if j == 0 { (in_ch, stride) } else { (out_ch, 1) };
                     let prefix = format!("{layer}.{j}");
                     blocks.push(Self::load_bottleneck(
                         &tensors, &prefix, blk_in, mid_ch, blk_stride, eps,
@@ -404,11 +405,7 @@ impl<B: MathBackend> ResNet<B> {
             } else {
                 let mut blocks = Vec::new();
                 for j in 0..num_blocks {
-                    let (blk_in, blk_stride) = if j == 0 {
-                        (in_ch, stride)
-                    } else {
-                        (mid_ch, 1)
-                    };
+                    let (blk_in, blk_stride) = if j == 0 { (in_ch, stride) } else { (mid_ch, 1) };
                     let prefix = format!("{layer}.{j}");
                     blocks.push(Self::load_basic_block(
                         &tensors, &prefix, blk_in, mid_ch, blk_stride, eps,
@@ -424,12 +421,8 @@ impl<B: MathBackend> ResNet<B> {
         let (fc_weight, fc_bias) = if config.num_classes > 0 {
             // PyTorch stores fc.weight as [num_classes, feature_dim]
             // We store as [feature_dim, num_classes], so transpose.
-            let w = load_tensor_transposed(
-                &tensors, "fc.weight", config.num_classes, feature_dim,
-            )?;
-            let b = load_tensor(
-                &tensors, "fc.bias", &[config.num_classes],
-            )?;
+            let w = load_tensor_transposed(&tensors, "fc.weight", config.num_classes, feature_dim)?;
+            let b = load_tensor(&tensors, "fc.bias", &[config.num_classes])?;
             (Some(w), Some(b))
         } else {
             (None, None)
@@ -458,30 +451,57 @@ impl<B: MathBackend> ResNet<B> {
         use crate::checkpoint::{load_batchnorm2d, load_conv2d};
 
         let conv1 = load_conv2d(
-            tensors, &format!("{prefix}.conv1"),
-            in_channels, out_channels, 3, 3, stride, 1,
+            tensors,
+            &format!("{prefix}.conv1"),
+            in_channels,
+            out_channels,
+            3,
+            3,
+            stride,
+            1,
         )?;
         let bn1 = load_batchnorm2d(tensors, &format!("{prefix}.bn1"), out_channels, eps)?;
         let conv2 = load_conv2d(
-            tensors, &format!("{prefix}.conv2"),
-            out_channels, out_channels, 3, 3, 1, 1,
+            tensors,
+            &format!("{prefix}.conv2"),
+            out_channels,
+            out_channels,
+            3,
+            3,
+            1,
+            1,
         )?;
         let bn2 = load_batchnorm2d(tensors, &format!("{prefix}.bn2"), out_channels, eps)?;
 
         let downsample = if stride != 1 || in_channels != out_channels {
             let ds_conv = load_conv2d(
-                tensors, &format!("{prefix}.downsample.0"),
-                in_channels, out_channels, 1, 1, stride, 0,
+                tensors,
+                &format!("{prefix}.downsample.0"),
+                in_channels,
+                out_channels,
+                1,
+                1,
+                stride,
+                0,
             )?;
             let ds_bn = load_batchnorm2d(
-                tensors, &format!("{prefix}.downsample.1"), out_channels, eps,
+                tensors,
+                &format!("{prefix}.downsample.1"),
+                out_channels,
+                eps,
             )?;
             Some((ds_conv, ds_bn))
         } else {
             None
         };
 
-        Ok(BasicBlock { conv1, bn1, conv2, bn2, downsample })
+        Ok(BasicBlock {
+            conv1,
+            bn1,
+            conv2,
+            bn2,
+            downsample,
+        })
     }
 
     fn load_bottleneck(
@@ -497,35 +517,70 @@ impl<B: MathBackend> ResNet<B> {
         let out_channels = mid_channels * Bottleneck::<B>::EXPANSION;
 
         let conv1 = load_conv2d(
-            tensors, &format!("{prefix}.conv1"),
-            in_channels, mid_channels, 1, 1, 1, 0,
+            tensors,
+            &format!("{prefix}.conv1"),
+            in_channels,
+            mid_channels,
+            1,
+            1,
+            1,
+            0,
         )?;
         let bn1 = load_batchnorm2d(tensors, &format!("{prefix}.bn1"), mid_channels, eps)?;
         let conv2 = load_conv2d(
-            tensors, &format!("{prefix}.conv2"),
-            mid_channels, mid_channels, 3, 3, stride, 1,
+            tensors,
+            &format!("{prefix}.conv2"),
+            mid_channels,
+            mid_channels,
+            3,
+            3,
+            stride,
+            1,
         )?;
         let bn2 = load_batchnorm2d(tensors, &format!("{prefix}.bn2"), mid_channels, eps)?;
         let conv3 = load_conv2d(
-            tensors, &format!("{prefix}.conv3"),
-            mid_channels, out_channels, 1, 1, 1, 0,
+            tensors,
+            &format!("{prefix}.conv3"),
+            mid_channels,
+            out_channels,
+            1,
+            1,
+            1,
+            0,
         )?;
         let bn3 = load_batchnorm2d(tensors, &format!("{prefix}.bn3"), out_channels, eps)?;
 
         let downsample = if stride != 1 || in_channels != out_channels {
             let ds_conv = load_conv2d(
-                tensors, &format!("{prefix}.downsample.0"),
-                in_channels, out_channels, 1, 1, stride, 0,
+                tensors,
+                &format!("{prefix}.downsample.0"),
+                in_channels,
+                out_channels,
+                1,
+                1,
+                stride,
+                0,
             )?;
             let ds_bn = load_batchnorm2d(
-                tensors, &format!("{prefix}.downsample.1"), out_channels, eps,
+                tensors,
+                &format!("{prefix}.downsample.1"),
+                out_channels,
+                eps,
             )?;
             Some((ds_conv, ds_bn))
         } else {
             None
         };
 
-        Ok(Bottleneck { conv1, bn1, conv2, bn2, conv3, bn3, downsample })
+        Ok(Bottleneck {
+            conv1,
+            bn1,
+            conv2,
+            bn2,
+            conv3,
+            bn3,
+            downsample,
+        })
     }
 }
 
@@ -565,10 +620,7 @@ impl<B: MathBackend> ResNetClassifier<B> {
 #[cfg(feature = "safetensors")]
 impl<B: MathBackend> ResNetClassifier<B> {
     /// Load a ResNet classifier from a safetensors file.
-    pub fn from_safetensors(
-        config: ResNetConfig,
-        path: &std::path::Path,
-    ) -> Result<Self> {
+    pub fn from_safetensors(config: ResNetConfig, path: &std::path::Path) -> Result<Self> {
         let model = ResNet::from_safetensors(config, path)?;
         Ok(Self::new(model))
     }
@@ -585,7 +637,11 @@ impl<B: MathBackend> Classify for ResNetClassifier<B> {
         let img = ImageBuffer::from_raw(image.to_vec(), width, height, 3)?;
 
         // Resize to model input size
-        let resize = Resize::new(self.input_size, self.input_size, InterpolationMode::Bilinear);
+        let resize = Resize::new(
+            self.input_size,
+            self.input_size,
+            InterpolationMode::Bilinear,
+        );
         let resized = resize.apply(&img)?;
 
         // HWC u8 → CHW f32 with ImageNet normalization
@@ -747,8 +803,8 @@ mod tests {
     #[test]
     fn classifier_with_custom_input_size() {
         let config = ResNetConfig::resnet18(10);
-        let classifier = ResNetClassifier::<CpuBackend>::new(ResNet::new(config))
-            .with_input_size(128);
+        let classifier =
+            ResNetClassifier::<CpuBackend>::new(ResNet::new(config)).with_input_size(128);
 
         assert_eq!(classifier.input_size, 128);
 
@@ -775,15 +831,26 @@ mod tests {
         impl F32View {
             fn new(values: &[f32], shape: &[usize]) -> Self {
                 let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-                Self { data, shape: shape.to_vec() }
+                Self {
+                    data,
+                    shape: shape.to_vec(),
+                }
             }
         }
 
         impl safetensors::View for F32View {
-            fn dtype(&self) -> safetensors::Dtype { safetensors::Dtype::F32 }
-            fn shape(&self) -> &[usize] { &self.shape }
-            fn data(&self) -> Cow<'_, [u8]> { Cow::Borrowed(&self.data) }
-            fn data_len(&self) -> usize { self.data.len() }
+            fn dtype(&self) -> safetensors::Dtype {
+                safetensors::Dtype::F32
+            }
+            fn shape(&self) -> &[usize] {
+                &self.shape
+            }
+            fn data(&self) -> Cow<'_, [u8]> {
+                Cow::Borrowed(&self.data)
+            }
+            fn data_len(&self) -> usize {
+                self.data.len()
+            }
         }
 
         /// Collect all parameter (name, data, shape) triples from a ResNet
@@ -842,8 +909,14 @@ mod tests {
                                 add(&format!("{prefix}.downsample.0.weight"), &dc.weight);
                                 add(&format!("{prefix}.downsample.1.weight"), &db.weight);
                                 add(&format!("{prefix}.downsample.1.bias"), &db.bias);
-                                add(&format!("{prefix}.downsample.1.running_mean"), &db.running_mean);
-                                add(&format!("{prefix}.downsample.1.running_var"), &db.running_var);
+                                add(
+                                    &format!("{prefix}.downsample.1.running_mean"),
+                                    &db.running_mean,
+                                );
+                                add(
+                                    &format!("{prefix}.downsample.1.running_var"),
+                                    &db.running_var,
+                                );
                             }
                         }
                         ResNetStage::Bottleneck(blocks) => {
@@ -867,8 +940,14 @@ mod tests {
                                 add(&format!("{prefix}.downsample.0.weight"), &dc.weight);
                                 add(&format!("{prefix}.downsample.1.weight"), &db.weight);
                                 add(&format!("{prefix}.downsample.1.bias"), &db.bias);
-                                add(&format!("{prefix}.downsample.1.running_mean"), &db.running_mean);
-                                add(&format!("{prefix}.downsample.1.running_var"), &db.running_var);
+                                add(
+                                    &format!("{prefix}.downsample.1.running_mean"),
+                                    &db.running_mean,
+                                );
+                                add(
+                                    &format!("{prefix}.downsample.1.running_var"),
+                                    &db.running_var,
+                                );
                             }
                         }
                     }
@@ -903,10 +982,7 @@ mod tests {
             let av = a.to_vec();
             let bv = b.to_vec();
             for (i, (x, y)) in av.iter().zip(bv.iter()).enumerate() {
-                assert!(
-                    (x - y).abs() < 1e-6,
-                    "{name}[{i}]: {x} vs {y}",
-                );
+                assert!((x - y).abs() < 1e-6, "{name}[{i}]: {x} vs {y}",);
             }
         }
 
@@ -926,13 +1002,33 @@ mod tests {
                         assert_eq!(ba.len(), bb.len());
                         for (bi, (a_blk, b_blk)) in ba.iter().zip(bb.iter()).enumerate() {
                             let p = format!("layer{}.{bi}", si + 1);
-                            tensors_equal(&a_blk.conv1.weight, &b_blk.conv1.weight, &format!("{p}.conv1.w"));
-                            tensors_equal(&a_blk.bn1.weight, &b_blk.bn1.weight, &format!("{p}.bn1.w"));
-                            tensors_equal(&a_blk.conv2.weight, &b_blk.conv2.weight, &format!("{p}.conv2.w"));
-                            tensors_equal(&a_blk.bn2.weight, &b_blk.bn2.weight, &format!("{p}.bn2.w"));
+                            tensors_equal(
+                                &a_blk.conv1.weight,
+                                &b_blk.conv1.weight,
+                                &format!("{p}.conv1.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.bn1.weight,
+                                &b_blk.bn1.weight,
+                                &format!("{p}.bn1.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.conv2.weight,
+                                &b_blk.conv2.weight,
+                                &format!("{p}.conv2.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.bn2.weight,
+                                &b_blk.bn2.weight,
+                                &format!("{p}.bn2.w"),
+                            );
                             match (&a_blk.downsample, &b_blk.downsample) {
                                 (Some((ac, ab)), Some((bc, bb))) => {
-                                    tensors_equal(&ac.weight, &bc.weight, &format!("{p}.ds.conv.w"));
+                                    tensors_equal(
+                                        &ac.weight,
+                                        &bc.weight,
+                                        &format!("{p}.ds.conv.w"),
+                                    );
                                     tensors_equal(&ab.weight, &bb.weight, &format!("{p}.ds.bn.w"));
                                 }
                                 (None, None) => {}
@@ -944,15 +1040,43 @@ mod tests {
                         assert_eq!(ba.len(), bb.len());
                         for (bi, (a_blk, b_blk)) in ba.iter().zip(bb.iter()).enumerate() {
                             let p = format!("layer{}.{bi}", si + 1);
-                            tensors_equal(&a_blk.conv1.weight, &b_blk.conv1.weight, &format!("{p}.conv1.w"));
-                            tensors_equal(&a_blk.conv2.weight, &b_blk.conv2.weight, &format!("{p}.conv2.w"));
-                            tensors_equal(&a_blk.conv3.weight, &b_blk.conv3.weight, &format!("{p}.conv3.w"));
-                            tensors_equal(&a_blk.bn1.weight, &b_blk.bn1.weight, &format!("{p}.bn1.w"));
-                            tensors_equal(&a_blk.bn2.weight, &b_blk.bn2.weight, &format!("{p}.bn2.w"));
-                            tensors_equal(&a_blk.bn3.weight, &b_blk.bn3.weight, &format!("{p}.bn3.w"));
+                            tensors_equal(
+                                &a_blk.conv1.weight,
+                                &b_blk.conv1.weight,
+                                &format!("{p}.conv1.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.conv2.weight,
+                                &b_blk.conv2.weight,
+                                &format!("{p}.conv2.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.conv3.weight,
+                                &b_blk.conv3.weight,
+                                &format!("{p}.conv3.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.bn1.weight,
+                                &b_blk.bn1.weight,
+                                &format!("{p}.bn1.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.bn2.weight,
+                                &b_blk.bn2.weight,
+                                &format!("{p}.bn2.w"),
+                            );
+                            tensors_equal(
+                                &a_blk.bn3.weight,
+                                &b_blk.bn3.weight,
+                                &format!("{p}.bn3.w"),
+                            );
                             match (&a_blk.downsample, &b_blk.downsample) {
                                 (Some((ac, ab)), Some((bc, bb))) => {
-                                    tensors_equal(&ac.weight, &bc.weight, &format!("{p}.ds.conv.w"));
+                                    tensors_equal(
+                                        &ac.weight,
+                                        &bc.weight,
+                                        &format!("{p}.ds.conv.w"),
+                                    );
                                     tensors_equal(&ab.weight, &bb.weight, &format!("{p}.ds.bn.w"));
                                 }
                                 (None, None) => {}
@@ -1017,7 +1141,11 @@ mod tests {
         #[test]
         fn roundtrip_feature_extractor() {
             // num_classes=0: FC layer should be skipped
-            let config = ResNetConfig { layers: [2, 2, 2, 2], bottleneck: false, num_classes: 0 };
+            let config = ResNetConfig {
+                layers: [2, 2, 2, 2],
+                bottleneck: false,
+                num_classes: 0,
+            };
             let original = ResNet::<CpuBackend>::new(config.clone());
 
             let bytes = serialize_resnet(&original, &config);
@@ -1034,10 +1162,7 @@ mod tests {
         fn missing_weight_produces_error() {
             // Empty safetensors file — should fail on first weight
             let info: Option<HashMap<String, String>> = None;
-            let bytes = safetensors::serialize(
-                Vec::<(String, F32View)>::new(),
-                &info,
-            ).unwrap();
+            let bytes = safetensors::serialize(Vec::<(String, F32View)>::new(), &info).unwrap();
             let path = write_temp(&bytes, "empty");
 
             let config = ResNetConfig::resnet18(10);
@@ -1047,7 +1172,10 @@ mod tests {
             match result {
                 Err(e) => {
                     let msg = format!("{e}");
-                    assert!(msg.contains("conv1.weight"), "error should mention conv1.weight: {msg}");
+                    assert!(
+                        msg.contains("conv1.weight"),
+                        "error should mention conv1.weight: {msg}"
+                    );
                 }
                 Ok(_) => panic!("should fail on empty safetensors"),
             }

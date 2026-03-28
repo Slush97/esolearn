@@ -54,7 +54,11 @@ fn main() {
     // KNN match + ratio test
     let knn = knn_match_binary(&desc1, &desc2, 2);
     let good = ratio_test(&knn, 0.8);
-    println!("Matches: {} raw KNN, {} after ratio test", knn.len(), good.len());
+    println!(
+        "Matches: {} raw KNN, {} after ratio test",
+        knn.len(),
+        good.len()
+    );
 
     if good.is_empty() {
         println!("No good matches found.");

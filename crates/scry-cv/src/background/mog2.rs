@@ -135,8 +135,8 @@ impl Mog2 {
 
                 let rho = alpha / self.weights[idx].max(1e-10);
                 self.means[idx] += rho * diff;
-                self.variances[idx] = ((1.0 - rho) * var + rho * diff * diff)
-                    .max(self.min_variance);
+                self.variances[idx] =
+                    ((1.0 - rho) * var + rho * diff * diff).max(self.min_variance);
 
                 // Update weight
                 self.weights[idx] += alpha * (1.0 - self.weights[idx]);
@@ -203,9 +203,7 @@ impl Mog2 {
         // Determine if the matched component is background
         // Sort components by weight/variance (descending weight) and check if
         // the cumulative weight of top components exceeds bg_ratio.
-        let mut sorted: Vec<(f32, usize)> = (0..nk)
-            .map(|k| (self.weights[base + k], k))
-            .collect();
+        let mut sorted: Vec<(f32, usize)> = (0..nk).map(|k| (self.weights[base + k], k)).collect();
         sorted.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut cum_weight = 0.0f32;
@@ -370,8 +368,7 @@ mod tests {
         }
 
         let bg = mog.background().unwrap();
-        let avg: f32 =
-            bg.as_slice().iter().sum::<f32>() / bg.as_slice().len() as f32;
+        let avg: f32 = bg.as_slice().iter().sum::<f32>() / bg.as_slice().len() as f32;
 
         assert!(
             (avg - bg_val).abs() < 0.05,
@@ -386,9 +383,7 @@ mod tests {
         let n = (w * h) as usize;
 
         let bg_frame = ImageBuf::<f32, Gray>::from_vec(vec![0.8; n], w, h).unwrap();
-        let mut mog = Mog2::new(w, h)
-            .detect_shadows(true)
-            .var_threshold(36.0); // wider threshold so shadow pixels still match
+        let mut mog = Mog2::new(w, h).detect_shadows(true).var_threshold(36.0); // wider threshold so shadow pixels still match
 
         for _ in 0..100 {
             mog.apply(&bg_frame, -1.0).unwrap();
@@ -396,8 +391,7 @@ mod tests {
 
         // Shadow: slightly darker version of background (ratio ~0.9)
         // Must be close enough to match the component but darker
-        let shadow_frame =
-            ImageBuf::<f32, Gray>::from_vec(vec![0.72; n], w, h).unwrap();
+        let shadow_frame = ImageBuf::<f32, Gray>::from_vec(vec![0.72; n], w, h).unwrap();
         let mask = mog.apply(&shadow_frame, 0.0).unwrap();
 
         let shadow_count = mask.as_slice().iter().filter(|&&v| v == 127).count();

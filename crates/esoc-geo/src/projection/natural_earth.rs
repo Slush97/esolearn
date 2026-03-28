@@ -38,10 +38,9 @@ impl Projection for NaturalEarth1 {
         let mut phi = y;
         for _ in 0..12 {
             let phi2 = phi * phi;
-            let f =
-                phi * (B0 + phi2 * (B1 + phi2 * (B2 + phi2 * (B3 + phi2 * B4)))) - y;
-            let df = B0
-                + phi2 * (3.0 * B1 + phi2 * (5.0 * B2 + phi2 * (7.0 * B3 + 9.0 * phi2 * B4)));
+            let f = phi * (B0 + phi2 * (B1 + phi2 * (B2 + phi2 * (B3 + phi2 * B4)))) - y;
+            let df =
+                B0 + phi2 * (3.0 * B1 + phi2 * (5.0 * B2 + phi2 * (7.0 * B3 + 9.0 * phi2 * B4)));
             if df.abs() < 1e-20 {
                 break;
             }

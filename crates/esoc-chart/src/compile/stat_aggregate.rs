@@ -44,7 +44,11 @@ pub fn compute_aggregate(
         let agg = match func {
             AggregateFunc::Count => values.len() as f64,
             AggregateFunc::Sum => {
-                if values.is_empty() { f64::NAN } else { values.iter().sum() }
+                if values.is_empty() {
+                    f64::NAN
+                } else {
+                    values.iter().sum()
+                }
             }
             AggregateFunc::Mean => {
                 if values.is_empty() {
@@ -66,12 +70,16 @@ pub fn compute_aggregate(
                 }
             }
             AggregateFunc::Min => {
-                if values.is_empty() { f64::NAN } else {
+                if values.is_empty() {
+                    f64::NAN
+                } else {
                     values.iter().copied().fold(f64::INFINITY, f64::min)
                 }
             }
             AggregateFunc::Max => {
-                if values.is_empty() { f64::NAN } else {
+                if values.is_empty() {
+                    f64::NAN
+                } else {
                     values.iter().copied().fold(f64::NEG_INFINITY, f64::max)
                 }
             }
@@ -143,7 +151,10 @@ mod tests {
         let cats = vec!["A".into()];
         let vals = vec![5.0];
         let result = compute_aggregate(&cats, &vals, AggregateFunc::Mean).unwrap();
-        assert!(!result.y_data[0].is_nan(), "non-empty group should not be NaN");
+        assert!(
+            !result.y_data[0].is_nan(),
+            "non-empty group should not be NaN"
+        );
         assert!((result.y_data[0] - 5.0).abs() < 1e-10);
     }
 

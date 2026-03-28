@@ -158,11 +158,8 @@ mod tests {
     fn to_tensor_normalized() {
         // Single white pixel
         let img = ImageBuffer::from_raw(vec![255, 255, 255], 1, 1, 3).unwrap();
-        let tensor: Tensor<CpuBackend> = ToTensor::normalized(
-            [0.5, 0.5, 0.5],
-            [0.5, 0.5, 0.5],
-        )
-        .apply(&img);
+        let tensor: Tensor<CpuBackend> =
+            ToTensor::normalized([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]).apply(&img);
         let data = tensor.to_vec();
         // (1.0 - 0.5) / 0.5 = 1.0
         for &v in &data {

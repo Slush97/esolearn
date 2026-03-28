@@ -9,11 +9,11 @@
 //! - [`NativeModel`] — wraps a scry-llm `Module<B>` with a forward function
 //! - [`OnnxModel`] — wraps an `ort::Session` (requires `feature = "onnx"`)
 
+#[cfg(test)]
+pub(crate) mod mock;
 pub mod native;
 #[cfg(feature = "onnx")]
 pub mod onnx;
-#[cfg(test)]
-pub(crate) mod mock;
 
 pub use native::NativeModel;
 #[cfg(feature = "onnx")]

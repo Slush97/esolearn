@@ -2,7 +2,11 @@
 //! Stress test: exercises every chart type, option, theme, annotation, facet mode,
 //! position, stat, and edge case to surface visual issues.
 
-use esoc_chart::express::*;
+use std::fmt::Write;
+
+use esoc_chart::express::{
+    area, bar, boxplot, grouped_bar, heatmap, histogram, line, pie_labeled, scatter, stacked_bar,
+};
 use esoc_chart::grammar::annotation::Annotation;
 use esoc_chart::grammar::chart::Chart;
 use esoc_chart::grammar::coord::CoordSystem;
@@ -14,13 +18,14 @@ use esoc_chart::new_theme::NewTheme;
 use esoc_color::{Color, ColorScale, Palette};
 
 fn main() -> esoc_chart::error::Result<()> {
-    let mut sections: Vec<(&str, String)> = Vec::new();
-
     // ── Simple RNG ───────────────────────────────────────────────────
     struct Rng(u64);
     impl Rng {
         fn uniform(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             (self.0 >> 11) as f64 / (1u64 << 53) as f64
         }
         fn normal(&mut self) -> f64 {
@@ -32,6 +37,7 @@ fn main() -> esoc_chart::error::Result<()> {
             lo + self.uniform() * (hi - lo)
         }
     }
+    let mut sections: Vec<(&str, String)> = Vec::new();
     let mut rng = Rng(12345);
 
     // ═════════════════════════════════════════════════════════════════
@@ -53,7 +59,10 @@ fn main() -> esoc_chart::error::Result<()> {
     {
         let n = 1000;
         let x: Vec<f64> = (0..n).map(|_| rng.normal() * 5.0 + 50.0).collect();
-        let y: Vec<f64> = x.iter().map(|&xi| xi * 0.6 + rng.normal() * 8.0 + 10.0).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&xi| xi * 0.6 + rng.normal() * 8.0 + 10.0)
+            .collect();
         let svg = scatter(&x, &y)
             .title("Dense Scatter (n=1000)")
             .x_label("Income ($K)")
@@ -68,7 +77,14 @@ fn main() -> esoc_chart::error::Result<()> {
         let mut x = Vec::new();
         let mut y = Vec::new();
         let mut cats = Vec::new();
-        let names = ["Setosa", "Versicolor", "Virginica", "Hybrid-A", "Hybrid-B", "Unknown"];
+        let names = [
+            "Setosa",
+            "Versicolor",
+            "Virginica",
+            "Hybrid-A",
+            "Hybrid-B",
+            "Unknown",
+        ];
         for (i, name) in names.iter().enumerate() {
             let cx = 2.0 + i as f64 * 1.5;
             let cy = 3.0 + (i as f64 * 0.7).sin() * 2.0;
@@ -90,16 +106,24 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 1d. Scatter with jitter position
     {
-        let x: Vec<f64> = (0..60).map(|i| (i % 3) as f64).collect();
-        let y: Vec<f64> = x.iter().map(|&xi| xi * 2.0 + rng.normal() * 0.5 + 5.0).collect();
-        let cats: Vec<String> = (0..60).map(|i| ["Low", "Med", "High"][i % 3].into()).collect();
+        let x: Vec<f64> = (0..60).map(|i| f64::from(i % 3)).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&xi| xi * 2.0 + rng.normal() * 0.5 + 5.0)
+            .collect();
+        let cats: Vec<String> = (0..60)
+            .map(|i| ["Low", "Med", "High"][i % 3].into())
+            .collect();
         let chart = Chart::new()
             .layer(
                 Layer::new(MarkType::Point)
                     .with_x(x)
                     .with_y(y)
                     .with_categories(cats)
-                    .position(Position::Jitter { x_amount: 0.2, y_amount: 0.0 }),
+                    .position(Position::Jitter {
+                        x_amount: 0.2,
+                        y_amount: 0.0,
+                    }),
             )
             .title("Scatter — Jittered (strip plot)")
             .x_label("Group")
@@ -118,19 +142,39 @@ fn main() -> esoc_chart::error::Result<()> {
             .y_label("Y")
             .size(550.0, 400.0)
             .build()
-            .annotate(Annotation::hline(40.0).with_label("Mean").with_color(Color::from_hex("#e74c3c").unwrap()))
-            .annotate(Annotation::vline(50.0).with_label("Midpoint").with_color(Color::from_hex("#3498db").unwrap()))
-            .annotate(Annotation::band(20.0, 60.0).with_label("Normal range").with_color(Color::from_hex("#2ecc71").unwrap().with_alpha(0.12)))
+            .annotate(
+                Annotation::hline(40.0)
+                    .with_label("Mean")
+                    .with_color(Color::from_hex("#e74c3c").unwrap()),
+            )
+            .annotate(
+                Annotation::vline(50.0)
+                    .with_label("Midpoint")
+                    .with_color(Color::from_hex("#3498db").unwrap()),
+            )
+            .annotate(
+                Annotation::band(20.0, 60.0)
+                    .with_label("Normal range")
+                    .with_color(Color::from_hex("#2ecc71").unwrap().with_alpha(0.12)),
+            )
             .annotate(Annotation::text(70.0, 70.0, "Outlier zone"));
         sections.push(("Scatter — All Annotations", chart.to_svg()?));
     }
 
     // 1f. Scatter with LOESS smooth overlay
     {
-        let x: Vec<f64> = (0..50).map(|i| i as f64 * 0.2).collect();
-        let y: Vec<f64> = x.iter().map(|&v| (v * 0.5).sin() * 4.0 + v * 0.3 + rng.normal() * 1.0).collect();
+        let x: Vec<f64> = (0..50).map(|i| f64::from(i) * 0.2).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.5).sin() * 4.0 + v * 0.3 + rng.normal() * 1.0)
+            .collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Point).with_x(x.clone()).with_y(y.clone()).with_label("Raw"))
+            .layer(
+                Layer::new(MarkType::Point)
+                    .with_x(x.clone())
+                    .with_y(y.clone())
+                    .with_label("Raw"),
+            )
             .layer(
                 Layer::new(MarkType::Line)
                     .with_x(x)
@@ -167,7 +211,7 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 2a. Single line
     {
-        let x: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();
+        let x: Vec<f64> = (0..100).map(|i| f64::from(i) * 0.1).collect();
         let y: Vec<f64> = x.iter().map(|&v| (v * 0.5).sin() * 3.0 + v * 0.2).collect();
         let svg = line(&x, &y)
             .title("Smooth Sine Wave")
@@ -180,13 +224,42 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 2b. Multi-line (5 series)
     {
-        let x: Vec<f64> = (0..40).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..40).map(f64::from).collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.2).sin() * 10.0 + 20.0).collect()).with_label("Server A"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.15).cos() * 8.0 + 25.0).collect()).with_label("Server B"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| v * 0.5 + 10.0).collect()).with_label("Server C"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| 30.0 - v * 0.3).collect()).with_label("Server D"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| ((v * 0.3).sin() * 5.0 + 18.0).max(5.0)).collect()).with_label("Server E"))
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| (v * 0.2).sin() * 10.0 + 20.0).collect())
+                    .with_label("Server A"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| (v * 0.15).cos() * 8.0 + 25.0).collect())
+                    .with_label("Server B"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| v * 0.5 + 10.0).collect())
+                    .with_label("Server C"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| 30.0 - v * 0.3).collect())
+                    .with_label("Server D"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(
+                        x.iter()
+                            .map(|&v| ((v * 0.3).sin() * 5.0 + 18.0).max(5.0))
+                            .collect(),
+                    )
+                    .with_label("Server E"),
+            )
             .title("5-Server Latency Dashboard")
             .x_label("Minute")
             .y_label("Latency (ms)")
@@ -196,12 +269,24 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 2c. Line + scatter overlay (actual vs predicted)
     {
-        let x: Vec<f64> = (0..15).map(|i| i as f64).collect();
-        let actual: Vec<f64> = vec![3.0, 5.2, 4.1, 7.8, 6.5, 9.1, 8.3, 10.2, 9.8, 12.1, 11.5, 13.7, 12.9, 15.0, 14.2];
+        let x: Vec<f64> = (0..15).map(f64::from).collect();
+        let actual: Vec<f64> = vec![
+            3.0, 5.2, 4.1, 7.8, 6.5, 9.1, 8.3, 10.2, 9.8, 12.1, 11.5, 13.7, 12.9, 15.0, 14.2,
+        ];
         let predicted: Vec<f64> = x.iter().map(|&v| v * 0.9 + 2.5).collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Point).with_x(x.clone()).with_y(actual).with_label("Actual"))
-            .layer(Layer::new(MarkType::Line).with_x(x).with_y(predicted).with_label("Predicted"))
+            .layer(
+                Layer::new(MarkType::Point)
+                    .with_x(x.clone())
+                    .with_y(actual)
+                    .with_label("Actual"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x)
+                    .with_y(predicted)
+                    .with_label("Predicted"),
+            )
             .title("Actual vs Predicted")
             .x_label("Week")
             .y_label("Sales ($K)")
@@ -211,12 +296,32 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 2d. Noisy line with wide LOESS
     {
-        let x: Vec<f64> = (0..80).map(|i| i as f64 * 0.125).collect();
-        let y: Vec<f64> = x.iter().map(|&v| (v * 0.8).sin() * 5.0 + rng.normal() * 2.5).collect();
+        let x: Vec<f64> = (0..80).map(|i| f64::from(i) * 0.125).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.8).sin() * 5.0 + rng.normal() * 2.5)
+            .collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(y.clone()).with_label("Raw"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(y.clone()).stat(Stat::Smooth { bandwidth: 0.15 }).with_label("bw=0.15"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(y).stat(Stat::Smooth { bandwidth: 0.5 }).with_label("bw=0.5"))
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(y.clone())
+                    .with_label("Raw"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(y.clone())
+                    .stat(Stat::Smooth { bandwidth: 0.15 })
+                    .with_label("bw=0.15"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x)
+                    .with_y(y)
+                    .stat(Stat::Smooth { bandwidth: 0.5 })
+                    .with_label("bw=0.5"),
+            )
             .title("LOESS Bandwidth Comparison")
             .x_label("X")
             .y_label("Y")
@@ -250,7 +355,9 @@ fn main() -> esoc_chart::error::Result<()> {
     // 3c. Many bars (20 categories, label rotation stress)
     {
         let cats: Vec<String> = (0..20).map(|i| format!("Department {}", i + 1)).collect();
-        let vals: Vec<f64> = (0..20).map(|i| 10.0 + (i as f64 * 2.7).sin().abs() * 40.0).collect();
+        let vals: Vec<f64> = (0..20)
+            .map(|i| 10.0 + (f64::from(i) * 2.7).sin().abs() * 40.0)
+            .collect();
         let cat_refs: Vec<&str> = cats.iter().map(|s| s.as_str()).collect();
         let svg = bar(&cat_refs, &vals)
             .title("20 Departments — Label Rotation Stress")
@@ -287,8 +394,12 @@ fn main() -> esoc_chart::error::Result<()> {
                     .with_x(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
                     .with_y(vec![95.0, 87.0, 76.0, 68.0, 55.0, 42.0])
                     .with_categories(vec![
-                        "Rust".into(), "Go".into(), "Python".into(),
-                        "Java".into(), "C++".into(), "JavaScript".into(),
+                        "Rust".into(),
+                        "Go".into(),
+                        "Python".into(),
+                        "Java".into(),
+                        "C++".into(),
+                        "JavaScript".into(),
                     ]),
             )
             .coord(CoordSystem::Flipped)
@@ -323,9 +434,16 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 3g. Grouped bar (3 groups × 4 quarters)
     {
-        let cats = vec!["Q1","Q2","Q3","Q4","Q1","Q2","Q3","Q4","Q1","Q2","Q3","Q4"];
-        let groups = vec!["2023","2023","2023","2023","2024","2024","2024","2024","2025","2025","2025","2025"];
-        let vals = vec![10.0,14.0,18.0,12.0, 12.0,18.0,22.0,15.0, 14.0,20.0,28.0,19.0];
+        let cats = vec![
+            "Q1", "Q2", "Q3", "Q4", "Q1", "Q2", "Q3", "Q4", "Q1", "Q2", "Q3", "Q4",
+        ];
+        let groups = vec![
+            "2023", "2023", "2023", "2023", "2024", "2024", "2024", "2024", "2025", "2025", "2025",
+            "2025",
+        ];
+        let vals = vec![
+            10.0, 14.0, 18.0, 12.0, 12.0, 18.0, 22.0, 15.0, 14.0, 20.0, 28.0, 19.0,
+        ];
         let svg = grouped_bar(&cats, &groups, &vals)
             .title("Grouped Bar — 3 Years × 4 Quarters")
             .x_label("Quarter")
@@ -360,9 +478,16 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 3i. Stacked bar
     {
-        let cats = vec!["Jan","Feb","Mar","Apr","May","Jun","Jan","Feb","Mar","Apr","May","Jun"];
-        let groups = vec!["Online","Online","Online","Online","Online","Online","Retail","Retail","Retail","Retail","Retail","Retail"];
-        let vals = vec![20.0,25.0,30.0,28.0,35.0,40.0, 15.0,12.0,18.0,20.0,16.0,14.0];
+        let cats = vec![
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        ];
+        let groups = vec![
+            "Online", "Online", "Online", "Online", "Online", "Online", "Retail", "Retail",
+            "Retail", "Retail", "Retail", "Retail",
+        ];
+        let vals = vec![
+            20.0, 25.0, 30.0, 28.0, 35.0, 40.0, 15.0, 12.0, 18.0, 20.0, 16.0, 14.0,
+        ];
         let svg = stacked_bar(&cats, &groups, &vals)
             .title("Stacked Bar — Online vs Retail")
             .x_label("Month")
@@ -479,7 +604,9 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 4c. Skewed (exponential-like)
     {
-        let data: Vec<f64> = (0..600).map(|_| (-rng.uniform().max(1e-10).ln()) * 5.0).collect();
+        let data: Vec<f64> = (0..600)
+            .map(|_| (-rng.uniform().max(1e-10).ln()) * 5.0)
+            .collect();
         let svg = histogram(&data)
             .bins(40)
             .title("Histogram — Skewed (Exponential)")
@@ -522,8 +649,11 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 5a. Basic area
     {
-        let x: Vec<f64> = (0..50).map(|i| i as f64).collect();
-        let y: Vec<f64> = x.iter().map(|&v| (v * 0.2).sin().abs() * 30.0 + 5.0 + rng.normal() * 2.0).collect();
+        let x: Vec<f64> = (0..50).map(f64::from).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.2).sin().abs() * 30.0 + 5.0 + rng.normal() * 2.0)
+            .collect();
         let svg = area(&x, &y)
             .title("Area — Website Traffic")
             .x_label("Day")
@@ -535,12 +665,30 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 5b. Stacked area (2 series)
     {
-        let x: Vec<f64> = (0..30).map(|i| i as f64).collect();
-        let y1: Vec<f64> = x.iter().map(|&v| (v * 0.15).sin().abs() * 10.0 + 8.0).collect();
-        let y2: Vec<f64> = x.iter().map(|&v| (v * 0.2).cos().abs() * 7.0 + 4.0).collect();
+        let x: Vec<f64> = (0..30).map(f64::from).collect();
+        let y1: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.15).sin().abs() * 10.0 + 8.0)
+            .collect();
+        let y2: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.2).cos().abs() * 7.0 + 4.0)
+            .collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(y1).with_label("Organic").position(Position::Stack))
-            .layer(Layer::new(MarkType::Area).with_x(x).with_y(y2).with_label("Paid").position(Position::Stack))
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(y1)
+                    .with_label("Organic")
+                    .position(Position::Stack),
+            )
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x)
+                    .with_y(y2)
+                    .with_label("Paid")
+                    .position(Position::Stack),
+            )
             .title("Stacked Area — Traffic Sources")
             .x_label("Day")
             .y_label("Sessions")
@@ -550,12 +698,52 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 5c. Stacked area (4 series)
     {
-        let x: Vec<f64> = (0..25).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..25).map(f64::from).collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.3).sin().abs() * 8.0 + 3.0).collect()).with_label("Direct").position(Position::Stack))
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.2).cos().abs() * 6.0 + 2.0).collect()).with_label("Social").position(Position::Stack))
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.15).sin().abs() * 4.0 + 1.5).collect()).with_label("Email").position(Position::Stack))
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.25).cos().abs() * 5.0 + 2.0).collect()).with_label("Referral").position(Position::Stack))
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(
+                        x.iter()
+                            .map(|&v| (v * 0.3).sin().abs() * 8.0 + 3.0)
+                            .collect(),
+                    )
+                    .with_label("Direct")
+                    .position(Position::Stack),
+            )
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(
+                        x.iter()
+                            .map(|&v| (v * 0.2).cos().abs() * 6.0 + 2.0)
+                            .collect(),
+                    )
+                    .with_label("Social")
+                    .position(Position::Stack),
+            )
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(
+                        x.iter()
+                            .map(|&v| (v * 0.15).sin().abs() * 4.0 + 1.5)
+                            .collect(),
+                    )
+                    .with_label("Email")
+                    .position(Position::Stack),
+            )
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(
+                        x.iter()
+                            .map(|&v| (v * 0.25).cos().abs() * 5.0 + 2.0)
+                            .collect(),
+                    )
+                    .with_label("Referral")
+                    .position(Position::Stack),
+            )
             .title("Stacked Area — 4 Channels")
             .x_label("Week")
             .y_label("Visits (K)")
@@ -569,19 +757,22 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 6a. Basic pie (5 slices)
     {
-        let svg = pie(&[35.0, 25.0, 20.0, 12.0, 8.0], &["Chrome", "Firefox", "Safari", "Edge", "Other"])
-            .title("Browser Market Share")
-            .size(400.0, 400.0)
-            .to_svg()?;
+        let svg = pie_labeled(
+            &["Chrome", "Firefox", "Safari", "Edge", "Other"],
+            &[35.0, 25.0, 20.0, 12.0, 8.0],
+        )
+        .title("Browser Market Share")
+        .size(400.0, 400.0)
+        .to_svg()?;
         sections.push(("Pie — 5 Slices", svg));
     }
 
     // 6b. Pie with many slices (10)
     {
-        let vals: Vec<f64> = (0..10).map(|i| 20.0 - i as f64 * 1.5).collect();
+        let vals: Vec<f64> = (0..10).map(|i| 20.0 - f64::from(i) * 1.5).collect();
         let labels: Vec<String> = (0..10).map(|i| format!("Slice {}", i + 1)).collect();
         let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
-        let svg = pie(&vals, &label_refs)
+        let svg = pie_labeled(&label_refs, &vals)
             .title("Pie — 10 Slices")
             .size(450.0, 450.0)
             .to_svg()?;
@@ -590,25 +781,31 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 6c. Pie with one dominant slice
     {
-        let svg = pie(&[90.0, 5.0, 3.0, 2.0], &["Dominant", "Small-A", "Small-B", "Tiny"])
-            .title("Pie — One Dominant (90%)")
-            .size(400.0, 400.0)
-            .to_svg()?;
+        let svg = pie_labeled(
+            &["Dominant", "Small-A", "Small-B", "Tiny"],
+            &[90.0, 5.0, 3.0, 2.0],
+        )
+        .title("Pie — One Dominant (90%)")
+        .size(400.0, 400.0)
+        .to_svg()?;
         sections.push(("Pie — Dominant Slice", svg));
     }
 
     // 6d. Equal slices
     {
-        let svg = pie(&[25.0, 25.0, 25.0, 25.0], &["North", "South", "East", "West"])
-            .title("Pie — Equal Slices")
-            .size(400.0, 400.0)
-            .to_svg()?;
+        let svg = pie_labeled(
+            &["North", "South", "East", "West"],
+            &[25.0, 25.0, 25.0, 25.0],
+        )
+        .title("Pie — Equal Slices")
+        .size(400.0, 400.0)
+        .to_svg()?;
         sections.push(("Pie — Equal", svg));
     }
 
     // 6e. Donut variants
     {
-        let svg = pie(&[60.0, 25.0, 15.0], &["Pass", "Warn", "Fail"])
+        let svg = pie_labeled(&["Pass", "Warn", "Fail"], &[60.0, 25.0, 15.0])
             .donut(0.55)
             .title("Donut — 55% hole")
             .size(380.0, 380.0)
@@ -616,7 +813,7 @@ fn main() -> esoc_chart::error::Result<()> {
         sections.push(("Donut — 55%", svg));
     }
     {
-        let svg = pie(&[40.0, 30.0, 20.0, 10.0], &["A", "B", "C", "D"])
+        let svg = pie_labeled(&["A", "B", "C", "D"], &[40.0, 30.0, 20.0, 10.0])
             .donut(0.8)
             .title("Donut — 80% hole (thin ring)")
             .size(380.0, 380.0)
@@ -632,7 +829,11 @@ fn main() -> esoc_chart::error::Result<()> {
     {
         let mut cats = Vec::new();
         let mut vals = Vec::new();
-        for (label, center, spread) in &[("Control", 50.0, 10.0), ("Drug A", 65.0, 8.0), ("Drug B", 70.0, 15.0)] {
+        for (label, center, spread) in &[
+            ("Control", 50.0, 10.0),
+            ("Drug A", 65.0, 8.0),
+            ("Drug B", 70.0, 15.0),
+        ] {
             for _ in 0..50 {
                 vals.push(center + rng.normal() * spread);
                 cats.push(*label);
@@ -703,8 +904,8 @@ fn main() -> esoc_chart::error::Result<()> {
         ];
         let svg = heatmap(data)
             .annotate()
-            .row_labels(vec!["X".into(), "Y".into(), "Z".into()])
-            .col_labels(vec!["A".into(), "B".into(), "C".into()])
+            .with_row_labels(&["X", "Y", "Z"])
+            .with_col_labels(&["A", "B", "C"])
             .title("Heatmap — 3×3 Annotated")
             .x_label("Feature")
             .y_label("Sample")
@@ -715,17 +916,21 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 8b. Large heatmap (8×8)
     {
-        let data: Vec<Vec<f64>> = (0..8).map(|r| {
-            (0..8).map(|c| {
-                ((r as f64 * 0.5 + c as f64 * 0.3).sin() * 50.0 + 50.0).round()
-            }).collect()
-        }).collect();
+        let data: Vec<Vec<f64>> = (0..8)
+            .map(|r| {
+                (0..8)
+                    .map(|c| {
+                        ((f64::from(r) * 0.5 + f64::from(c) * 0.3).sin() * 50.0 + 50.0).round()
+                    })
+                    .collect()
+            })
+            .collect();
         let rows: Vec<String> = (0..8).map(|i| format!("Gene {}", i + 1)).collect();
         let cols: Vec<String> = (0..8).map(|i| format!("Sample {}", i + 1)).collect();
         let svg = heatmap(data)
             .annotate()
-            .row_labels(rows)
-            .col_labels(cols)
+            .with_row_labels(&rows)
+            .with_col_labels(&cols)
             .title("Heatmap — 8×8 Gene Expression")
             .x_label("Sample")
             .y_label("Gene")
@@ -742,11 +947,11 @@ fn main() -> esoc_chart::error::Result<()> {
             vec![0.0, 4.0, 90.0, 3.0],
             vec![1.0, 2.0, 3.0, 82.0],
         ];
-        let labels = vec!["Cat".into(), "Dog".into(), "Bird".into(), "Fish".into()];
+        let labels: Vec<String> = vec!["Cat".into(), "Dog".into(), "Bird".into(), "Fish".into()];
         let svg = heatmap(data)
             .annotate()
-            .row_labels(labels.clone())
-            .col_labels(labels)
+            .with_row_labels(&labels)
+            .with_col_labels(&labels)
             .title("Confusion Matrix — 4 Classes")
             .x_label("Predicted")
             .y_label("Actual")
@@ -775,9 +980,9 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 8e. Heatmap no annotations (just gradient)
     {
-        let data: Vec<Vec<f64>> = (0..6).map(|r| {
-            (0..10).map(|c| (r * 10 + c) as f64).collect()
-        }).collect();
+        let data: Vec<Vec<f64>> = (0..6)
+            .map(|r| (0..10).map(|c| f64::from(r * 10 + c)).collect())
+            .collect();
         let svg = heatmap(data)
             .title("Heatmap — 6×10 No Annotations")
             .x_label("Time")
@@ -983,11 +1188,26 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 10b. Dark theme — multi-line
     {
-        let x: Vec<f64> = (0..30).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..30).map(f64::from).collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.3).sin() * 5.0 + 10.0).collect()).with_label("CPU"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| (v * 0.2).cos() * 4.0 + 8.0).collect()).with_label("Memory"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(x.iter().map(|&v| v * 0.3 + 2.0).collect()).with_label("Disk"))
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| (v * 0.3).sin() * 5.0 + 10.0).collect())
+                    .with_label("CPU"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| (v * 0.2).cos() * 4.0 + 8.0).collect())
+                    .with_label("Memory"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(x.iter().map(|&v| v * 0.3 + 2.0).collect())
+                    .with_label("Disk"),
+            )
             .title("Dark Theme — System Monitor")
             .x_label("Time (s)")
             .y_label("Usage (%)")
@@ -998,20 +1218,26 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 10c. Dark theme — bar
     {
-        let svg = bar(&["Mon", "Tue", "Wed", "Thu", "Fri"], &[120.0, 95.0, 150.0, 88.0, 110.0])
-            .title("Dark Theme — Bars")
-            .x_label("Day")
-            .y_label("Tickets Closed")
-            .theme(NewTheme::dark())
-            .size(500.0, 350.0)
-            .to_svg()?;
+        let svg = bar(
+            &["Mon", "Tue", "Wed", "Thu", "Fri"],
+            &[120.0, 95.0, 150.0, 88.0, 110.0],
+        )
+        .title("Dark Theme — Bars")
+        .x_label("Day")
+        .y_label("Tickets Closed")
+        .theme(NewTheme::dark())
+        .size(500.0, 350.0)
+        .to_svg()?;
         sections.push(("Theme — Dark Bar", svg));
     }
 
     // 10d. Dark theme — area
     {
-        let x: Vec<f64> = (0..30).map(|i| i as f64).collect();
-        let y: Vec<f64> = x.iter().map(|&v| (v * 0.2).sin().abs() * 20.0 + 5.0).collect();
+        let x: Vec<f64> = (0..30).map(f64::from).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|&v| (v * 0.2).sin().abs() * 20.0 + 5.0)
+            .collect();
         let svg = area(&x, &y)
             .title("Dark Theme — Area")
             .x_label("Day")
@@ -1046,7 +1272,7 @@ fn main() -> esoc_chart::error::Result<()> {
         theme.point_size = 8.0;
         theme.grid_width = 1.5;
 
-        let x: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..10).map(f64::from).collect();
         let y: Vec<f64> = vec![3.0, 5.0, 4.0, 7.0, 6.0, 9.0, 8.0, 10.0, 9.5, 12.0];
         let svg = scatter(&x, &y)
             .title("Custom Theme — Big Fonts")
@@ -1085,7 +1311,10 @@ fn main() -> esoc_chart::error::Result<()> {
         let mut x = Vec::new();
         let mut y = Vec::new();
         let mut cats = Vec::new();
-        for (i, name) in ["Bad", "Poor", "Ok", "Good", "Great", "Excellent"].iter().enumerate() {
+        for (i, name) in ["Bad", "Poor", "Ok", "Good", "Great", "Excellent"]
+            .iter()
+            .enumerate()
+        {
             for _ in 0..10 {
                 x.push(i as f64 + rng.normal() * 0.3);
                 y.push(rng.range(0.0, 10.0));
@@ -1119,17 +1348,20 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 11b. Mixed positive/negative bar (non-stacked)
     {
-        let svg = bar(&["Jan", "Feb", "Mar", "Apr", "May"], &[10.0, -5.0, 15.0, -3.0, 8.0])
-            .title("Mixed +/- Bar (no stack)")
-            .y_label("Net Change")
-            .size(450.0, 320.0)
-            .to_svg()?;
+        let svg = bar(
+            &["Jan", "Feb", "Mar", "Apr", "May"],
+            &[10.0, -5.0, 15.0, -3.0, 8.0],
+        )
+        .title("Mixed +/- Bar (no stack)")
+        .y_label("Net Change")
+        .size(450.0, 320.0)
+        .to_svg()?;
         sections.push(("Edge — Mixed +/-", svg));
     }
 
     // 11c. Very wide chart
     {
-        let x: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..100).map(f64::from).collect();
         let y: Vec<f64> = x.iter().map(|&v| (v * 0.1).sin() * 10.0 + 50.0).collect();
         let svg = line(&x, &y)
             .title("Very Wide Chart (900×200)")
@@ -1172,7 +1404,7 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 11g. Scatter with identical Y values (flat line)
     {
-        let x: Vec<f64> = (0..10).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..10).map(f64::from).collect();
         let y = vec![5.0; 10];
         let svg = scatter(&x, &y)
             .title("Flat — All Y=5")
@@ -1187,14 +1419,19 @@ fn main() -> esoc_chart::error::Result<()> {
     {
         let x = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0];
         let y = vec![10.0, 12.0, 11.0, 20.0, 22.0, 18.0, 15.0, 17.0, 16.0];
-        let cats: Vec<String> = vec!["A","A","A","B","B","B","C","C","C"].into_iter().map(String::from).collect();
+        let cats: Vec<String> = vec!["A", "A", "A", "B", "B", "B", "C", "C", "C"]
+            .into_iter()
+            .map(String::from)
+            .collect();
         let chart = Chart::new()
             .layer(
                 Layer::new(MarkType::Bar)
                     .with_x(x)
                     .with_y(y)
                     .with_categories(cats)
-                    .stat(Stat::Aggregate { func: AggregateFunc::Mean }),
+                    .stat(Stat::Aggregate {
+                        func: AggregateFunc::Mean,
+                    }),
             )
             .title("Aggregate — Mean per Category")
             .x_label("Category")
@@ -1229,13 +1466,34 @@ fn main() -> esoc_chart::error::Result<()> {
 
     // 11j. Line + Area combo (confidence band look)
     {
-        let x: Vec<f64> = (0..30).map(|i| i as f64).collect();
-        let y_main: Vec<f64> = x.iter().map(|&v| v * 0.5 + 10.0 + (v * 0.3).sin() * 3.0).collect();
-        let y_area: Vec<f64> = x.iter().map(|&v| v * 0.5 + 10.0 + (v * 0.3).sin() * 3.0 + 5.0).collect();
+        let x: Vec<f64> = (0..30).map(f64::from).collect();
+        let y_main: Vec<f64> = x
+            .iter()
+            .map(|&v| v * 0.5 + 10.0 + (v * 0.3).sin() * 3.0)
+            .collect();
+        let y_area: Vec<f64> = x
+            .iter()
+            .map(|&v| v * 0.5 + 10.0 + (v * 0.3).sin() * 3.0 + 5.0)
+            .collect();
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Area).with_x(x.clone()).with_y(y_area).with_label("Upper Bound"))
-            .layer(Layer::new(MarkType::Line).with_x(x.clone()).with_y(y_main.clone()).with_label("Forecast"))
-            .layer(Layer::new(MarkType::Point).with_x(x.clone()).with_y(y_main).with_label("Data"))
+            .layer(
+                Layer::new(MarkType::Area)
+                    .with_x(x.clone())
+                    .with_y(y_area)
+                    .with_label("Upper Bound"),
+            )
+            .layer(
+                Layer::new(MarkType::Line)
+                    .with_x(x.clone())
+                    .with_y(y_main.clone())
+                    .with_label("Forecast"),
+            )
+            .layer(
+                Layer::new(MarkType::Point)
+                    .with_x(x)
+                    .with_y(y_main)
+                    .with_label("Data"),
+            )
             .title("Forecast with Confidence Band")
             .x_label("Day")
             .y_label("Metric")
@@ -1307,10 +1565,7 @@ fn main() -> esoc_chart::error::Result<()> {
 "#,
     );
 
-    html.push_str(&format!(
-        "    <span>{} charts</span>\n",
-        sections.len()
-    ));
+    writeln!(html, "    <span>{} charts</span>", sections.len()).unwrap();
     html.push_str("    <span>11 categories</span>\n");
     html.push_str("    <span>3 themes</span>\n");
     html.push_str("    <span>5 positions</span>\n");
@@ -1318,10 +1573,18 @@ fn main() -> esoc_chart::error::Result<()> {
     html.push_str("  </div>\n</header>\n");
 
     for (title, svg) in &sections {
-        let key = title.to_lowercase().replace([' ', '–', '—', '+', '/', '(', ')', '%'], "_").replace("__", "_");
-        let dark_class = if title.contains("Dark") { " dark-bg" } else { "" };
+        let key = title
+            .to_lowercase()
+            .replace([' ', '–', '—', '+', '/', '(', ')', '%'], "_")
+            .replace("__", "_");
+        let dark_class = if title.contains("Dark") {
+            " dark-bg"
+        } else {
+            ""
+        };
         html.push_str("<div class=\"grid\">\n");
-        html.push_str(&format!(
+        write!(
+            html,
             concat!(
                 "<div class=\"card{dark_class}\">\n",
                 "  <h2>{title}</h2>\n",
@@ -1337,7 +1600,8 @@ fn main() -> esoc_chart::error::Result<()> {
             svg = svg,
             key = key,
             dark_class = dark_class,
-        ));
+        )
+        .unwrap();
         html.push_str("</div>\n");
     }
 

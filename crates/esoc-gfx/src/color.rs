@@ -8,7 +8,9 @@ use crate::error::{GfxError, Result};
 /// **Deprecated:** This type uses sRGB f64 values. Prefer [`esoc_color::Color`]
 /// which uses linear f32 RGBA (GPU-native). Use `esoc_color::Color::from(legacy_color)`
 /// to convert.
-#[deprecated(note = "Use esoc_color::Color instead — this type uses sRGB f64, esoc_color uses linear f32")]
+#[deprecated(
+    note = "Use esoc_color::Color instead — this type uses sRGB f64, esoc_color uses linear f32"
+)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color {
     /// Red channel.
@@ -186,7 +188,35 @@ impl From<Color> for esoc_color::Color {
             };
             v as f32
         }
-        Self::new(srgb_to_linear(c.r), srgb_to_linear(c.g), srgb_to_linear(c.b), c.a as f32)
+        Self::new(
+            srgb_to_linear(c.r),
+            srgb_to_linear(c.g),
+            srgb_to_linear(c.b),
+            c.a as f32,
+        )
+    }
+}
+
+#[allow(deprecated)]
+impl From<esoc_color::Color> for Color {
+    /// Convert from new linear f32 Color back to legacy sRGB f64 Color.
+    ///
+    /// Applies linear→sRGB conversion on each channel.
+    fn from(c: esoc_color::Color) -> Self {
+        fn linear_to_srgb(l: f32) -> f64 {
+            let v = if l <= 0.003_130_8 {
+                l * 12.92
+            } else {
+                1.055 * l.powf(1.0 / 2.4) - 0.055
+            };
+            f64::from(v)
+        }
+        Self {
+            r: linear_to_srgb(c.r),
+            g: linear_to_srgb(c.g),
+            b: linear_to_srgb(c.b),
+            a: f64::from(c.a),
+        }
     }
 }
 

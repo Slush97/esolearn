@@ -93,7 +93,9 @@ mod tests {
         // Default init should be identity transform
         let bn = BatchNorm2d::<CpuBackend>::new(3, 1e-5);
         let input = Tensor::from_vec(
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            vec![
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ],
             Shape::new(&[3, 2, 2]),
         );
         let output = bn.forward(&input);

@@ -32,9 +32,9 @@ pub fn cross_check(matches_ab: &[DMatch], matches_ba: &[DMatch]) -> Vec<DMatch> 
     matches_ab
         .iter()
         .filter(|m_ab| {
-            matches_ba.iter().any(|m_ba| {
-                m_ba.query_idx == m_ab.train_idx && m_ba.train_idx == m_ab.query_idx
-            })
+            matches_ba
+                .iter()
+                .any(|m_ba| m_ba.query_idx == m_ab.train_idx && m_ba.train_idx == m_ab.query_idx)
         })
         .cloned()
         .collect()
@@ -49,13 +49,29 @@ mod tests {
         let knn = vec![
             // Good match: 10 / 50 = 0.2 < 0.75
             vec![
-                DMatch { query_idx: 0, train_idx: 1, distance: 10.0 },
-                DMatch { query_idx: 0, train_idx: 2, distance: 50.0 },
+                DMatch {
+                    query_idx: 0,
+                    train_idx: 1,
+                    distance: 10.0,
+                },
+                DMatch {
+                    query_idx: 0,
+                    train_idx: 2,
+                    distance: 50.0,
+                },
             ],
             // Ambiguous match: 40 / 45 = 0.89 > 0.75
             vec![
-                DMatch { query_idx: 1, train_idx: 3, distance: 40.0 },
-                DMatch { query_idx: 1, train_idx: 4, distance: 45.0 },
+                DMatch {
+                    query_idx: 1,
+                    train_idx: 3,
+                    distance: 40.0,
+                },
+                DMatch {
+                    query_idx: 1,
+                    train_idx: 4,
+                    distance: 45.0,
+                },
             ],
         ];
         let good = ratio_test(&knn, 0.75);
@@ -66,12 +82,28 @@ mod tests {
     #[test]
     fn cross_check_filters() {
         let ab = vec![
-            DMatch { query_idx: 0, train_idx: 1, distance: 5.0 },
-            DMatch { query_idx: 1, train_idx: 2, distance: 10.0 },
+            DMatch {
+                query_idx: 0,
+                train_idx: 1,
+                distance: 5.0,
+            },
+            DMatch {
+                query_idx: 1,
+                train_idx: 2,
+                distance: 10.0,
+            },
         ];
         let ba = vec![
-            DMatch { query_idx: 1, train_idx: 0, distance: 5.0 }, // agrees with ab[0]
-            DMatch { query_idx: 2, train_idx: 3, distance: 8.0 }, // disagrees with ab[1]
+            DMatch {
+                query_idx: 1,
+                train_idx: 0,
+                distance: 5.0,
+            }, // agrees with ab[0]
+            DMatch {
+                query_idx: 2,
+                train_idx: 3,
+                distance: 8.0,
+            }, // disagrees with ab[1]
         ];
         let good = cross_check(&ab, &ba);
         assert_eq!(good.len(), 1);

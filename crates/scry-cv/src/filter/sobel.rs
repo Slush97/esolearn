@@ -78,11 +78,7 @@ mod tests {
         let gy = sobel_y(&img).unwrap();
 
         // Row 3 (just above edge) and row 4 (just below) should have strong response
-        let edge_response: f32 = gy
-            .as_slice()
-            .iter()
-            .map(|v| v.abs())
-            .sum::<f32>();
+        let edge_response: f32 = gy.as_slice().iter().map(|v| v.abs()).sum::<f32>();
         assert!(edge_response > 0.0, "should detect horizontal edge");
     }
 

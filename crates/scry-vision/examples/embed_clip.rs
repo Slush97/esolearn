@@ -17,7 +17,10 @@ use scry_vision::postprocess::embedding::cosine_similarity;
 
 fn main() {
     let model_path = std::env::var("CLIP_MODEL_PATH").unwrap_or_else(|_| {
-        format!("{}/testdata/clip_vit_b32.safetensors", env!("CARGO_MANIFEST_DIR"))
+        format!(
+            "{}/testdata/clip_vit_b32.safetensors",
+            env!("CARGO_MANIFEST_DIR")
+        )
     });
     let path = Path::new(&model_path);
 
@@ -59,7 +62,12 @@ fn main() {
         let emb = embedder.embed(data, 64, 64).unwrap();
         let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
         let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
-        println!("  {name:>8}: dim={}, norm={:.4}, ({:.0}ms)", emb.len(), norm, elapsed);
+        println!(
+            "  {name:>8}: dim={}, norm={:.4}, ({:.0}ms)",
+            emb.len(),
+            norm,
+            elapsed
+        );
         embeddings.push((*name, emb));
     }
 
@@ -90,13 +98,22 @@ fn main() {
     let sim_red_blue = cosine_similarity(&embeddings[0].1, &embeddings[2].1);
     let sim_red_stripes = cosine_similarity(&embeddings[0].1, &embeddings[4].1);
 
-    println!("  red vs orange:  {:.4} (should be high — warm colors)", sim_red_orange);
-    println!("  red vs blue:    {:.4} (should be lower — opposite colors)", sim_red_blue);
-    println!("  red vs stripes: {:.4} (should be different — different texture)", sim_red_stripes);
+    println!(
+        "  red vs orange:  {:.4} (should be high — warm colors)",
+        sim_red_orange
+    );
+    println!(
+        "  red vs blue:    {:.4} (should be lower — opposite colors)",
+        sim_red_blue
+    );
+    println!(
+        "  red vs stripes: {:.4} (should be different — different texture)",
+        sim_red_stripes
+    );
 
-    let all_same = embeddings.windows(2).all(|w| {
-        cosine_similarity(&w[0].1, &w[1].1) > 0.999
-    });
+    let all_same = embeddings
+        .windows(2)
+        .all(|w| cosine_similarity(&w[0].1, &w[1].1) > 0.999);
     if all_same {
         println!("\n  WARNING: all embeddings are nearly identical — model may not be working");
     } else {
@@ -120,9 +137,13 @@ fn make_stripes(w: u32, h: u32) -> Vec<u8> {
         for x in 0..w {
             let i = (y * w + x) as usize * 3;
             if (y / 8) % 2 == 0 {
-                data[i] = 200; data[i + 1] = 180; data[i + 2] = 50;
+                data[i] = 200;
+                data[i + 1] = 180;
+                data[i + 2] = 50;
             } else {
-                data[i] = 30; data[i + 1] = 60; data[i + 2] = 150;
+                data[i] = 30;
+                data[i + 1] = 60;
+                data[i + 2] = 150;
             }
         }
     }

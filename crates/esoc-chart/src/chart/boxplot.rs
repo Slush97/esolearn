@@ -140,7 +140,10 @@ impl SeriesRenderer for BoxPlotSeries {
             let p_ml = transform.to_pixel(x - half_w, stats.median);
             let p_mr = transform.to_pixel(x + half_w, stats.median);
             canvas.add(DrawElement::line(
-                p_ml.x, p_ml.y, p_mr.x, p_mr.y,
+                p_ml.x,
+                p_ml.y,
+                p_mr.x,
+                p_mr.y,
                 Stroke::solid(color, 2.0),
                 Layer::Data,
             ));
@@ -149,7 +152,10 @@ impl SeriesRenderer for BoxPlotSeries {
             let p_wl_top = transform.to_pixel(x, stats.whisker_hi);
             let p_wl_q3 = transform.to_pixel(x, stats.q3);
             canvas.add(DrawElement::line(
-                p_wl_top.x, p_wl_top.y, p_wl_q3.x, p_wl_q3.y,
+                p_wl_top.x,
+                p_wl_top.y,
+                p_wl_q3.x,
+                p_wl_q3.y,
                 Stroke::solid(color, 1.0),
                 Layer::Data,
             ));
@@ -157,7 +163,10 @@ impl SeriesRenderer for BoxPlotSeries {
             let p_wl_bot = transform.to_pixel(x, stats.whisker_lo);
             let p_wl_q1 = transform.to_pixel(x, stats.q1);
             canvas.add(DrawElement::line(
-                p_wl_bot.x, p_wl_bot.y, p_wl_q1.x, p_wl_q1.y,
+                p_wl_bot.x,
+                p_wl_bot.y,
+                p_wl_q1.x,
+                p_wl_q1.y,
                 Stroke::solid(color, 1.0),
                 Layer::Data,
             ));
@@ -167,7 +176,10 @@ impl SeriesRenderer for BoxPlotSeries {
             let p_cap_hi_l = transform.to_pixel(x - cap_w, stats.whisker_hi);
             let p_cap_hi_r = transform.to_pixel(x + cap_w, stats.whisker_hi);
             canvas.add(DrawElement::line(
-                p_cap_hi_l.x, p_cap_hi_l.y, p_cap_hi_r.x, p_cap_hi_r.y,
+                p_cap_hi_l.x,
+                p_cap_hi_l.y,
+                p_cap_hi_r.x,
+                p_cap_hi_r.y,
                 Stroke::solid(color, 1.0),
                 Layer::Data,
             ));
@@ -175,7 +187,10 @@ impl SeriesRenderer for BoxPlotSeries {
             let p_cap_lo_l = transform.to_pixel(x - cap_w, stats.whisker_lo);
             let p_cap_lo_r = transform.to_pixel(x + cap_w, stats.whisker_lo);
             canvas.add(DrawElement::line(
-                p_cap_lo_l.x, p_cap_lo_l.y, p_cap_lo_r.x, p_cap_lo_r.y,
+                p_cap_lo_l.x,
+                p_cap_lo_l.y,
+                p_cap_lo_r.x,
+                p_cap_lo_r.y,
                 Stroke::solid(color, 1.0),
                 Layer::Data,
             ));

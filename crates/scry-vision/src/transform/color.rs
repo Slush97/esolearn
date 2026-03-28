@@ -88,7 +88,9 @@ fn rgb_to_gray(image: &ImageBuffer) -> Result<ImageBuffer> {
         let r = f32::from(pixel[0]);
         let g = f32::from(pixel[1]);
         let b = f32::from(pixel[2]);
-        data[i] = (0.299 * r + 0.587 * g + 0.114 * b).round().clamp(0.0, 255.0) as u8;
+        data[i] = (0.299 * r + 0.587 * g + 0.114 * b)
+            .round()
+            .clamp(0.0, 255.0) as u8;
     }
 
     Ok(ImageBuffer {

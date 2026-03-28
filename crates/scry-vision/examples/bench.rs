@@ -46,9 +46,11 @@ fn main() {
 
     println!("=== scry-vision inference benchmark ===\n");
     println!("BLAS:    {blas_label}");
-    println!("Threads: OPENBLAS_NUM_THREADS={}, RAYON_NUM_THREADS={}",
+    println!(
+        "Threads: OPENBLAS_NUM_THREADS={}, RAYON_NUM_THREADS={}",
         std::env::var("OPENBLAS_NUM_THREADS").unwrap_or_else(|_| "auto".into()),
-        rayon::current_num_threads());
+        rayon::current_num_threads()
+    );
     if blas {
         println!("Tip:     Set OPENBLAS_NUM_THREADS=1 to avoid rayon/BLAS contention");
     } else {
@@ -57,7 +59,10 @@ fn main() {
     println!();
 
     // ── ResNet-18 ──
-    let resnet_path = format!("{}/testdata/resnet18.safetensors", env!("CARGO_MANIFEST_DIR"));
+    let resnet_path = format!(
+        "{}/testdata/resnet18.safetensors",
+        env!("CARGO_MANIFEST_DIR")
+    );
     if Path::new(&resnet_path).exists() {
         println!("--- ResNet-18 (ImageNet 1000-class, 224x224) ---");
 
@@ -79,7 +84,10 @@ fn main() {
     }
 
     // ── CLIP ViT-B/32 ──
-    let clip_path = format!("{}/testdata/clip_vit_b32.safetensors", env!("CARGO_MANIFEST_DIR"));
+    let clip_path = format!(
+        "{}/testdata/clip_vit_b32.safetensors",
+        env!("CARGO_MANIFEST_DIR")
+    );
     if Path::new(&clip_path).exists() {
         println!("--- CLIP ViT-B/32 (512-dim embedding, 224x224) ---");
 

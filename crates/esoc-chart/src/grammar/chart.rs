@@ -204,8 +204,7 @@ impl Chart {
     #[cfg(feature = "png")]
     pub fn to_png(&self) -> Result<Vec<u8>> {
         let scene = self.build()?;
-        let bytes =
-            esoc_gfx::scene_svg::render_scene_png(&scene, self.width, self.height)?;
+        let bytes = esoc_gfx::scene_svg::render_scene_png(&scene, self.width, self.height)?;
         Ok(bytes)
     }
 

@@ -131,11 +131,7 @@ impl SparseOpticalFlow for LucasKanade {
                         let sx = cx + wx as f32;
                         let sy = cy + wy as f32;
 
-                        if sx < 0.0
-                            || sy < 0.0
-                            || sx >= (pw - 1) as f32
-                            || sy >= (ph - 1) as f32
-                        {
+                        if sx < 0.0 || sy < 0.0 || sx >= (pw - 1) as f32 || sy >= (ph - 1) as f32 {
                             continue;
                         }
 
@@ -165,10 +161,21 @@ impl SparseOpticalFlow for LucasKanade {
 
                 // Iterative refinement
                 let (vx, vy) = refine_flow(
-                    prev_data, next_data, pw, ph,
-                    cx, cy, gx / scale, gy / scale,
-                    ws, self.max_iters, self.epsilon,
-                    g_xx, g_xy, g_yy, inv_det,
+                    prev_data,
+                    next_data,
+                    pw,
+                    ph,
+                    cx,
+                    cy,
+                    gx / scale,
+                    gy / scale,
+                    ws,
+                    self.max_iters,
+                    self.epsilon,
+                    g_xx,
+                    g_xy,
+                    g_yy,
+                    inv_det,
                 );
 
                 // Propagate to next (finer) level
@@ -245,8 +252,8 @@ fn refine_flow(
 
                 let ix = gradient_x(prev_data, pw, ph, sx, sy);
                 let iy = gradient_y(prev_data, pw, ph, sx, sy);
-                let it = bilinear_at(next_data, pw, ph, tx, ty)
-                    - bilinear_at(prev_data, pw, ph, sx, sy);
+                let it =
+                    bilinear_at(next_data, pw, ph, tx, ty) - bilinear_at(prev_data, pw, ph, sx, sy);
 
                 bx += ix * it;
                 by += iy * it;
@@ -297,8 +304,8 @@ fn tracking_error(
                 && tx < (pw - 1) as f32
                 && ty < (ph - 1) as f32
             {
-                let d = bilinear_at(prev_data, pw, ph, sx, sy)
-                    - bilinear_at(next_data, pw, ph, tx, ty);
+                let d =
+                    bilinear_at(prev_data, pw, ph, sx, sy) - bilinear_at(next_data, pw, ph, tx, ty);
                 err += d * d;
                 count += 1;
             }
@@ -353,7 +360,12 @@ mod tests {
     use super::*;
     use crate::image::{Gray, ImageBuf};
 
-    fn make_shifted_pair(w: u32, h: u32, dx: f32, dy: f32) -> (ImageBuf<f32, Gray>, ImageBuf<f32, Gray>) {
+    fn make_shifted_pair(
+        w: u32,
+        h: u32,
+        dx: f32,
+        dy: f32,
+    ) -> (ImageBuf<f32, Gray>, ImageBuf<f32, Gray>) {
         // Gaussian blob centered at (w/2, h/2)
         let cx = w as f32 / 2.0;
         let cy = h as f32 / 2.0;

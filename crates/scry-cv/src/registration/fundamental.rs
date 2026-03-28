@@ -154,17 +154,7 @@ pub fn estimate_8point(pairs: &[EpipolarPair]) -> Option<FundamentalMatrix> {
     for i in 0..n {
         let (x1, y1) = p1_norm[i];
         let (x2, y2) = p2_norm[i];
-        let row = [
-            x2 * x1,
-            x2 * y1,
-            x2,
-            y2 * x1,
-            y2 * y1,
-            y2,
-            x1,
-            y1,
-            1.0,
-        ];
+        let row = [x2 * x1, x2 * y1, x2, y2 * x1, y2 * y1, y2, x1, y1, 1.0];
         for j in 0..9 {
             for k in 0..9 {
                 ata[j * 9 + k] += row[j] * row[k];
@@ -208,17 +198,7 @@ pub fn estimate_7point(pairs: &[EpipolarPair]) -> Vec<FundamentalMatrix> {
     for i in 0..7 {
         let (x1, y1) = p1_norm[i];
         let (x2, y2) = p2_norm[i];
-        let row = [
-            x2 * x1,
-            x2 * y1,
-            x2,
-            y2 * x1,
-            y2 * y1,
-            y2,
-            x1,
-            y1,
-            1.0,
-        ];
+        let row = [x2 * x1, x2 * y1, x2, y2 * x1, y2 * y1, y2, x1, y1, 1.0];
         for j in 0..9 {
             for k in 0..9 {
                 ata[j * 9 + k] += row[j] * row[k];
@@ -253,20 +233,14 @@ pub fn estimate_7point(pairs: &[EpipolarPair]) -> Vec<FundamentalMatrix> {
 // ── Internal: normalization ──
 
 /// Hartley normalization: translate centroid to origin, scale avg distance to √2.
-fn normalize_points(
-    points: impl Iterator<Item = (f64, f64)>,
-) -> (Vec<(f64, f64)>, [f64; 9]) {
+fn normalize_points(points: impl Iterator<Item = (f64, f64)>) -> (Vec<(f64, f64)>, [f64; 9]) {
     let pts: Vec<(f64, f64)> = points.collect();
     let n = pts.len() as f64;
 
     let cx: f64 = pts.iter().map(|p| p.0).sum::<f64>() / n;
     let cy: f64 = pts.iter().map(|p| p.1).sum::<f64>() / n;
 
-    let avg_dist: f64 = pts
-        .iter()
-        .map(|p| (p.0 - cx).hypot(p.1 - cy))
-        .sum::<f64>()
-        / n;
+    let avg_dist: f64 = pts.iter().map(|p| (p.0 - cx).hypot(p.1 - cy)).sum::<f64>() / n;
 
     let s = if avg_dist > 1e-10 {
         std::f64::consts::SQRT_2 / avg_dist
@@ -581,7 +555,9 @@ fn solve_cubic(a: f64, b: f64, c: f64, d: f64) -> Vec<f64> {
 
     if discriminant < -1e-12 {
         // One real root (Cardano's formula)
-        let sq = (r_dep * r_dep / 4.0 + q_dep * q_dep * q_dep / 27.0).max(0.0).sqrt();
+        let sq = (r_dep * r_dep / 4.0 + q_dep * q_dep * q_dep / 27.0)
+            .max(0.0)
+            .sqrt();
         let u = -r_dep / 2.0 + sq;
         let v = -r_dep / 2.0 - sq;
         let t = cbrt(u) + cbrt(v);
@@ -631,23 +607,19 @@ fn cbrt(x: f64) -> f64 {
 // ── Internal: 3×3 matrix utilities ──
 
 fn det3(m: &[f64; 9]) -> f64 {
-    m[0] * (m[4] * m[8] - m[5] * m[7])
-        - m[1] * (m[3] * m[8] - m[5] * m[6])
+    m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
         + m[2] * (m[3] * m[7] - m[4] * m[6])
 }
 
 fn transpose3(m: &[f64; 9]) -> [f64; 9] {
-    [
-        m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8],
-    ]
+    [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]
 }
 
 fn mat3_mul(a: &[f64; 9], b: &[f64; 9]) -> [f64; 9] {
     let mut c = [0.0f64; 9];
     for i in 0..3 {
         for j in 0..3 {
-            c[i * 3 + j] =
-                a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+            c[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
         }
     }
     c
@@ -714,7 +686,10 @@ mod tests {
         let (pairs, f) = make_test_pairs();
         for pair in &pairs {
             let d = f.sampson_distance(pair.p1, pair.p2);
-            assert!(d < 1e-10, "Sampson distance should be ~0 for true F, got {d}");
+            assert!(
+                d < 1e-10,
+                "Sampson distance should be ~0 for true F, got {d}"
+            );
         }
     }
 
@@ -726,10 +701,7 @@ mod tests {
         // Verify epipolar constraint: p2^T F p1 ≈ 0 for all pairs
         for pair in &pairs {
             let d = f_est.sampson_distance(pair.p1, pair.p2);
-            assert!(
-                d < 1e-3,
-                "Sampson distance should be small, got {d}"
-            );
+            assert!(d < 1e-3, "Sampson distance should be small, got {d}");
         }
     }
 

@@ -23,6 +23,7 @@ fn make_rect_image(w: u32, h: u32, x0: u32, y0: u32, x1: u32, y1: u32) -> GrayIm
 }
 
 /// Create a textured image using a simple hash-based pattern.
+#[cfg(feature = "stereo")]
 fn make_textured_image(w: u32, h: u32, seed: u32) -> GrayImageF {
     let mut data = vec![0.0f32; (w * h) as usize];
     for y in 0..h {
@@ -69,7 +70,10 @@ fn canny_to_hough_lines_detects_rectangle() {
     assert_eq!(edges.dimensions(), (80, 80));
 
     let edge_count: usize = edges.as_slice().iter().filter(|&&v| v > 0.5).count();
-    assert!(edge_count > 30, "expected edges around rectangle, got {edge_count}");
+    assert!(
+        edge_count > 30,
+        "expected edges around rectangle, got {edge_count}"
+    );
 
     // Hough lines — should detect roughly 4 dominant lines
     let lines = hough_lines(&edges, 1.0, PI / 180.0, 15).unwrap();
@@ -317,7 +321,11 @@ fn mog2_detects_foreground_blob() {
     let mask = mog.apply(&fg_frame, -1.0).unwrap();
 
     // Convert u8 mask to f32 for connected_components (foreground = 255)
-    let mask_f32: Vec<f32> = mask.as_slice().iter().map(|&v| if v > 127 { 1.0 } else { 0.0 }).collect();
+    let mask_f32: Vec<f32> = mask
+        .as_slice()
+        .iter()
+        .map(|&v| if v > 127 { 1.0 } else { 0.0 })
+        .collect();
     let mask_img = ImageBuf::<f32, Gray>::from_vec(mask_f32, w, h).unwrap();
 
     let cc = connected_components(&mask_img, Connectivity::Eight).unwrap();

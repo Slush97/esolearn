@@ -67,8 +67,7 @@ impl ImageTransform for Pad {
                 let (sx, sy) = self.map_pixel(dx, dy, image.width, image.height);
 
                 let src_idx = (sy as usize * image.width as usize + sx as usize) * ch;
-                data[dst_idx..dst_idx + ch]
-                    .copy_from_slice(&image.data[src_idx..src_idx + ch]);
+                data[dst_idx..dst_idx + ch].copy_from_slice(&image.data[src_idx..src_idx + ch]);
             }
         }
 
@@ -199,7 +198,7 @@ mod tests {
             .unwrap();
         assert_eq!(padded.width, 3);
         assert_eq!(padded.height, 6); // 3 + 1 + 2
-        // First row should be padding
+                                      // First row should be padding
         assert_eq!(padded.pixel(0, 0, 0), Some(255));
         // Original row 0 at y=1
         assert_eq!(padded.pixel(0, 1, 0), Some(0));

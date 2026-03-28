@@ -34,5 +34,21 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 [dev-dependencies]
 scry-learn = { path = "../scry-learn" }
 
+[[example]]
+name = "classify"
+required-features = ["safetensors"]
+
+[[example]]
+name = "embed_clip"
+required-features = ["safetensors"]
+
+[[example]]
+name = "bench"
+required-features = ["safetensors"]
+
+[[example]]
+name = "inspect_keys"
+required-features = ["safetensors"]
+
 [lints]
 workspace = true

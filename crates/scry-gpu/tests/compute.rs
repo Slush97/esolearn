@@ -1296,7 +1296,6 @@ fn buffer_len_and_byte_size() {
 }
 
 #[test]
-#[test]
 fn upload_download_repeated_reuses_pool() {
     // Repeated upload+dispatch+download cycles should reuse staging buffers.
     // This test verifies correctness (not timing), but exercises the pool path.
@@ -1311,7 +1310,7 @@ fn upload_download_repeated_reuses_pool() {
 
         let result = output.download().unwrap();
         assert!(
-            (result[0] - data[0] * 2.0).abs() < f32::EPSILON,
+            data[0].mul_add(-2.0, result[0]).abs() < f32::EPSILON,
             "iter {i}: got {}, expected {}",
             result[0],
             data[0] * 2.0,

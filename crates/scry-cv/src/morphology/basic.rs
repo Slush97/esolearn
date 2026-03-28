@@ -27,11 +27,7 @@ pub fn dilate(
 }
 
 /// Morphological opening: erode then dilate. Removes small bright spots.
-pub fn open(
-    img: &ImageBuf<f32, Gray>,
-    kernel: &[bool],
-    ksize: u32,
-) -> Result<ImageBuf<f32, Gray>> {
+pub fn open(img: &ImageBuf<f32, Gray>, kernel: &[bool], ksize: u32) -> Result<ImageBuf<f32, Gray>> {
     let eroded = erode(img, kernel, ksize)?;
     dilate(&eroded, kernel, ksize)
 }

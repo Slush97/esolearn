@@ -109,7 +109,13 @@ impl Detect for YoloDetector {
 
         // Rescale from model input coordinates to original image coordinates
         let inv_scale = 1.0 / info.scale;
-        rescale_detections(&mut detections, inv_scale, inv_scale, info.pad_x, info.pad_y);
+        rescale_detections(
+            &mut detections,
+            inv_scale,
+            inv_scale,
+            info.pad_x,
+            info.pad_y,
+        );
 
         Ok(detections)
     }
@@ -259,9 +265,8 @@ mod tests {
     #[ignore]
     #[cfg(feature = "onnx")]
     fn detect_with_real_yolov8n() {
-        let model_path = std::env::var("YOLO_MODEL_PATH").unwrap_or_else(|_| {
-            format!("{}/testdata/yolov8n.onnx", env!("CARGO_MANIFEST_DIR"))
-        });
+        let model_path = std::env::var("YOLO_MODEL_PATH")
+            .unwrap_or_else(|_| format!("{}/testdata/yolov8n.onnx", env!("CARGO_MANIFEST_DIR")));
 
         if !std::path::Path::new(&model_path).exists() {
             eprintln!("Skipping: model not found at {model_path}");

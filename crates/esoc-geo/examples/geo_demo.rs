@@ -8,7 +8,7 @@ use esoc_color::Color;
 use esoc_geo::bundled;
 use esoc_geo::geometry::{GeoCollection, GeoGeometry, GeoPolygon};
 use esoc_geo::projection::{AlbersUsa, NaturalEarth1};
-use esoc_geo::Projection;
+use esoc_geo::{Projection, PropertyValue};
 use esoc_gfx::scene_svg::save_scene_svg;
 use esoc_scene::mark::{Mark, PathCommand, PathMark};
 use esoc_scene::node::Node;
@@ -17,8 +17,8 @@ use esoc_scene::SceneGraph;
 
 /// A palette of 10 distinguishable colors (Tableau 10).
 const PALETTE: [&str; 10] = [
-    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f",
-    "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac",
+    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
+    "#9c755f", "#bab0ac",
 ];
 
 fn color_at(i: usize) -> Color {
@@ -125,15 +125,21 @@ fn main() {
     let countries = bundled::world_countries();
     let (min_x, max_x, min_y, max_y) = projected_bounds(countries, &proj);
     let (scale, ox, oy) = fit_to_canvas(
-        f64::from(width), f64::from(height), min_x, max_x, min_y, max_y, 10.0,
+        f64::from(width),
+        f64::from(height),
+        min_x,
+        max_x,
+        min_y,
+        max_y,
+        10.0,
     );
 
     let mut scene = SceneGraph::with_root();
     let root = scene.root().unwrap();
     for (i, feature) in countries.features.iter().enumerate() {
         let cmds = match &feature.geometry {
-            GeoGeometry::Polygon(poly) => polygon_to_commands(poly, &proj, scale, ox, oy),
-            GeoGeometry::MultiPolygon(mp) => {
+            GeoGeometry::Polygon(ref poly) => polygon_to_commands(poly, &proj, scale, ox, oy),
+            GeoGeometry::MultiPolygon(ref mp) => {
                 let mut all = Vec::new();
                 for poly in &mp.polygons {
                     all.extend(polygon_to_commands(poly, &proj, scale, ox, oy));
@@ -154,7 +160,10 @@ fn main() {
     }
 
     save_scene_svg(&scene, width, height, "world_map.svg").expect("failed to write world_map.svg");
-    println!("wrote world_map.svg ({width}×{height}) — {} countries", countries.features.len());
+    println!(
+        "wrote world_map.svg ({width}×{height}) — {} countries",
+        countries.features.len()
+    );
 
     // ── US states (Albers USA composite) ────────────────────────────────
     let us_w = 960.0_f32;
@@ -164,25 +173,47 @@ fn main() {
     let states = bundled::us_states();
 
     // Filter to 50 states + DC (exclude territories the composite projection doesn't cover)
-    let us_features: Vec<_> = states.features.iter().filter(|f| {
-        let name = f.properties.get("NAME").and_then(|v| v.as_str()).unwrap_or("");
-        !matches!(name, "Puerto Rico" | "Guam" | "American Samoa"
-            | "Commonwealth of the Northern Mariana Islands" | "United States Virgin Islands")
-    }).collect();
+    let us_features: Vec<_> = states
+        .features
+        .iter()
+        .filter(|f| {
+            let name = f
+                .properties
+                .get("NAME")
+                .and_then(PropertyValue::as_str)
+                .unwrap_or("");
+            !matches!(
+                name,
+                "Puerto Rico"
+                    | "Guam"
+                    | "American Samoa"
+                    | "Commonwealth of the Northern Mariana Islands"
+                    | "United States Virgin Islands"
+            )
+        })
+        .collect();
     let filtered = esoc_geo::GeoCollection {
         features: us_features.iter().map(|f| (*f).clone()).collect(),
     };
     let (us_min_x, us_max_x, us_min_y, us_max_y) = projected_bounds(&filtered, &albers);
     let (us_scale, us_ox, us_oy) = fit_to_canvas(
-        f64::from(us_w), f64::from(us_h), us_min_x, us_max_x, us_min_y, us_max_y, 20.0,
+        f64::from(us_w),
+        f64::from(us_h),
+        us_min_x,
+        us_max_x,
+        us_min_y,
+        us_max_y,
+        20.0,
     );
 
     let mut us_scene = SceneGraph::with_root();
     let us_root = us_scene.root().unwrap();
     for (i, feature) in us_features.iter().enumerate() {
         let cmds = match &feature.geometry {
-            GeoGeometry::Polygon(poly) => polygon_to_commands(poly, &albers, us_scale, us_ox, us_oy),
-            GeoGeometry::MultiPolygon(mp) => {
+            GeoGeometry::Polygon(ref poly) => {
+                polygon_to_commands(poly, &albers, us_scale, us_ox, us_oy)
+            }
+            GeoGeometry::MultiPolygon(ref mp) => {
                 let mut all = Vec::new();
                 for poly in &mp.polygons {
                     all.extend(polygon_to_commands(poly, &albers, us_scale, us_ox, us_oy));
@@ -206,5 +237,8 @@ fn main() {
     }
 
     save_scene_svg(&us_scene, us_w, us_h, "us_states.svg").expect("failed to write us_states.svg");
-    println!("wrote us_states.svg ({us_w}×{us_h}) — {} states", us_features.len());
+    println!(
+        "wrote us_states.svg ({us_w}×{us_h}) — {} states",
+        us_features.len()
+    );
 }

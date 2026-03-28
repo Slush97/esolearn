@@ -2,11 +2,11 @@
 //! Benchmark the GPU-resident tensor forward pass.
 //!
 //! Trains an MLP classifier on a synthetic dataset large enough to trigger
-//! the GPU dispatch path (batch * max_dim >= 4096), then compares
+//! the GPU dispatch path (batch * `max_dim` >= 4096), then compares
 //! forward-pass throughput for inference.
 //!
 //! Usage:
-//!   cargo run -p scry-learn --example gpu_tensor_bench --release [--features scry-gpu]
+//!   cargo run -p scry-learn --example `gpu_tensor_bench` --release [--features scry-gpu]
 
 use std::time::Instant;
 
@@ -55,11 +55,7 @@ fn main() {
     // ── Inference benchmark ──
     // Build row-major feature matrix for predict (one Vec per sample)
     let features_for_predict: Vec<Vec<f64>> = (0..n_samples)
-        .map(|i| {
-            (0..n_features)
-                .map(|j| ds.features[j][i])
-                .collect()
-        })
+        .map(|i| (0..n_features).map(|j| ds.features[j][i]).collect())
         .collect();
 
     // Warm up
@@ -76,8 +72,8 @@ fn main() {
 
     println!("Inference ({n_iters} iterations):");
     println!("  total:      {:.1}ms", predict_time.as_secs_f64() * 1000.0);
-    println!("  per batch:  {:.2}ms", per_predict);
-    println!("  throughput: {:.0} samples/sec", throughput);
+    println!("  per batch:  {per_predict:.2}ms");
+    println!("  throughput: {throughput:.0} samples/sec");
     println!();
 
     // ── Accuracy ──
@@ -113,10 +109,10 @@ fn make_dataset(
     for i in 0..n_samples {
         let class = i % n_classes;
         target.push(class as f64);
-        for f in 0..n_features {
+        for (f, col) in features.iter_mut().enumerate() {
             let signal = (class * n_features + f) as f64 * 0.01;
             let noise = rng.normal() * 0.5;
-            features[f][i] = signal + noise;
+            col[i] = signal + noise;
         }
     }
 
@@ -126,7 +122,10 @@ fn make_dataset(
 struct SimpleRng(u64);
 impl SimpleRng {
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
 

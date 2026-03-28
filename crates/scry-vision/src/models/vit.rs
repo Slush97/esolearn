@@ -39,7 +39,10 @@ impl VitConfig {
 
     /// ViT-B/16.
     pub fn vit_b16() -> Self {
-        Self { patch_size: 16, ..Self::vit_b32() }
+        Self {
+            patch_size: 16,
+            ..Self::vit_b32()
+        }
     }
 
     /// ViT-L/14.
@@ -124,23 +127,20 @@ impl<B: MathBackend> VitAttention<B> {
         // Add bias
         let qkv_shape = Shape::new(&[seq, 3 * self.d_model]);
         let bias_shape = Shape::new(&[1, 3 * self.d_model]);
-        let qkv_biased =
-            B::add(&qkv_storage, &self.qkv_bias.data, &qkv_shape, &bias_shape, &qkv_shape);
+        let qkv_biased = B::add(
+            &qkv_storage,
+            &self.qkv_bias.data,
+            &qkv_shape,
+            &bias_shape,
+            &qkv_shape,
+        );
 
         // Split Q,K,V and reshape to [n_heads, seq, d_head]
         let (q, k, v) = B::split_qkv_reshape_heads(&qkv_biased, seq, self.n_heads, self.d_head);
 
         // Attention: Q @ K^T / sqrt(d_head)
-        let scores = B::matmul_strided_batched(
-            &q,
-            &k,
-            self.n_heads,
-            seq,
-            self.d_head,
-            seq,
-            false,
-            true,
-        );
+        let scores =
+            B::matmul_strided_batched(&q, &k, self.n_heads, seq, self.d_head, seq, false, true);
 
         // Scaled softmax (no causal mask)
         let scale = 1.0 / (self.d_head as f32).sqrt();
@@ -148,16 +148,8 @@ impl<B: MathBackend> VitAttention<B> {
         let attn = B::scaled_softmax(&scores, scale, &scores_shape);
 
         // Context: attn @ V → [n_heads, seq, d_head]
-        let context = B::matmul_strided_batched(
-            &attn,
-            &v,
-            self.n_heads,
-            seq,
-            seq,
-            self.d_head,
-            false,
-            false,
-        );
+        let context =
+            B::matmul_strided_batched(&attn, &v, self.n_heads, seq, seq, self.d_head, false, false);
 
         // Reshape back: [n_heads, seq, d_head] → [seq, d_model]
         let context_flat = B::reshape_from_heads(&context, 1, seq, self.n_heads, self.d_head);
@@ -174,7 +166,13 @@ impl<B: MathBackend> VitAttention<B> {
         );
         let out_shape = Shape::new(&[seq, self.d_model]);
         let proj_bias_shape = Shape::new(&[1, self.d_model]);
-        let result = B::add(&proj, &self.proj_bias.data, &out_shape, &proj_bias_shape, &out_shape);
+        let result = B::add(
+            &proj,
+            &self.proj_bias.data,
+            &out_shape,
+            &proj_bias_shape,
+            &out_shape,
+        );
 
         Tensor::new(result, out_shape)
     }
@@ -193,15 +191,9 @@ pub struct VitMlp<B: MathBackend> {
 impl<B: MathBackend> VitMlp<B> {
     pub fn new(d_model: usize, d_ff: usize) -> Self {
         Self {
-            fc1_weight: Tensor::from_vec(
-                vec![0.0; d_model * d_ff],
-                Shape::new(&[d_model, d_ff]),
-            ),
+            fc1_weight: Tensor::from_vec(vec![0.0; d_model * d_ff], Shape::new(&[d_model, d_ff])),
             fc1_bias: Tensor::from_vec(vec![0.0; d_ff], Shape::new(&[d_ff])),
-            fc2_weight: Tensor::from_vec(
-                vec![0.0; d_ff * d_model],
-                Shape::new(&[d_ff, d_model]),
-            ),
+            fc2_weight: Tensor::from_vec(vec![0.0; d_ff * d_model], Shape::new(&[d_ff, d_model])),
             fc2_bias: Tensor::from_vec(vec![0.0; d_model], Shape::new(&[d_model])),
             d_model,
             d_ff,
@@ -224,17 +216,36 @@ impl<B: MathBackend> VitMlp<B> {
         );
         let hidden_shape = Shape::new(&[seq, self.d_ff]);
         let bias1_shape = Shape::new(&[1, self.d_ff]);
-        let hidden =
-            B::add(&hidden, &self.fc1_bias.data, &hidden_shape, &bias1_shape, &hidden_shape);
+        let hidden = B::add(
+            &hidden,
+            &self.fc1_bias.data,
+            &hidden_shape,
+            &bias1_shape,
+            &hidden_shape,
+        );
 
         // GELU activation
         let hidden = B::gelu(&hidden);
 
         // fc2: [seq, d_ff] @ [d_ff, d_model] + bias → [seq, d_model]
-        let out = B::matmul(&hidden, &self.fc2_weight.data, seq, self.d_ff, self.d_model, false, false);
+        let out = B::matmul(
+            &hidden,
+            &self.fc2_weight.data,
+            seq,
+            self.d_ff,
+            self.d_model,
+            false,
+            false,
+        );
         let out_shape = Shape::new(&[seq, self.d_model]);
         let bias2_shape = Shape::new(&[1, self.d_model]);
-        let result = B::add(&out, &self.fc2_bias.data, &out_shape, &bias2_shape, &out_shape);
+        let result = B::add(
+            &out,
+            &self.fc2_bias.data,
+            &out_shape,
+            &bias2_shape,
+            &out_shape,
+        );
 
         Tensor::new(result, out_shape)
     }
@@ -282,13 +293,8 @@ impl<B: MathBackend> VitBlock<B> {
         let x = B::add(&input.data, &attn_out.data, &shape, &shape, &shape);
 
         // LN → MLP → residual
-        let normed2 = B::layernorm_inference(
-            &x,
-            &self.ln2_gamma.data,
-            &self.ln2_beta.data,
-            &shape,
-            1e-5,
-        );
+        let normed2 =
+            B::layernorm_inference(&x, &self.ln2_gamma.data, &self.ln2_beta.data, &shape, 1e-5);
         let mlp_out = self.mlp.forward(&Tensor::new(normed2, shape.clone()));
         let result = B::add(&x, &mlp_out.data, &shape, &shape, &shape);
 
@@ -364,7 +370,13 @@ impl<B: MathBackend> Vit<B> {
         // Add positional embeddings
         let seq_shape = Shape::new(&[seq, d]);
         let seq_storage = B::from_vec(seq_data, &seq_shape);
-        let mut x = B::add(&seq_storage, &self.pos_embed.data, &seq_shape, &seq_shape, &seq_shape);
+        let mut x = B::add(
+            &seq_storage,
+            &self.pos_embed.data,
+            &seq_shape,
+            &seq_shape,
+            &seq_shape,
+        );
 
         // Optional pre-LN (present in OpenCLIP, absent in vanilla ViT)
         if let (Some(gamma), Some(beta)) = (&self.ln_pre_gamma, &self.ln_pre_beta) {
@@ -470,15 +482,13 @@ impl<B: MathBackend> Vit<B> {
             let ln1_beta = load_tensor(tensors, &format!("{bp}.ln_1.bias"), &[d])?;
 
             // QKV: in_proj_weight [3d, d] → our qkv_weight [d, 3d] (transpose)
-            let qkv_weight = load_tensor_transposed(
-                tensors, &format!("{bp}.attn.in_proj_weight"), 3 * d, d,
-            )?;
+            let qkv_weight =
+                load_tensor_transposed(tensors, &format!("{bp}.attn.in_proj_weight"), 3 * d, d)?;
             let qkv_bias = load_tensor(tensors, &format!("{bp}.attn.in_proj_bias"), &[3 * d])?;
 
             // Output projection: out_proj.weight [d, d] → our proj_weight [d, d] (transpose)
-            let proj_weight = load_tensor_transposed(
-                tensors, &format!("{bp}.attn.out_proj.weight"), d, d,
-            )?;
+            let proj_weight =
+                load_tensor_transposed(tensors, &format!("{bp}.attn.out_proj.weight"), d, d)?;
             let proj_bias = load_tensor(tensors, &format!("{bp}.attn.out_proj.bias"), &[d])?;
 
             let attn = VitAttention {
@@ -495,22 +505,31 @@ impl<B: MathBackend> Vit<B> {
             let ln2_beta = load_tensor(tensors, &format!("{bp}.ln_2.bias"), &[d])?;
 
             // MLP: c_fc.weight [d_ff, d] → our fc1_weight [d, d_ff] (transpose)
-            let fc1_weight = load_tensor_transposed(
-                tensors, &format!("{bp}.mlp.c_fc.weight"), d_ff, d,
-            )?;
+            let fc1_weight =
+                load_tensor_transposed(tensors, &format!("{bp}.mlp.c_fc.weight"), d_ff, d)?;
             let fc1_bias = load_tensor(tensors, &format!("{bp}.mlp.c_fc.bias"), &[d_ff])?;
 
             // c_proj.weight [d, d_ff] → our fc2_weight [d_ff, d] (transpose)
-            let fc2_weight = load_tensor_transposed(
-                tensors, &format!("{bp}.mlp.c_proj.weight"), d, d_ff,
-            )?;
+            let fc2_weight =
+                load_tensor_transposed(tensors, &format!("{bp}.mlp.c_proj.weight"), d, d_ff)?;
             let fc2_bias = load_tensor(tensors, &format!("{bp}.mlp.c_proj.bias"), &[d])?;
 
-            let mlp = VitMlp { fc1_weight, fc1_bias, fc2_weight, fc2_bias, d_model: d, d_ff };
+            let mlp = VitMlp {
+                fc1_weight,
+                fc1_bias,
+                fc2_weight,
+                fc2_bias,
+                d_model: d,
+                d_ff,
+            };
 
             blocks.push(VitBlock {
-                ln1_gamma, ln1_beta, attn,
-                ln2_gamma, ln2_beta, mlp,
+                ln1_gamma,
+                ln1_beta,
+                attn,
+                ln2_gamma,
+                ln2_beta,
+                mlp,
                 d_model: d,
             });
         }
@@ -550,8 +569,12 @@ impl<B: MathBackend> Module<B> for Vit<B> {
         params.extend(self.patch_embed.parameters());
         params.push(&self.cls_token);
         params.push(&self.pos_embed);
-        if let Some(ref g) = self.ln_pre_gamma { params.push(g); }
-        if let Some(ref b) = self.ln_pre_beta { params.push(b); }
+        if let Some(ref g) = self.ln_pre_gamma {
+            params.push(g);
+        }
+        if let Some(ref b) = self.ln_pre_beta {
+            params.push(b);
+        }
         for block in &self.blocks {
             params.push(&block.ln1_gamma);
             params.push(&block.ln1_beta);
@@ -642,23 +665,30 @@ mod tests {
         impl F32View {
             fn new(values: &[f32], shape: &[usize]) -> Self {
                 let data: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-                Self { data, shape: shape.to_vec() }
+                Self {
+                    data,
+                    shape: shape.to_vec(),
+                }
             }
         }
 
         impl safetensors::View for F32View {
-            fn dtype(&self) -> safetensors::Dtype { safetensors::Dtype::F32 }
-            fn shape(&self) -> &[usize] { &self.shape }
-            fn data(&self) -> Cow<'_, [u8]> { Cow::Borrowed(&self.data) }
-            fn data_len(&self) -> usize { self.data.len() }
+            fn dtype(&self) -> safetensors::Dtype {
+                safetensors::Dtype::F32
+            }
+            fn shape(&self) -> &[usize] {
+                &self.shape
+            }
+            fn data(&self) -> Cow<'_, [u8]> {
+                Cow::Borrowed(&self.data)
+            }
+            fn data_len(&self) -> usize {
+                self.data.len()
+            }
         }
 
         /// Serialize a Vit into safetensors bytes using OpenAI CLIP naming.
-        fn serialize_vit(
-            model: &Vit<CpuBackend>,
-            config: &VitConfig,
-            prefix: &str,
-        ) -> Vec<u8> {
+        fn serialize_vit(model: &Vit<CpuBackend>, config: &VitConfig, prefix: &str) -> Vec<u8> {
             let d = config.embed_dim;
             let d_ff = config.d_ff();
             let mut entries: Vec<(String, F32View)> = Vec::new();
@@ -666,7 +696,10 @@ mod tests {
             // Patch embed: proj [d, C*P*P] — same flat layout as conv1.weight [d, C, P, P]
             entries.push((
                 format!("{prefix}conv1.weight"),
-                F32View::new(&model.patch_embed.proj.to_vec(), model.patch_embed.proj.shape.dims()),
+                F32View::new(
+                    &model.patch_embed.proj.to_vec(),
+                    model.patch_embed.proj.shape.dims(),
+                ),
             ));
 
             // CLS token: our [1, d] → CLIP stores as [d]
@@ -685,36 +718,82 @@ mod tests {
             for (i, block) in model.blocks.iter().enumerate() {
                 let bp = format!("{prefix}transformer.resblocks.{i}");
 
-                entries.push((format!("{bp}.ln_1.weight"), F32View::new(&block.ln1_gamma.to_vec(), &[d])));
-                entries.push((format!("{bp}.ln_1.bias"), F32View::new(&block.ln1_beta.to_vec(), &[d])));
+                entries.push((
+                    format!("{bp}.ln_1.weight"),
+                    F32View::new(&block.ln1_gamma.to_vec(), &[d]),
+                ));
+                entries.push((
+                    format!("{bp}.ln_1.bias"),
+                    F32View::new(&block.ln1_beta.to_vec(), &[d]),
+                ));
 
                 // qkv_weight: our [d, 3d] → CLIP in_proj_weight [3d, d] (transpose)
-                let qkv_t = crate::checkpoint::transpose_2d(&block.attn.qkv_weight.to_vec(), d, 3 * d);
-                entries.push((format!("{bp}.attn.in_proj_weight"), F32View::new(&qkv_t, &[3 * d, d])));
-                entries.push((format!("{bp}.attn.in_proj_bias"), F32View::new(&block.attn.qkv_bias.to_vec(), &[3 * d])));
+                let qkv_t =
+                    crate::checkpoint::transpose_2d(&block.attn.qkv_weight.to_vec(), d, 3 * d);
+                entries.push((
+                    format!("{bp}.attn.in_proj_weight"),
+                    F32View::new(&qkv_t, &[3 * d, d]),
+                ));
+                entries.push((
+                    format!("{bp}.attn.in_proj_bias"),
+                    F32View::new(&block.attn.qkv_bias.to_vec(), &[3 * d]),
+                ));
 
                 // proj_weight: our [d, d] → CLIP out_proj.weight [d, d] (transpose)
-                let proj_t = crate::checkpoint::transpose_2d(&block.attn.proj_weight.to_vec(), d, d);
-                entries.push((format!("{bp}.attn.out_proj.weight"), F32View::new(&proj_t, &[d, d])));
-                entries.push((format!("{bp}.attn.out_proj.bias"), F32View::new(&block.attn.proj_bias.to_vec(), &[d])));
+                let proj_t =
+                    crate::checkpoint::transpose_2d(&block.attn.proj_weight.to_vec(), d, d);
+                entries.push((
+                    format!("{bp}.attn.out_proj.weight"),
+                    F32View::new(&proj_t, &[d, d]),
+                ));
+                entries.push((
+                    format!("{bp}.attn.out_proj.bias"),
+                    F32View::new(&block.attn.proj_bias.to_vec(), &[d]),
+                ));
 
-                entries.push((format!("{bp}.ln_2.weight"), F32View::new(&block.ln2_gamma.to_vec(), &[d])));
-                entries.push((format!("{bp}.ln_2.bias"), F32View::new(&block.ln2_beta.to_vec(), &[d])));
+                entries.push((
+                    format!("{bp}.ln_2.weight"),
+                    F32View::new(&block.ln2_gamma.to_vec(), &[d]),
+                ));
+                entries.push((
+                    format!("{bp}.ln_2.bias"),
+                    F32View::new(&block.ln2_beta.to_vec(), &[d]),
+                ));
 
                 // fc1: our [d, d_ff] → CLIP c_fc.weight [d_ff, d] (transpose)
-                let fc1_t = crate::checkpoint::transpose_2d(&block.mlp.fc1_weight.to_vec(), d, d_ff);
-                entries.push((format!("{bp}.mlp.c_fc.weight"), F32View::new(&fc1_t, &[d_ff, d])));
-                entries.push((format!("{bp}.mlp.c_fc.bias"), F32View::new(&block.mlp.fc1_bias.to_vec(), &[d_ff])));
+                let fc1_t =
+                    crate::checkpoint::transpose_2d(&block.mlp.fc1_weight.to_vec(), d, d_ff);
+                entries.push((
+                    format!("{bp}.mlp.c_fc.weight"),
+                    F32View::new(&fc1_t, &[d_ff, d]),
+                ));
+                entries.push((
+                    format!("{bp}.mlp.c_fc.bias"),
+                    F32View::new(&block.mlp.fc1_bias.to_vec(), &[d_ff]),
+                ));
 
                 // fc2: our [d_ff, d] → CLIP c_proj.weight [d, d_ff] (transpose)
-                let fc2_t = crate::checkpoint::transpose_2d(&block.mlp.fc2_weight.to_vec(), d_ff, d);
-                entries.push((format!("{bp}.mlp.c_proj.weight"), F32View::new(&fc2_t, &[d, d_ff])));
-                entries.push((format!("{bp}.mlp.c_proj.bias"), F32View::new(&block.mlp.fc2_bias.to_vec(), &[d])));
+                let fc2_t =
+                    crate::checkpoint::transpose_2d(&block.mlp.fc2_weight.to_vec(), d_ff, d);
+                entries.push((
+                    format!("{bp}.mlp.c_proj.weight"),
+                    F32View::new(&fc2_t, &[d, d_ff]),
+                ));
+                entries.push((
+                    format!("{bp}.mlp.c_proj.bias"),
+                    F32View::new(&block.mlp.fc2_bias.to_vec(), &[d]),
+                ));
             }
 
             // LN post
-            entries.push((format!("{prefix}ln_post.weight"), F32View::new(&model.ln_post_gamma.to_vec(), &[d])));
-            entries.push((format!("{prefix}ln_post.bias"), F32View::new(&model.ln_post_beta.to_vec(), &[d])));
+            entries.push((
+                format!("{prefix}ln_post.weight"),
+                F32View::new(&model.ln_post_gamma.to_vec(), &[d]),
+            ));
+            entries.push((
+                format!("{prefix}ln_post.bias"),
+                F32View::new(&model.ln_post_beta.to_vec(), &[d]),
+            ));
 
             let info: Option<HashMap<String, String>> = None;
             safetensors::serialize(entries, &info).unwrap()
@@ -745,17 +824,41 @@ mod tests {
             let loaded = Vit::<CpuBackend>::from_safetensors(config, &tensors, "").unwrap();
 
             // Compare key tensors
-            tensors_equal(&original.patch_embed.proj, &loaded.patch_embed.proj, "patch_embed.proj");
+            tensors_equal(
+                &original.patch_embed.proj,
+                &loaded.patch_embed.proj,
+                "patch_embed.proj",
+            );
             tensors_equal(&original.cls_token, &loaded.cls_token, "cls_token");
             tensors_equal(&original.pos_embed, &loaded.pos_embed, "pos_embed");
-            tensors_equal(&original.ln_post_gamma, &loaded.ln_post_gamma, "ln_post.gamma");
+            tensors_equal(
+                &original.ln_post_gamma,
+                &loaded.ln_post_gamma,
+                "ln_post.gamma",
+            );
             tensors_equal(&original.ln_post_beta, &loaded.ln_post_beta, "ln_post.beta");
 
             for (i, (a, b)) in original.blocks.iter().zip(loaded.blocks.iter()).enumerate() {
-                tensors_equal(&a.attn.qkv_weight, &b.attn.qkv_weight, &format!("block{i}.qkv_w"));
-                tensors_equal(&a.attn.proj_weight, &b.attn.proj_weight, &format!("block{i}.proj_w"));
-                tensors_equal(&a.mlp.fc1_weight, &b.mlp.fc1_weight, &format!("block{i}.fc1_w"));
-                tensors_equal(&a.mlp.fc2_weight, &b.mlp.fc2_weight, &format!("block{i}.fc2_w"));
+                tensors_equal(
+                    &a.attn.qkv_weight,
+                    &b.attn.qkv_weight,
+                    &format!("block{i}.qkv_w"),
+                );
+                tensors_equal(
+                    &a.attn.proj_weight,
+                    &b.attn.proj_weight,
+                    &format!("block{i}.proj_w"),
+                );
+                tensors_equal(
+                    &a.mlp.fc1_weight,
+                    &b.mlp.fc1_weight,
+                    &format!("block{i}.fc1_w"),
+                );
+                tensors_equal(
+                    &a.mlp.fc2_weight,
+                    &b.mlp.fc2_weight,
+                    &format!("block{i}.fc2_w"),
+                );
                 tensors_equal(&a.ln1_gamma, &b.ln1_gamma, &format!("block{i}.ln1_g"));
                 tensors_equal(&a.ln2_gamma, &b.ln2_gamma, &format!("block{i}.ln2_g"));
             }
@@ -781,7 +884,11 @@ mod tests {
 
             tensors_equal(&original.patch_embed.proj, &loaded.patch_embed.proj, "proj");
             tensors_equal(&original.cls_token, &loaded.cls_token, "cls");
-            tensors_equal(&original.blocks[0].attn.qkv_weight, &loaded.blocks[0].attn.qkv_weight, "qkv");
+            tensors_equal(
+                &original.blocks[0].attn.qkv_weight,
+                &loaded.blocks[0].attn.qkv_weight,
+                "qkv",
+            );
         }
     }
 }

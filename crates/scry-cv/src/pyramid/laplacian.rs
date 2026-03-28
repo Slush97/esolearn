@@ -87,9 +87,6 @@ mod tests {
             .map(|(&a, &b)| (a - b).abs())
             .fold(0.0f32, f32::max);
 
-        assert!(
-            max_err < 0.05,
-            "reconstruction error too large: {max_err}"
-        );
+        assert!(max_err < 0.05, "reconstruction error too large: {max_err}");
     }
 }

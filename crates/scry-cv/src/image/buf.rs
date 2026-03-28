@@ -53,11 +53,7 @@ impl<T: Pixel, C: ChannelLayout> ImageBuf<T, C> {
     }
 
     /// Create an image by calling `f(x, y)` for each pixel.
-    pub fn from_fn(
-        width: u32,
-        height: u32,
-        mut f: impl FnMut(u32, u32) -> Vec<T>,
-    ) -> Result<Self> {
+    pub fn from_fn(width: u32, height: u32, mut f: impl FnMut(u32, u32) -> Vec<T>) -> Result<Self> {
         let len = Self::required_len(width, height)?;
         let mut data = Vec::with_capacity(len);
         for y in 0..height {
@@ -223,14 +219,7 @@ impl<T: Pixel, C: ChannelLayout> ImageBuf<T, C> {
         })
     }
 
-    fn check_bounds(
-        img_w: u32,
-        img_h: u32,
-        x: u32,
-        y: u32,
-        w: u32,
-        h: u32,
-    ) -> Result<()> {
+    fn check_bounds(img_w: u32, img_h: u32, x: u32, y: u32, w: u32, h: u32) -> Result<()> {
         if x + w > img_w || y + h > img_h || w == 0 || h == 0 {
             return Err(ScryVisionError::OutOfBounds(format!(
                 "sub-image ({x},{y})+({w},{h}) exceeds {img_w}x{img_h}"

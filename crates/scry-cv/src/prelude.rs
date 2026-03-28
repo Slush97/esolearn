@@ -13,8 +13,7 @@ pub use crate::filter::canny::{canny, canny_with_sigma};
 
 // Connected components & contours
 pub use crate::components::{
-    connected_components, find_contours, ComponentStats, Connectivity, ConnectedComponents,
-    Contour,
+    connected_components, find_contours, ComponentStats, ConnectedComponents, Connectivity, Contour,
 };
 
 // Hough transforms
@@ -36,7 +35,9 @@ pub use crate::registration::{
 pub use crate::stereo::SgbmStereo;
 
 #[cfg(feature = "flow")]
-pub use crate::flow::{DenseOpticalFlow, Farneback, FlowField, LucasKanade, SparseFlowResult, SparseOpticalFlow};
+pub use crate::flow::{
+    DenseOpticalFlow, Farneback, FlowField, LucasKanade, SparseFlowResult, SparseOpticalFlow,
+};
 
 #[cfg(feature = "background")]
 pub use crate::background::{BackgroundSubtractor, KnnBackground, Mog2};

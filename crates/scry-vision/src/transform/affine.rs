@@ -52,8 +52,16 @@ impl AffineTransform {
     /// `src` = detected landmarks, `dst` = canonical template landmarks (in
     /// output image coordinates).
     #[must_use]
-    pub fn estimate_similarity(src: &[[f32; 2]], dst: &[[f32; 2]], out_width: u32, out_height: u32) -> Self {
-        assert!(src.len() >= 2 && src.len() == dst.len(), "need >= 2 matching point pairs");
+    pub fn estimate_similarity(
+        src: &[[f32; 2]],
+        dst: &[[f32; 2]],
+        out_width: u32,
+        out_height: u32,
+    ) -> Self {
+        assert!(
+            src.len() >= 2 && src.len() == dst.len(),
+            "need >= 2 matching point pairs"
+        );
         let n = src.len() as f32;
 
         // Least-squares for similarity: [a, b, tx, ty]

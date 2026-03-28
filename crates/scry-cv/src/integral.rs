@@ -59,8 +59,7 @@ impl IntegralImage {
     #[inline]
     pub fn rect_sum(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> f64 {
         let (x0, y0, x1, y1) = (x0 as usize, y0 as usize, x1 as usize + 1, y1 as usize + 1);
-        self.data[y1 * self.w + x1] - self.data[y0 * self.w + x1]
-            - self.data[y1 * self.w + x0]
+        self.data[y1 * self.w + x1] - self.data[y0 * self.w + x1] - self.data[y1 * self.w + x0]
             + self.data[y0 * self.w + x0]
     }
 

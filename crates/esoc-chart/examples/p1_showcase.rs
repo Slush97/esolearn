@@ -10,7 +10,10 @@
 //! - Improved number formatting (SI/commas)
 //! - Area chart, pie chart, donut chart, stacked bar, grouped bar
 
-use esoc_chart::v2::*;
+use esoc_chart::v2::{
+    area, bar, boxplot, grouped_bar, histogram, pie_labeled, scatter, stacked_bar, Chart, Layer,
+    MarkType, NewTheme,
+};
 
 fn main() -> esoc_chart::error::Result<()> {
     // ── Simple LCG for reproducibility ────────────────────────────────
@@ -53,8 +56,26 @@ fn main() -> esoc_chart::error::Result<()> {
     println!("Saved hist_tight_bins.svg");
 
     // ── 3. Bar chart (horizontal-only gridlines) ──────────────────────
-    let langs = ["Rust", "Python", "TypeScript", "Go", "Java", "C++", "Ruby", "Swift"];
-    let users: Vec<f64> = vec![85000.0, 1200000.0, 950000.0, 420000.0, 780000.0, 650000.0, 180000.0, 310000.0];
+    let langs = [
+        "Rust",
+        "Python",
+        "TypeScript",
+        "Go",
+        "Java",
+        "C++",
+        "Ruby",
+        "Swift",
+    ];
+    let users: Vec<f64> = vec![
+        85_000.0,
+        1_200_000.0,
+        950_000.0,
+        420_000.0,
+        780_000.0,
+        650_000.0,
+        180_000.0,
+        310_000.0,
+    ];
 
     let svg = bar(&langs, &users)
         .title("Language Users (thousands)")
@@ -64,8 +85,11 @@ fn main() -> esoc_chart::error::Result<()> {
     println!("Saved bar_large_values.svg");
 
     // ── 4. Area chart ─────────────────────────────────────────────────
-    let x_area: Vec<f64> = (0..60).map(|i| i as f64 * 0.5).collect();
-    let y_area: Vec<f64> = x_area.iter().map(|&xi| (xi * 0.3).sin() * 20.0 + 25.0 + (xi * 0.1).cos() * 5.0).collect();
+    let x_area: Vec<f64> = (0..60).map(|i| f64::from(i) * 0.5).collect();
+    let y_area: Vec<f64> = x_area
+        .iter()
+        .map(|&xi| (xi * 0.3).sin() * 20.0 + 25.0 + (xi * 0.1).cos() * 5.0)
+        .collect();
 
     let svg = area(&x_area, &y_area)
         .title("Server Load Over Time")
@@ -80,7 +104,7 @@ fn main() -> esoc_chart::error::Result<()> {
     let pie_vals = [35.0, 25.0, 20.0, 12.0, 8.0];
     let pie_labels = ["Chrome", "Safari", "Firefox", "Edge", "Other"];
 
-    let svg = pie(&pie_vals, &pie_labels)
+    let svg = pie_labeled(&pie_labels, &pie_vals)
         .title("Browser Market Share")
         .size(500.0, 500.0)
         .to_svg()?;
@@ -88,7 +112,7 @@ fn main() -> esoc_chart::error::Result<()> {
     println!("Saved pie_chart.svg");
 
     // ── 6. Donut chart ────────────────────────────────────────────────
-    let svg = pie(&pie_vals, &pie_labels)
+    let svg = pie_labeled(&pie_labels, &pie_vals)
         .donut(0.5)
         .title("Browser Share (Donut)")
         .size(500.0, 500.0)
@@ -99,14 +123,23 @@ fn main() -> esoc_chart::error::Result<()> {
     // ── 7. Stacked bar ───────────────────────────────────────────────
     let stack_cats = ["Q1", "Q2", "Q3", "Q4"];
     let stack_groups = [
-        "Product A", "Product A", "Product A", "Product A",
-        "Product B", "Product B", "Product B", "Product B",
-        "Product C", "Product C", "Product C", "Product C",
+        "Product A",
+        "Product A",
+        "Product A",
+        "Product A",
+        "Product B",
+        "Product B",
+        "Product B",
+        "Product B",
+        "Product C",
+        "Product C",
+        "Product C",
+        "Product C",
     ];
     let stack_vals = [
-        30.0, 45.0, 55.0, 40.0,    // Product A
-        20.0, 25.0, 30.0, 35.0,    // Product B
-        15.0, 10.0, 20.0, 25.0,    // Product C
+        30.0, 45.0, 55.0, 40.0, // Product A
+        20.0, 25.0, 30.0, 35.0, // Product B
+        15.0, 10.0, 20.0, 25.0, // Product C
     ];
     // stacked_bar expects (categories, groups, values) where each row is (cat, group, value)
     let cats_expanded: Vec<&str> = stack_cats.iter().copied().cycle().take(12).collect();
@@ -155,7 +188,7 @@ fn main() -> esoc_chart::error::Result<()> {
     println!("Saved boxplot_v2.svg");
 
     // ── 10. Scatter with subtitle & caption (font hierarchy demo) ────
-    let x_sm: Vec<f64> = (0..30).map(|i| i as f64).collect();
+    let x_sm: Vec<f64> = (0..30).map(f64::from).collect();
     let y_sm: Vec<f64> = x_sm.iter().map(|&xi| xi.sqrt() * 3.0 + normal()).collect();
 
     let chart = Chart::new()
@@ -175,7 +208,11 @@ fn main() -> esoc_chart::error::Result<()> {
     let mut cx = Vec::new();
     let mut cy = Vec::new();
     let mut cc = Vec::new();
-    for (label, cx_off, cy_off) in [("Group A", 0.0, 0.0), ("Group B", 5.0, 3.0), ("Group C", 2.5, 6.0)] {
+    for (label, cx_off, cy_off) in [
+        ("Group A", 0.0, 0.0),
+        ("Group B", 5.0, 3.0),
+        ("Group C", 2.5, 6.0),
+    ] {
         for _ in 0..150 {
             cx.push(cx_off + normal() * 1.2);
             cy.push(cy_off + normal() * 1.2);
@@ -194,12 +231,22 @@ fn main() -> esoc_chart::error::Result<()> {
     println!("Saved dense_categorical.svg");
 
     // ── 12. Multi-line with grammar API (dark theme) ──────────────────
-    let epochs: Vec<f64> = (1..=40).map(|i| i as f64).collect();
-    let loss1: Vec<f64> = epochs.iter().map(|&e| 2.5 * (-e / 10.0).exp() + 0.1 + normal() * 0.02).collect();
-    let loss2: Vec<f64> = epochs.iter().map(|&e| 2.0 * (-e / 15.0).exp() + 0.15 + normal() * 0.03).collect();
+    let epochs: Vec<f64> = (1..=40).map(f64::from).collect();
+    let loss1: Vec<f64> = epochs
+        .iter()
+        .map(|&e| 2.5 * (-e / 10.0).exp() + 0.1 + normal() * 0.02)
+        .collect();
+    let loss2: Vec<f64> = epochs
+        .iter()
+        .map(|&e| 2.0 * (-e / 15.0).exp() + 0.15 + normal() * 0.03)
+        .collect();
 
     let chart = Chart::new()
-        .layer(Layer::new(MarkType::Line).with_x(epochs.clone()).with_y(loss1))
+        .layer(
+            Layer::new(MarkType::Line)
+                .with_x(epochs.clone())
+                .with_y(loss1),
+        )
         .layer(Layer::new(MarkType::Line).with_x(epochs).with_y(loss2))
         .title("Model Comparison — Dark Theme")
         .subtitle("Lower is better")

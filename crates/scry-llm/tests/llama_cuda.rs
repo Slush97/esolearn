@@ -8,12 +8,15 @@
 
 #[cfg(feature = "cuda")]
 mod cuda_tests {
+    #[cfg(all(feature = "safetensors", feature = "tokenizer"))]
     use std::path::PathBuf;
 
+    #[cfg(all(feature = "safetensors", feature = "tokenizer"))]
     fn model_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/llama-3.2-1b")
     }
 
+    #[cfg(all(feature = "safetensors", feature = "tokenizer"))]
     fn model_available() -> bool {
         let dir = model_dir();
         dir.join("config.json").exists() && dir.join("tokenizer.json").exists()

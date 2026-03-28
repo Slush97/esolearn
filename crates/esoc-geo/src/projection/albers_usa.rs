@@ -24,12 +24,7 @@ impl AlbersConic {
         let c = phi1.cos() * phi1.cos() + 2.0 * n * phi1.sin();
         let rho0 = (c - 2.0 * n * phi0.sin()).abs().sqrt() / n;
 
-        Self {
-            lam0,
-            n,
-            c,
-            rho0,
-        }
+        Self { lam0, n, c, rho0 }
     }
 
     fn project(&self, lon: f64, lat: f64) -> (f64, f64) {

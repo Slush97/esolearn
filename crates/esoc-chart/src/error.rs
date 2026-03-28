@@ -56,7 +56,11 @@ impl fmt::Display for ChartError {
             Self::InvalidData { layer, detail } => {
                 write!(f, "layer {layer}: {detail}")
             }
-            Self::DimensionMismatch { layer, x_len, y_len } => {
+            Self::DimensionMismatch {
+                layer,
+                x_len,
+                y_len,
+            } => {
                 write!(f, "layer {layer}: x has {x_len} elements but y has {y_len}")
             }
             Self::InvalidParameter(msg) => write!(f, "invalid parameter: {msg}"),

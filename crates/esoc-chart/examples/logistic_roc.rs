@@ -43,11 +43,14 @@ fn main() -> Result<()> {
 
     let test_rows = to_row_major(&test.features);
     let y_pred = model.predict(&test_rows).expect("predict failed");
-    let y_proba = model.predict_proba(&test_rows).expect("predict_proba failed");
+    let y_proba = model
+        .predict_proba(&test_rows)
+        .expect("predict_proba failed");
     // For binary classification, scores = P(class=1)
-    let y_scores: Vec<f64> = y_proba.iter().map(|p: &Vec<f64>| {
-        if p.len() == 2 { p[1] } else { p[0] }
-    }).collect();
+    let y_scores: Vec<f64> = y_proba
+        .iter()
+        .map(|p: &Vec<f64>| if p.len() == 2 { p[1] } else { p[0] })
+        .collect();
 
     // ── 1. ROC Curve ─────────────────────────────────────────────────
     let roc = roc_curve(&test.target, &y_scores);
@@ -73,9 +76,13 @@ fn main() -> Result<()> {
 
 /// Transpose column-major features to row-major for `predict`/`predict_proba`.
 fn to_row_major(cols: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    if cols.is_empty() { return vec![]; }
+    if cols.is_empty() {
+        return vec![];
+    }
     let n_samples = cols[0].len();
-    (0..n_samples).map(|i| cols.iter().map(|col| col[i]).collect()).collect()
+    (0..n_samples)
+        .map(|i| cols.iter().map(|col| col[i]).collect())
+        .collect()
 }
 
 // ── Minimal RNG for the example (no external deps) ──────────────────
@@ -87,7 +94,10 @@ impl SimpleRng {
     }
 
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         self.0
     }
 

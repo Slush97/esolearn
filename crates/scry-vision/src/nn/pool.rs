@@ -210,10 +210,7 @@ mod tests {
         assert_eq!(output.shape.dims(), &[1, 3, 3]);
         let data = output.to_vec();
         for (i, &v) in data.iter().enumerate() {
-            assert!(
-                (v - (i as f32 + 1.0)).abs() < 1e-6,
-                "mismatch at {i}: {v}"
-            );
+            assert!((v - (i as f32 + 1.0)).abs() < 1e-6, "mismatch at {i}: {v}");
         }
     }
 
@@ -243,10 +240,7 @@ mod tests {
     fn maxpool_with_padding() {
         // 3×3 kernel, stride 2, padding 1 on 4×4 → 2×2
         let pool = MaxPool2d::new(3, 2, 1);
-        let input = Tensor::<CpuBackend>::from_vec(
-            vec![1.0; 16],
-            Shape::new(&[1, 4, 4]),
-        );
+        let input = Tensor::<CpuBackend>::from_vec(vec![1.0; 16], Shape::new(&[1, 4, 4]));
         let output = pool.forward(&input);
         assert_eq!(output.shape.dims(), &[1, 2, 2]);
     }
@@ -256,10 +250,8 @@ mod tests {
         // ResNet uses MaxPool2d(3, stride=2, padding=1) after the initial conv
         // On 112×112 input → 56×56 output
         let pool = MaxPool2d::new(3, 2, 1);
-        let input = Tensor::<CpuBackend>::from_vec(
-            vec![0.0; 64 * 112 * 112],
-            Shape::new(&[64, 112, 112]),
-        );
+        let input =
+            Tensor::<CpuBackend>::from_vec(vec![0.0; 64 * 112 * 112], Shape::new(&[64, 112, 112]));
         let output = pool.forward(&input);
         assert_eq!(output.shape.dims(), &[64, 56, 56]);
     }

@@ -19,8 +19,11 @@ pub trait BackgroundSubtractor {
     ///   negative = use algorithm default).
     ///
     /// Returns a binary mask: 255 = foreground, 127 = shadow (if detected), 0 = background.
-    fn apply(&mut self, frame: &ImageBuf<f32, Gray>, learning_rate: f64)
-        -> Result<ImageBuf<u8, Gray>>;
+    fn apply(
+        &mut self,
+        frame: &ImageBuf<f32, Gray>,
+        learning_rate: f64,
+    ) -> Result<ImageBuf<u8, Gray>>;
 
     /// Get the current background model as a grayscale f32 image.
     fn background(&self) -> Result<ImageBuf<f32, Gray>>;

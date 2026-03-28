@@ -264,8 +264,13 @@ mod tests {
         let resized = resize_bilinear(&img, 2, 2);
         // Bilinear at same size should closely match the original
         for i in 0..img.data.len() {
-            let diff = (resized.data[i] as i16 - img.data[i] as i16).unsigned_abs();
-            assert!(diff <= 1, "pixel {i}: {} vs {}", resized.data[i], img.data[i]);
+            let diff = (i16::from(resized.data[i]) - i16::from(img.data[i])).unsigned_abs();
+            assert!(
+                diff <= 1,
+                "pixel {i}: {} vs {}",
+                resized.data[i],
+                img.data[i]
+            );
         }
     }
 

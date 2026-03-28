@@ -333,7 +333,7 @@ pub mod elementwise {
     /// **Bindings:**
     ///   - `@binding(0)` `z: array<f32>` (read) — input matrix `[rows, cols]`
     ///   - `@binding(1)` `bias: array<f32>` (read) — bias vector `[cols]`
-    ///   - `@binding(2)` `out: array<f32>` (read_write) — output `[rows, cols]`
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`) — output `[rows, cols]`
     pub const BIAS_ADD: &str = "\
 struct Dims { N: u32, cols: u32 }
 var<push_constant> dims: Dims;
@@ -361,13 +361,13 @@ extern \"C\" __global__ void bias_add(
     out[i] = z[i] + bias[i % cols];
 }";
 
-    /// ReLU activation: `out[i] = max(0, in[i])`.
+    /// `ReLU` activation: `out[i] = max(0, in[i])`.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
     /// **Workgroup size:** 256 — dispatch `N` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read)
-    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
     pub const RELU: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -400,7 +400,7 @@ extern \"C\" __global__ void relu(
     /// **Workgroup size:** 256 — dispatch `N` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read)
-    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
     pub const TANH: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -433,7 +433,7 @@ extern \"C\" __global__ void tanh_fwd(
     /// **Workgroup size:** 256 — dispatch `N` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read)
-    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
     pub const SIGMOID: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -466,7 +466,7 @@ extern \"C\" __global__ void sigmoid(
 /// All shaders use workgroup size 256 (1D) and follow the same dispatch
 /// pattern as the [`elementwise`] forward shaders.
 pub mod backward {
-    /// ReLU backward: `out[i] = grad[i] * (z[i] > 0 ? 1 : 0)`.
+    /// `ReLU` backward: `out[i] = grad[i] * (z[i] > 0 ? 1 : 0)`.
     ///
     /// Uses the pre-activation value `z` (not the activated output).
     ///
@@ -475,7 +475,7 @@ pub mod backward {
     /// **Bindings:**
     ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
     ///   - `@binding(1)` `z: array<f32>` (read) — pre-activation values
-    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`) — output gradient
     pub const RELU_BACKWARD: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -512,7 +512,7 @@ extern \"C\" __global__ void relu_backward(
     /// **Bindings:**
     ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
     ///   - `@binding(1)` `activated: array<f32>` (read) — post-activation values
-    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`) — output gradient
     pub const SIGMOID_BACKWARD: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -551,7 +551,7 @@ extern \"C\" __global__ void sigmoid_backward(
     /// **Bindings:**
     ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
     ///   - `@binding(1)` `activated: array<f32>` (read) — post-activation values
-    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`) — output gradient
     pub const TANH_BACKWARD: &str = "\
 struct Dims { N: u32 }
 var<push_constant> dims: Dims;
@@ -590,7 +590,7 @@ extern \"C\" __global__ void tanh_backward(
     /// **Workgroup size:** 256 — dispatch `rows * cols` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read)
-    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
     pub const TRANSPOSE: &str = "\
 struct Dims { rows: u32, cols: u32 }
 var<push_constant> dims: Dims;
@@ -628,7 +628,7 @@ extern \"C\" __global__ void transpose_2d(
     /// **Workgroup size:** 256 — dispatch `N` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read)
-    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
     pub const SCALE: &str = "\
 struct Dims { N: u32, alpha: f32 }
 var<push_constant> dims: Dims;
@@ -664,7 +664,7 @@ extern \"C\" __global__ void scale_fwd(
     /// **Workgroup size:** 256 — dispatch `cols` invocations
     /// **Bindings:**
     ///   - `@binding(0)` `input: array<f32>` (read) — `[rows, cols]` matrix
-    ///   - `@binding(1)` `out: array<f32>` (read_write) — `[cols]` vector
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`) — `[cols]` vector
     pub const REDUCE_COLS: &str = "\
 struct Dims { rows: u32, cols: u32, scale: f32 }
 var<push_constant> dims: Dims;

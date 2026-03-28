@@ -32,11 +32,7 @@ pub struct PolyExpansion {
 ///
 /// `poly_n` is the polynomial expansion neighborhood size (typically 5 or 7).
 /// `poly_sigma` is the standard deviation of the Gaussian weight (typically 1.1 or 1.5).
-pub fn poly_expand(
-    img: &ImageBuf<f32, Gray>,
-    poly_n: u32,
-    poly_sigma: f32,
-) -> PolyExpansion {
+pub fn poly_expand(img: &ImageBuf<f32, Gray>, poly_n: u32, poly_sigma: f32) -> PolyExpansion {
     let w = img.width();
     let h = img.height();
     let data = img.as_slice();
@@ -139,10 +135,8 @@ pub fn poly_expand(
 
             // Solve the polynomial systems and store results
             let (pa11, pa12, pa22, pb1, pb2) = solve_poly_systems(
-                g_dxdx, g_dxdy, g_dydy, g_dx_f, g_dy_f,
-                g_xx_xx, g_xx_xy, g_xx_yy, g_xy_xy, g_xy_yy, g_yy_yy,
-                g_xx_f, g_xy_f, g_yy_f,
-                s_xx, s_xy, s_yy, f_center,
+                g_dxdx, g_dxdy, g_dydy, g_dx_f, g_dy_f, g_xx_xx, g_xx_xy, g_xx_yy, g_xy_xy,
+                g_xy_yy, g_yy_yy, g_xx_f, g_xy_f, g_yy_f, s_xx, s_xy, s_yy, f_center,
             );
             a11[idx] = pa11;
             a12[idx] = pa12;
@@ -166,11 +160,24 @@ pub fn poly_expand(
 /// Solve the 2x2 and 3x3 systems for polynomial expansion coefficients.
 #[allow(clippy::too_many_arguments, clippy::suspicious_operation_groupings)]
 fn solve_poly_systems(
-    g_dxdx: f32, g_dxdy: f32, g_dydy: f32, g_dx_f: f32, g_dy_f: f32,
-    g_xx_xx: f32, g_xx_xy: f32, g_xx_yy: f32,
-    g_xy_xy: f32, g_xy_yy: f32, g_yy_yy: f32,
-    g_xx_f: f32, g_xy_f: f32, g_yy_f: f32,
-    s_xx: f32, s_xy: f32, s_yy: f32, f_center: f32,
+    g_dxdx: f32,
+    g_dxdy: f32,
+    g_dydy: f32,
+    g_dx_f: f32,
+    g_dy_f: f32,
+    g_xx_xx: f32,
+    g_xx_xy: f32,
+    g_xx_yy: f32,
+    g_xy_xy: f32,
+    g_xy_yy: f32,
+    g_yy_yy: f32,
+    g_xx_f: f32,
+    g_xy_f: f32,
+    g_yy_f: f32,
+    s_xx: f32,
+    s_xy: f32,
+    s_yy: f32,
+    f_center: f32,
 ) -> (f32, f32, f32, f32, f32) {
     let mut pb1 = 0.0f32;
     let mut pb2 = 0.0f32;

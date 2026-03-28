@@ -198,7 +198,10 @@ mod tests {
         // Grad should match the forward mask pattern.
         for i in 0..10 {
             if output[i] == 0.0 {
-                assert_eq!(grad_input[i], 0.0, "zeroed element should have zero grad");
+                assert!(
+                    grad_input[i].abs() < f64::EPSILON,
+                    "zeroed element should have zero grad"
+                );
             } else {
                 assert!(
                     (grad_input[i] - 2.0).abs() < 1e-10,

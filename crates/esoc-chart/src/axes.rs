@@ -201,7 +201,6 @@ impl<'a> LineBuilder<'a> {
     }
 }
 
-
 /// Builder for a scatter series.
 pub struct ScatterBuilder<'a> {
     axes: &'a mut Axes,
@@ -241,7 +240,6 @@ impl<'a> ScatterBuilder<'a> {
         self.axes
     }
 }
-
 
 /// Builder for a bar series.
 pub struct BarBuilder<'a> {
@@ -291,7 +289,6 @@ impl<'a> BarBuilder<'a> {
     }
 }
 
-
 /// Builder for a histogram series.
 pub struct HistogramBuilder<'a> {
     axes: &'a mut Axes,
@@ -332,7 +329,6 @@ impl<'a> HistogramBuilder<'a> {
     }
 }
 
-
 /// Builder for a box plot series.
 pub struct BoxPlotBuilder<'a> {
     axes: &'a mut Axes,
@@ -364,7 +360,6 @@ impl<'a> BoxPlotBuilder<'a> {
         self.axes
     }
 }
-
 
 /// Builder for a heatmap series.
 pub struct HeatmapBuilder<'a> {
@@ -414,7 +409,6 @@ impl<'a> HeatmapBuilder<'a> {
     }
 }
 
-
 /// Builder for an error bar series.
 pub struct ErrorBarBuilder<'a> {
     axes: &'a mut Axes,
@@ -446,4 +440,3 @@ impl<'a> ErrorBarBuilder<'a> {
         self.axes
     }
 }
-

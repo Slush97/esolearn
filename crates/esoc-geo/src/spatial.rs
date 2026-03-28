@@ -185,25 +185,24 @@ pub fn area(geom: &GeoGeometry) -> f64 {
             }
             a.max(0.0)
         }
-        GeoGeometry::MultiPolygon(mp) => {
-            mp.polygons
-                .iter()
-                .map(|poly| {
-                    let mut a = ring_area(&poly.exterior).abs();
-                    for hole in &poly.holes {
-                        a -= ring_area(hole).abs();
-                    }
-                    a.max(0.0)
-                })
-                .sum()
-        }
+        GeoGeometry::MultiPolygon(mp) => mp
+            .polygons
+            .iter()
+            .map(|poly| {
+                let mut a = ring_area(&poly.exterior).abs();
+                for hole in &poly.holes {
+                    a -= ring_area(hole).abs();
+                }
+                a.max(0.0)
+            })
+            .sum(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{GeoMultiPolygon, GeoLineString};
+    use crate::geometry::{GeoLineString, GeoMultiPolygon};
 
     fn unit_square() -> GeoPolygon {
         GeoPolygon {

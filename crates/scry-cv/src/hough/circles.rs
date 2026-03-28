@@ -145,8 +145,7 @@ pub fn hough_circles(
             let circumference = (2.0 * std::f32::consts::PI * r as f32).ceil() as usize;
             let n_samples = circumference.max(16);
             for i in 0..n_samples {
-                let angle =
-                    2.0 * std::f32::consts::PI * i as f32 / n_samples as f32;
+                let angle = 2.0 * std::f32::consts::PI * i as f32 / n_samples as f32;
                 let px = (cx as f32 + r as f32 * angle.cos()).round() as i32;
                 let py = (cy as f32 + r as f32 * angle.sin()).round() as i32;
                 if px >= 0 && px < w as i32 && py >= 0 && py < h as i32 {

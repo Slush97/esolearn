@@ -30,11 +30,7 @@ use crate::image::{Gray, ImageBuf};
 /// let edges = canny(&img, 0.1, 0.3).unwrap();
 /// assert_eq!(edges.dimensions(), (32, 32));
 /// ```
-pub fn canny(
-    img: &ImageBuf<f32, Gray>,
-    low: f32,
-    high: f32,
-) -> Result<ImageBuf<f32, Gray>> {
+pub fn canny(img: &ImageBuf<f32, Gray>, low: f32, high: f32) -> Result<ImageBuf<f32, Gray>> {
     canny_with_sigma(img, low, high, 1.4)
 }
 
@@ -100,12 +96,7 @@ pub fn canny_with_sigma(
 /// For each pixel, quantize the gradient direction to one of 4 axes
 /// (0, 45, 90, 135 degrees) and keep the pixel only if it is a local
 /// maximum along that axis.
-fn non_maximum_suppression(
-    mag: &[f32],
-    dir: &[f32],
-    w: usize,
-    h: usize,
-) -> Vec<f32> {
+fn non_maximum_suppression(mag: &[f32], dir: &[f32], w: usize, h: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; w * h];
 
     for y in 1..h - 1 {
@@ -153,13 +144,7 @@ fn non_maximum_suppression(
 /// Two-threshold hysteresis: keep strong edges and weak edges connected to them.
 ///
 /// Uses a stack-based flood fill from strong pixels through weak pixels.
-fn hysteresis(
-    nms: &[f32],
-    low: f32,
-    high: f32,
-    w: usize,
-    h: usize,
-) -> Vec<f32> {
+fn hysteresis(nms: &[f32], low: f32, high: f32, w: usize, h: usize) -> Vec<f32> {
     const STRONG: u8 = 2;
     const WEAK: u8 = 1;
 
@@ -250,7 +235,10 @@ mod tests {
         let img = ImageBuf::<f32, Gray>::from_vec(data, 64, 64).unwrap();
         let edges = canny(&img, 0.05, 0.15).unwrap();
         assert!(
-            edges.as_slice().iter().all(|&v| v < f32::EPSILON || (v - 1.0).abs() < f32::EPSILON),
+            edges
+                .as_slice()
+                .iter()
+                .all(|&v| v < f32::EPSILON || (v - 1.0).abs() < f32::EPSILON),
             "output must be binary (0.0 or 1.0)"
         );
     }
@@ -259,10 +247,7 @@ mod tests {
     fn rejects_invalid_thresholds() {
         let img = ImageBuf::<f32, Gray>::new(16, 16).unwrap();
         assert!(canny(&img, 0.5, 0.1).is_err(), "high < low should error");
-        assert!(
-            canny(&img, -0.1, 0.3).is_err(),
-            "negative low should error"
-        );
+        assert!(canny(&img, -0.1, 0.3).is_err(), "negative low should error");
         assert!(
             canny_with_sigma(&img, 0.1, 0.3, 0.0).is_err(),
             "zero sigma should error"

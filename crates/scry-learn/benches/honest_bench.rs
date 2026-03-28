@@ -372,8 +372,8 @@ fn bench_cold_start(c: &mut Criterion) {
         // We build a 1-row linfa dataset for fairness.
         let linfa_single = {
             let flat: Vec<f64> = single_row[0].clone();
-            let x = ndarray::Array2::from_shape_vec((1, flat.len()), flat).unwrap();
-            x
+
+            ndarray::Array2::from_shape_vec((1, flat.len()), flat).unwrap()
         };
         b.iter(|| {
             let dt = linfa_trees::DecisionTree::params()

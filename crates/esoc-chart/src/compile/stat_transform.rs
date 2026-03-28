@@ -271,7 +271,9 @@ mod tests {
         let layer = Layer::new(MarkType::Bar)
             .with_y(vec![10.0, 20.0, 30.0])
             .with_categories(vec!["A".into(), "B".into(), "A".into()])
-            .stat(Stat::Aggregate { func: AggregateFunc::Sum });
+            .stat(Stat::Aggregate {
+                func: AggregateFunc::Sum,
+            });
         let resolved = resolve_layer(&layer, 0).unwrap();
         assert_eq!(resolved.categories.as_ref().unwrap(), &["A", "B"]);
         assert!((resolved.y_data[0] - 40.0).abs() < 1e-10); // A: 10+30
@@ -280,10 +282,10 @@ mod tests {
 
     #[test]
     fn smooth_produces_output() {
-        let x: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let x: Vec<f64> = (0..20).map(f64::from).collect();
         let y: Vec<f64> = x.iter().map(|&xi| 2.0 * xi + 1.0).collect();
         let layer = Layer::new(MarkType::Line)
-            .with_x(x.clone())
+            .with_x(x)
             .with_y(y)
             .stat(Stat::Smooth { bandwidth: 0.5 });
         let resolved = resolve_layer(&layer, 0).unwrap();

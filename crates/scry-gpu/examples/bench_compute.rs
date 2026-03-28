@@ -143,7 +143,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// thread coarsening as `COARSE_64X64`, but workgroup IDs are
 /// swizzled into 4-wide super-tiles so that adjacent workgroups share
 /// A-tile rows, keeping them hot in L2 cache. Within each super-tile
-/// (4 columns × grid_m rows), column index varies fastest.
+/// (4 columns × `grid_m` rows), column index varies fastest.
 const MATMUL_COARSE_L2_SHADER: &str = "\
 struct Dims { M: u32, N: u32, K: u32 }
 var<push_constant> dims: Dims;
@@ -384,8 +384,7 @@ fn bench_saxpy(gpu: &Device) {
             let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
 
             println!(
-                "    {name}  sync {:>7.2?} {:>5.0} GB/s  │  batch {:>7.2?} {:>5.0} GB/s  ({speedup:.1}x)",
-                sync_per, sync_gbps, batch_per, batch_gbps
+                "    {name}  sync {sync_per:>7.2?} {sync_gbps:>5.0} GB/s  │  batch {batch_per:>7.2?} {batch_gbps:>5.0} GB/s  ({speedup:.1}x)"
             );
         }
     }
@@ -449,8 +448,7 @@ fn bench_reduce(gpu: &Device) {
             let speedup = sync_per.as_nanos() as f64 / batch_per.as_nanos() as f64;
 
             println!(
-                "    {name}  sync {:>7.2?} {:>5.1} GB/s  │  batch {:>7.2?} {:>5.1} GB/s  ({speedup:.1}x)",
-                sync_per, sync_gbps, batch_per, batch_gbps
+                "    {name}  sync {sync_per:>7.2?} {sync_gbps:>5.1} GB/s  │  batch {batch_per:>7.2?} {batch_gbps:>5.1} GB/s  ({speedup:.1}x)"
             );
         }
     }
@@ -498,7 +496,7 @@ fn reduce_sum_batched(gpu: &Device, kernel: &Kernel, input: &dyn GpuBuf, n: u32)
     intermediates.last().unwrap().download().expect("download")[0]
 }
 
-fn count_passes(mut n: u32) -> u32 {
+const fn count_passes(mut n: u32) -> u32 {
     let mut passes = 0;
     while n > 1 {
         n = n.div_ceil(256);
@@ -615,23 +613,28 @@ fn bench_matmul(gpu: &Device) {
 
 fn dispatch_matmul(
     gpu: &Device,
-    v: &MatmulKernel,
-    a: &scry_gpu::Buffer<f32>,
-    b: &scry_gpu::Buffer<f32>,
-    c: &scry_gpu::Buffer<f32>,
-    n: u32,
+    variant: &MatmulKernel,
+    buf_a: &scry_gpu::Buffer<f32>,
+    buf_b: &scry_gpu::Buffer<f32>,
+    buf_c: &scry_gpu::Buffer<f32>,
+    dim: u32,
     pc: &[u8],
 ) {
-    if v.tile_m == 0 {
+    if variant.tile_m == 0 {
         // 1D dispatch (naive)
-        gpu.run_with_push_constants(&v.kernel, &[a, b, c], n * n, pc)
+        gpu.run_with_push_constants(&variant.kernel, &[buf_a, buf_b, buf_c], dim * dim, pc)
             .expect("run");
     } else {
         // 2D dispatch (tiled/coarsened)
-        let wg_y = n.div_ceil(v.tile_m);
-        let wg_x = n.div_ceil(v.tile_n);
-        gpu.run_configured(&v.kernel, &[a, b, c], [wg_x, wg_y, 1], Some(pc))
-            .expect("run");
+        let wg_y = dim.div_ceil(variant.tile_m);
+        let wg_x = dim.div_ceil(variant.tile_n);
+        gpu.run_configured(
+            &variant.kernel,
+            &[buf_a, buf_b, buf_c],
+            [wg_x, wg_y, 1],
+            Some(pc),
+        )
+        .expect("run");
     }
 }
 

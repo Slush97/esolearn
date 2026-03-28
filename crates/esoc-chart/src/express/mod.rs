@@ -79,17 +79,15 @@ macro_rules! xy_builder_methods {
 
         /// Add a horizontal reference line at the given y value.
         pub fn hline(mut self, y: f64) -> Self {
-            self.annotations.push(
-                crate::grammar::annotation::Annotation::hline(y)
-            );
+            self.annotations
+                .push(crate::grammar::annotation::Annotation::hline(y));
             self
         }
 
         /// Add a vertical reference line at the given x value.
         pub fn vline(mut self, x: f64) -> Self {
-            self.annotations.push(
-                crate::grammar::annotation::Annotation::vline(x)
-            );
+            self.annotations
+                .push(crate::grammar::annotation::Annotation::vline(x));
             self
         }
     };
@@ -259,7 +257,9 @@ impl ScatterBuilder {
         if (!matches!(chart.facet, Facet::None) || self.facet_ncol > 0)
             && chart.layers.iter().any(|l| l.facet_values.is_some())
         {
-            chart = chart.facet(Facet::Wrap { ncol: self.facet_ncol });
+            chart = chart.facet(Facet::Wrap {
+                ncol: self.facet_ncol,
+            });
         }
         if let Some((lo, hi)) = self.x_domain {
             chart = chart.x_domain(lo, hi);
@@ -324,9 +324,7 @@ impl LineBuilder {
 
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let mut layer = Layer::new(MarkType::Line)
-            .with_x(self.x)
-            .with_y(self.y);
+        let mut layer = Layer::new(MarkType::Line).with_x(self.x).with_y(self.y);
         if let Some(cats) = self.categories {
             layer = layer.with_categories(cats);
         }
@@ -605,9 +603,7 @@ impl AreaBuilder {
 
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let mut layer = Layer::new(MarkType::Area)
-            .with_x(self.x)
-            .with_y(self.y);
+        let mut layer = Layer::new(MarkType::Area).with_x(self.x).with_y(self.y);
         if let Some(cats) = self.categories {
             layer = layer.with_categories(cats);
         }
@@ -827,7 +823,13 @@ impl MultiBarBuilder {
             width: self.width,
             height: self.height,
         };
-        let mut chart = try_build_grouped_chart(self.categories, self.groups, self.values, self.position, config)?;
+        let mut chart = try_build_grouped_chart(
+            self.categories,
+            self.groups,
+            self.values,
+            self.position,
+            config,
+        )?;
         if let Some((lo, hi)) = self.x_domain {
             chart = chart.x_domain(lo, hi);
         }
@@ -905,7 +907,9 @@ fn try_build_grouped_chart(
         .map(|(i, c)| (c.as_str(), i as f64))
         .collect();
 
-    let mut chart = Chart::new().size(config.width, config.height).theme(config.theme);
+    let mut chart = Chart::new()
+        .size(config.width, config.height)
+        .theme(config.theme);
 
     for group in &unique_groups {
         let mut x_data = Vec::new();
@@ -1041,8 +1045,7 @@ impl HeatmapBuilder {
 
     /// Build the chart.
     pub fn build(self) -> Chart {
-        let mut layer = Layer::new(MarkType::Heatmap)
-            .with_heatmap_data(self.data);
+        let mut layer = Layer::new(MarkType::Heatmap).with_heatmap_data(self.data);
         if let Some(rl) = self.row_labels {
             layer = layer.with_row_labels(rl);
         }
@@ -1119,7 +1122,7 @@ mod tests {
 
     #[test]
     fn histogram_builds_svg() {
-        let data: Vec<f64> = (0..100).map(|i| (i as f64) * 0.1).collect();
+        let data: Vec<f64> = (0..100).map(|i| f64::from(i) * 0.1).collect();
         let svg = histogram(&data).title("Histogram").to_svg().unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<rect"));
@@ -1127,7 +1130,7 @@ mod tests {
 
     #[test]
     fn histogram_with_bins() {
-        let data: Vec<f64> = (0..50).map(|i| i as f64).collect();
+        let data: Vec<f64> = (0..50).map(f64::from).collect();
         let svg = histogram(&data).bins(5).title("5 Bins").to_svg().unwrap();
         assert!(svg.contains("<rect"));
     }
@@ -1145,7 +1148,10 @@ mod tests {
     fn pie_builds_svg() {
         let values = vec![30.0, 20.0, 50.0];
         let labels = vec!["A", "B", "C"];
-        let svg = pie_labeled(&labels, &values).title("Pie Chart").to_svg().unwrap();
+        let svg = pie_labeled(&labels, &values)
+            .title("Pie Chart")
+            .to_svg()
+            .unwrap();
         assert!(svg.contains("<svg"));
         assert!(!svg.contains("<line") || svg.contains("<path"));
     }
@@ -1181,8 +1187,7 @@ mod tests {
         use crate::grammar::annotation::Annotation;
         let x = vec![1.0, 2.0, 3.0];
         let y = vec![10.0, 20.0, 30.0];
-        let chart = scatter(&x, &y).build()
-            .annotate(Annotation::hline(15.0));
+        let chart = scatter(&x, &y).build().annotate(Annotation::hline(15.0));
         let svg = chart.to_svg().unwrap();
         assert!(svg.contains("<line"));
     }
@@ -1192,7 +1197,11 @@ mod tests {
         use crate::grammar::chart::Chart;
         use crate::grammar::layer::{Layer, MarkType};
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Point).with_x(vec![1.0]).with_y(vec![1.0]))
+            .layer(
+                Layer::new(MarkType::Point)
+                    .with_x(vec![1.0])
+                    .with_y(vec![1.0]),
+            )
             .title("Title")
             .subtitle("Subtitle here")
             .caption("Source: data");
@@ -1264,16 +1273,13 @@ mod tests {
             .unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<circle"));
-        assert!(svg.contains("A"));
-        assert!(svg.contains("B"));
+        assert!(svg.contains('A'));
+        assert!(svg.contains('B'));
     }
 
     #[test]
     fn heatmap_builds_svg() {
-        let data = vec![
-            vec![1.0, 2.0, 3.0],
-            vec![4.0, 5.0, 6.0],
-        ];
+        let data = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
         let svg = heatmap(data).title("Heatmap").to_svg().unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<rect"));
@@ -1281,11 +1287,12 @@ mod tests {
 
     #[test]
     fn heatmap_annotated_builds_svg() {
-        let data = vec![
-            vec![10.0, 20.0],
-            vec![30.0, 40.0],
-        ];
-        let svg = heatmap(data).annotate().title("Annotated").to_svg().unwrap();
+        let data = vec![vec![10.0, 20.0], vec![30.0, 40.0]];
+        let svg = heatmap(data)
+            .annotate()
+            .title("Annotated")
+            .to_svg()
+            .unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<rect"));
         assert!(svg.contains("<text"));
@@ -1296,10 +1303,7 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0];
         let y = vec![10.0, 20.0, 30.0];
         let facets = vec!["All", "All", "All"];
-        let svg = scatter(&x, &y)
-            .facet_wrap(&facets, 2)
-            .to_svg()
-            .unwrap();
+        let svg = scatter(&x, &y).facet_wrap(&facets, 2).to_svg().unwrap();
         assert!(svg.contains("<svg"));
         assert!(svg.contains("<circle"));
     }
@@ -1310,24 +1314,28 @@ mod tests {
         let groups = vec!["Revenue", "Revenue", "Costs", "Costs"];
         let vals = vec![10.0, 20.0, 15.0, 25.0];
         let svg = grouped_bar(&cats, &groups, &vals).to_svg().unwrap();
-        assert!(svg.contains("Revenue"), "legend should contain group name 'Revenue'");
-        assert!(svg.contains("Costs"), "legend should contain group name 'Costs'");
+        assert!(
+            svg.contains("Revenue"),
+            "legend should contain group name 'Revenue'"
+        );
+        assert!(
+            svg.contains("Costs"),
+            "legend should contain group name 'Costs'"
+        );
     }
 
     #[test]
     fn grouped_bar_mismatched_lengths_panics() {
         #[allow(deprecated)]
         let result = std::panic::catch_unwind(|| {
-            grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0])
-                .build();
+            grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0]).build();
         });
         assert!(result.is_err(), "mismatched lengths should panic");
     }
 
     #[test]
     fn grouped_bar_try_build_returns_err() {
-        let result = grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0])
-            .try_build();
+        let result = grouped_bar(&["Q1", "Q2"], &["A", "A", "B"], &[10.0, 20.0]).try_build();
         assert!(result.is_err());
     }
 
@@ -1354,13 +1362,23 @@ mod tests {
         use crate::grammar::chart::Chart;
         use crate::grammar::layer::{Layer, MarkType};
         let chart = Chart::new()
-            .layer(Layer::new(MarkType::Point).with_x(vec![1.0]).with_y(vec![1.0]))
+            .layer(
+                Layer::new(MarkType::Point)
+                    .with_x(vec![1.0])
+                    .with_y(vec![1.0]),
+            )
             .title("My Chart")
             .description("A scatter plot of test data");
         let svg = chart.to_svg().unwrap();
         assert!(svg.contains(r#"role="img""#), "SVG should have role=img");
-        assert!(svg.contains("<title>My Chart</title>"), "SVG should contain <title>");
-        assert!(svg.contains("<desc>A scatter plot of test data</desc>"), "SVG should contain <desc>");
+        assert!(
+            svg.contains("<title>My Chart</title>"),
+            "SVG should contain <title>"
+        );
+        assert!(
+            svg.contains("<desc>A scatter plot of test data</desc>"),
+            "SVG should contain <desc>"
+        );
     }
 
     #[test]
@@ -1415,17 +1433,31 @@ mod tests {
         let groups = vec!["Alpha", "Alpha", "Beta", "Beta"];
         let vals = vec![10.0, 20.0, 5.0, 15.0];
         let svg = stacked_bar(&cats, &groups, &vals).to_svg().unwrap();
-        assert!(svg.contains("Alpha"), "legend should contain group name 'Alpha'");
-        assert!(svg.contains("Beta"), "legend should contain group name 'Beta'");
+        assert!(
+            svg.contains("Alpha"),
+            "legend should contain group name 'Alpha'"
+        );
+        assert!(
+            svg.contains("Beta"),
+            "legend should contain group name 'Beta'"
+        );
     }
 
     #[test]
     fn boxplot_shows_category_labels() {
-        let cats = vec!["GroupA", "GroupA", "GroupA", "GroupA", "GroupA",
-                        "GroupB", "GroupB", "GroupB", "GroupB", "GroupB"];
+        let cats = vec![
+            "GroupA", "GroupA", "GroupA", "GroupA", "GroupA", "GroupB", "GroupB", "GroupB",
+            "GroupB", "GroupB",
+        ];
         let vals = vec![1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 4.0, 6.0, 8.0, 10.0];
         let svg = boxplot(&cats, &vals).title("Box Plot").to_svg().unwrap();
-        assert!(svg.contains("GroupA"), "boxplot SVG should contain category name GroupA");
-        assert!(svg.contains("GroupB"), "boxplot SVG should contain category name GroupB");
+        assert!(
+            svg.contains("GroupA"),
+            "boxplot SVG should contain category name GroupA"
+        );
+        assert!(
+            svg.contains("GroupB"),
+            "boxplot SVG should contain category name GroupB"
+        );
     }
 }

@@ -90,14 +90,15 @@ impl ClipCounter {
     }
 }
 
-fn write_element_tree(w: &mut String, elem: &DrawElement, indent: usize, clip_counter: &mut ClipCounter) -> Result<()> {
+fn write_element_tree(
+    w: &mut String,
+    elem: &DrawElement,
+    indent: usize,
+    clip_counter: &mut ClipCounter,
+) -> Result<()> {
     let pad = "  ".repeat(indent);
     match &elem.kind {
-        Element::Line {
-            start,
-            end,
-            stroke,
-        } => {
+        Element::Line { start, end, stroke } => {
             let dash = stroke_dash_attrs(&stroke.dash);
             writeln!(
                 w,
@@ -153,7 +154,11 @@ fn write_element_tree(w: &mut String, elem: &DrawElement, indent: usize, clip_co
             writeln!(
                 w,
                 r#"{pad}<rect x="{}" y="{}" width="{}" height="{}" fill="{}"{stroke_attrs}{rx_attr}/>"#,
-                rect.x, rect.y, rect.width, rect.height, fill.to_svg_string(),
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                fill.to_svg_string(),
             )?;
         }
         Element::Circle {
@@ -173,7 +178,10 @@ fn write_element_tree(w: &mut String, elem: &DrawElement, indent: usize, clip_co
             writeln!(
                 w,
                 r#"{pad}<circle cx="{}" cy="{}" r="{}" fill="{}"{stroke_attrs}/>"#,
-                center.x, center.y, radius, fill.to_svg_string(),
+                center.x,
+                center.y,
+                radius,
+                fill.to_svg_string(),
             )?;
         }
         Element::Path {
@@ -204,7 +212,10 @@ fn write_element_tree(w: &mut String, elem: &DrawElement, indent: usize, clip_co
             rotation,
         } => {
             let transform = match rotation {
-                Some(deg) => format!(r#" transform="rotate({deg},{},{})""#, position.x, position.y),
+                Some(deg) => format!(
+                    r#" transform="rotate({deg},{},{})""#,
+                    position.x, position.y
+                ),
                 None => String::new(),
             };
             writeln!(
@@ -324,12 +335,16 @@ mod tests {
             Layer::Background,
         ));
         canvas.add(DrawElement::circle(
-            200.0, 150.0, 50.0,
+            200.0,
+            150.0,
+            50.0,
             Fill::Solid(Color::BLUE),
             Layer::Data,
         ));
         canvas.add(DrawElement::text(
-            200.0, 30.0, "Test Chart",
+            200.0,
+            30.0,
+            "Test Chart",
             FontStyle::new(16.0),
             Layer::Annotations,
         ));

@@ -181,14 +181,7 @@ impl Element {
 
 impl DrawElement {
     /// Shorthand: line on a given layer.
-    pub fn line(
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-        stroke: Stroke,
-        layer: Layer,
-    ) -> Self {
+    pub fn line(x1: f64, y1: f64, x2: f64, y2: f64, stroke: Stroke, layer: Layer) -> Self {
         Self::new(Element::line(x1, y1, x2, y2, stroke), layer)
     }
 
@@ -203,13 +196,7 @@ impl DrawElement {
     }
 
     /// Shorthand: text on a given layer.
-    pub fn text(
-        x: f64,
-        y: f64,
-        content: impl Into<String>,
-        font: FontStyle,
-        layer: Layer,
-    ) -> Self {
+    pub fn text(x: f64, y: f64, content: impl Into<String>, font: FontStyle, layer: Layer) -> Self {
         Self::new(Element::text(x, y, content, font), layer)
     }
 }

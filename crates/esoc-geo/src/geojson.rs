@@ -53,9 +53,7 @@ pub fn parse(input: &str) -> Result<GeoCollection> {
         "FeatureCollection" => {
             let features = root.features.unwrap_or_default();
             let parsed: Result<Vec<GeoFeature>> = features.iter().map(parse_feature).collect();
-            Ok(GeoCollection {
-                features: parsed?,
-            })
+            Ok(GeoCollection { features: parsed? })
         }
         "Feature" => {
             let feature = GeoJsonFeature {
@@ -88,9 +86,7 @@ fn parse_feature(feature: &GeoJsonFeature) -> Result<GeoFeature> {
     let geometry = match &feature.geometry {
         Some(g) => parse_geometry(g)?,
         None => {
-            return Err(GeoError::ParseError(
-                "feature has no geometry".into(),
-            ));
+            return Err(GeoError::ParseError("feature has no geometry".into()));
         }
     };
 
@@ -110,9 +106,7 @@ fn parse_properties(map: &serde_json::Map<String, serde_json::Value>) -> Propert
     for (key, value) in map {
         let pv = match value {
             serde_json::Value::String(s) => PropertyValue::String(s.clone()),
-            serde_json::Value::Number(n) => {
-                PropertyValue::Number(n.as_f64().unwrap_or(0.0))
-            }
+            serde_json::Value::Number(n) => PropertyValue::Number(n.as_f64().unwrap_or(0.0)),
             serde_json::Value::Bool(b) => PropertyValue::Bool(*b),
             serde_json::Value::Null => PropertyValue::Null,
             // Nested objects/arrays → serialize back to JSON string
@@ -167,9 +161,7 @@ fn parse_geometry(geom: &GeoJsonGeometry) -> Result<GeoGeometry> {
             if let Some(first) = geometries.first() {
                 parse_geometry(first)
             } else {
-                Err(GeoError::ParseError(
-                    "GeometryCollection is empty".into(),
-                ))
+                Err(GeoError::ParseError("GeometryCollection is empty".into()))
             }
         }
         other => Err(GeoError::ParseError(format!(
@@ -183,7 +175,9 @@ fn parse_point(value: &serde_json::Value) -> Result<GeoPoint> {
         .as_array()
         .ok_or_else(|| GeoError::ParseError("expected array for point".into()))?;
     if arr.len() < 2 {
-        return Err(GeoError::ParseError("point needs at least 2 coordinates".into()));
+        return Err(GeoError::ParseError(
+            "point needs at least 2 coordinates".into(),
+        ));
     }
     let lon = arr[0]
         .as_f64()

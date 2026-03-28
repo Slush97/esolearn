@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Annotation compilation: reference lines, bands, text → scene marks.
 
+use crate::compile::layout;
 use crate::grammar::annotation::Annotation;
 use crate::new_theme::NewTheme;
-use esoc_scene::bounds::DataBounds;
-use crate::compile::layout;
 use esoc_scene::bounds::BoundingBox;
+use esoc_scene::bounds::DataBounds;
 use esoc_scene::mark::{AreaMark, Mark, RectMark, RuleMark, TextAnchor, TextMark};
 use esoc_scene::node::{Node, NodeId};
 use esoc_scene::scale::Scale;
@@ -176,7 +176,10 @@ pub fn generate_annotations(
                         font_size * 1.2,
                     ),
                     fill: FillStyle::Solid(theme.background.with_alpha(0.8)),
-                    stroke: StrokeStyle { width: 0.0, ..Default::default() },
+                    stroke: StrokeStyle {
+                        width: 0.0,
+                        ..Default::default()
+                    },
                     corner_radius: 2.0,
                 }))
                 .z_order(3);
@@ -293,8 +296,16 @@ mod tests {
         let theme = NewTheme::default();
         let annotations = vec![Annotation::hline(50.0)];
         generate_annotations(
-            &mut scene, plot_id, root, &annotations, &bounds,
-            400.0, 300.0, 50.0, 50.0, &theme,
+            &mut scene,
+            plot_id,
+            root,
+            &annotations,
+            &bounds,
+            400.0,
+            300.0,
+            50.0,
+            50.0,
+            &theme,
         );
         assert!(count_marks(&scene) >= 1);
     }
@@ -306,8 +317,16 @@ mod tests {
         let theme = NewTheme::default();
         let annotations = vec![Annotation::vline(25.0)];
         generate_annotations(
-            &mut scene, plot_id, root, &annotations, &bounds,
-            400.0, 300.0, 50.0, 50.0, &theme,
+            &mut scene,
+            plot_id,
+            root,
+            &annotations,
+            &bounds,
+            400.0,
+            300.0,
+            50.0,
+            50.0,
+            &theme,
         );
         assert!(count_marks(&scene) >= 1);
     }
@@ -319,8 +338,16 @@ mod tests {
         let theme = NewTheme::default();
         let annotations = vec![Annotation::band(20.0, 80.0)];
         generate_annotations(
-            &mut scene, plot_id, root, &annotations, &bounds,
-            400.0, 300.0, 50.0, 50.0, &theme,
+            &mut scene,
+            plot_id,
+            root,
+            &annotations,
+            &bounds,
+            400.0,
+            300.0,
+            50.0,
+            50.0,
+            &theme,
         );
         assert!(count_marks(&scene) >= 1);
     }
@@ -332,8 +359,16 @@ mod tests {
         let theme = NewTheme::default();
         let annotations = vec![Annotation::text(50.0, 50.0, "hello")];
         generate_annotations(
-            &mut scene, plot_id, root, &annotations, &bounds,
-            400.0, 300.0, 50.0, 50.0, &theme,
+            &mut scene,
+            plot_id,
+            root,
+            &annotations,
+            &bounds,
+            400.0,
+            300.0,
+            50.0,
+            50.0,
+            &theme,
         );
         assert!(count_marks(&scene) >= 1);
     }

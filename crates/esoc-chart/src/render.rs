@@ -71,7 +71,12 @@ pub fn render_figure(fig: &Figure) -> Result<Canvas> {
     Ok(canvas)
 }
 
-fn render_axes(canvas: &mut Canvas, axes: &Axes, bounds: Rect, theme: &crate::theme::Theme) -> Result<()> {
+fn render_axes(
+    canvas: &mut Canvas,
+    axes: &Axes,
+    bounds: Rect,
+    theme: &crate::theme::Theme,
+) -> Result<()> {
     // Compute margins
     let margins = compute_margins(axes, theme);
     let plot_area = Rect::new(
@@ -101,14 +106,30 @@ fn render_axes(canvas: &mut Canvas, axes: &Axes, bounds: Rect, theme: &crate::th
 
     // Build transforms
     let x_transform = match &axes.x_config.scale {
-        Scale::Linear => AxisTransform::Linear { min: x_min, max: x_max },
-        Scale::Log => AxisTransform::Log { min: x_min, max: x_max },
-        Scale::Categorical(labels) => AxisTransform::Categorical { count: labels.len() },
+        Scale::Linear => AxisTransform::Linear {
+            min: x_min,
+            max: x_max,
+        },
+        Scale::Log => AxisTransform::Log {
+            min: x_min,
+            max: x_max,
+        },
+        Scale::Categorical(labels) => AxisTransform::Categorical {
+            count: labels.len(),
+        },
     };
     let y_transform = match &axes.y_config.scale {
-        Scale::Linear => AxisTransform::Linear { min: y_min, max: y_max },
-        Scale::Log => AxisTransform::Log { min: y_min, max: y_max },
-        Scale::Categorical(labels) => AxisTransform::Categorical { count: labels.len() },
+        Scale::Linear => AxisTransform::Linear {
+            min: y_min,
+            max: y_max,
+        },
+        Scale::Log => AxisTransform::Log {
+            min: y_min,
+            max: y_max,
+        },
+        Scale::Categorical(labels) => AxisTransform::Categorical {
+            count: labels.len(),
+        },
     };
     let viewport = ViewportTransform::new(plot_area);
     let coord_transform = CoordinateTransform::new(x_transform, y_transform, viewport);
@@ -256,7 +277,10 @@ fn render_grid(
         };
         let px = plot_area.x + t * plot_area.width;
         canvas.add(DrawElement::line(
-            px, plot_area.y, px, plot_area.bottom(),
+            px,
+            plot_area.y,
+            px,
+            plot_area.bottom(),
             grid_stroke.clone(),
             Layer::Grid,
         ));
@@ -275,7 +299,10 @@ fn render_grid(
         };
         let py = plot_area.bottom() - t * plot_area.height;
         canvas.add(DrawElement::line(
-            plot_area.x, py, plot_area.right(), py,
+            plot_area.x,
+            py,
+            plot_area.right(),
+            py,
             grid_stroke.clone(),
             Layer::Grid,
         ));
@@ -296,13 +323,19 @@ fn render_axis_frame(
 
     // Bottom axis line
     canvas.add(DrawElement::line(
-        plot_area.x, plot_area.bottom(), plot_area.right(), plot_area.bottom(),
+        plot_area.x,
+        plot_area.bottom(),
+        plot_area.right(),
+        plot_area.bottom(),
         axis_stroke.clone(),
         Layer::Grid,
     ));
     // Left axis line
     canvas.add(DrawElement::line(
-        plot_area.x, plot_area.y, plot_area.x, plot_area.bottom(),
+        plot_area.x,
+        plot_area.y,
+        plot_area.x,
+        plot_area.bottom(),
         axis_stroke,
         Layer::Grid,
     ));
@@ -330,13 +363,19 @@ fn render_axis_frame(
 
         // Tick mark
         canvas.add(DrawElement::line(
-            px, plot_area.bottom(), px, plot_area.bottom() + 5.0,
+            px,
+            plot_area.bottom(),
+            px,
+            plot_area.bottom() + 5.0,
             Stroke::solid(theme.foreground, 0.5),
             Layer::Grid,
         ));
 
         // Tick label
-        let label = axes.x_config.tick_labels.as_ref()
+        let label = axes
+            .x_config
+            .tick_labels
+            .as_ref()
             .and_then(|tl| tl.get(i))
             .unwrap_or(&x_ticks.labels[i]);
         canvas.add(DrawElement::text(
@@ -371,13 +410,19 @@ fn render_axis_frame(
 
         // Tick mark
         canvas.add(DrawElement::line(
-            plot_area.x - 5.0, py, plot_area.x, py,
+            plot_area.x - 5.0,
+            py,
+            plot_area.x,
+            py,
             Stroke::solid(theme.foreground, 0.5),
             Layer::Grid,
         ));
 
         // Tick label
-        let label = axes.y_config.tick_labels.as_ref()
+        let label = axes
+            .y_config
+            .tick_labels
+            .as_ref()
             .and_then(|tl| tl.get(i))
             .unwrap_or(&y_ticks.labels[i]);
         canvas.add(DrawElement::text(

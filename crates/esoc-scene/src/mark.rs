@@ -283,7 +283,13 @@ impl MarkBatch {
         shape: MarkerShape,
         strokes: BatchAttr<StrokeStyle>,
     ) -> Result<Self, String> {
-        let batch = Self::Points { positions, sizes, fills, shape, strokes };
+        let batch = Self::Points {
+            positions,
+            sizes,
+            fills,
+            shape,
+            strokes,
+        };
         batch.validate()?;
         Ok(batch)
     }
@@ -295,7 +301,12 @@ impl MarkBatch {
         strokes: BatchAttr<StrokeStyle>,
         corner_radius: f32,
     ) -> Result<Self, String> {
-        let batch = Self::Rects { rects, fills, strokes, corner_radius };
+        let batch = Self::Rects {
+            rects,
+            fills,
+            strokes,
+            corner_radius,
+        };
         batch.validate()?;
         Ok(batch)
     }
@@ -303,13 +314,24 @@ impl MarkBatch {
     /// Validate that all Varying attributes match the batch size.
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            Self::Points { positions, sizes, fills, strokes, .. } => {
+            Self::Points {
+                positions,
+                sizes,
+                fills,
+                strokes,
+                ..
+            } => {
                 let n = positions.len();
                 check_varying_len("sizes", sizes, n)?;
                 check_varying_len("fills", fills, n)?;
                 check_varying_len("strokes", strokes, n)?;
             }
-            Self::Rects { rects, fills, strokes, .. } => {
+            Self::Rects {
+                rects,
+                fills,
+                strokes,
+                ..
+            } => {
                 let n = rects.len();
                 check_varying_len("fills", fills, n)?;
                 check_varying_len("strokes", strokes, n)?;
@@ -320,7 +342,11 @@ impl MarkBatch {
     }
 }
 
-fn check_varying_len<T: Clone>(name: &str, attr: &BatchAttr<T>, expected: usize) -> Result<(), String> {
+fn check_varying_len<T: Clone>(
+    name: &str,
+    attr: &BatchAttr<T>,
+    expected: usize,
+) -> Result<(), String> {
     if let BatchAttr::Varying(v) = attr {
         if v.len() != expected {
             return Err(format!(

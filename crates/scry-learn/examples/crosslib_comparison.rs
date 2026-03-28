@@ -19,6 +19,19 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// (col_major_features, row_major_features, target, feature_names)
+type Dataset = (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<String>);
+
+/// (train_row, train_col, train_target, test_row, test_col, test_target)
+type TrainTestSplit = (
+    Vec<Vec<f64>>,
+    Vec<Vec<f64>>,
+    Vec<f64>,
+    Vec<Vec<f64>>,
+    Vec<Vec<f64>>,
+    Vec<f64>,
+);
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Data loading utilities
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,7 +76,7 @@ fn load_target_csv(name: &str) -> Vec<f64> {
 }
 
 /// Load a dataset from fixture CSVs. Returns (col_major_features, row_major_features, target, feature_names).
-fn load_dataset(base: &str) -> (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<String>) {
+fn load_dataset(base: &str) -> Dataset {
     let (cols, feat_names) = load_features_csv(&format!("{base}_features.csv"));
     let target = load_target_csv(&format!("{base}_target.csv"));
     let n_samples = target.len();
@@ -82,14 +95,7 @@ fn stratified_split(
     col_major: &[Vec<f64>],
     target: &[f64],
     ratio: f64,
-) -> (
-    Vec<Vec<f64>>,
-    Vec<Vec<f64>>,
-    Vec<f64>,
-    Vec<Vec<f64>>,
-    Vec<Vec<f64>>,
-    Vec<f64>,
-) {
+) -> TrainTestSplit {
     let _n = target.len();
     let n_features = col_major.len();
 
@@ -105,7 +111,7 @@ fn stratified_split(
 
     // Deterministic: sort classes then split each class proportionally
     let mut classes: Vec<i64> = class_indices.keys().copied().collect();
-    classes.sort();
+    classes.sort_unstable();
 
     for cls in classes {
         let indices = &class_indices[&cls];
@@ -156,7 +162,7 @@ fn r2_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
     1.0 - ss_res / ss_tot
 }
 
-fn rmse(y_true: &[f64], y_pred: &[f64]) -> f64 {
+fn _rmse(y_true: &[f64], y_pred: &[f64]) -> f64 {
     let mse: f64 = y_true
         .iter()
         .zip(y_pred.iter())
@@ -273,7 +279,7 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
 
     let (train_scaled, test_scaled) = standardize(&train_row, &test_row);
     let train_scaled_col = transpose_to_col_major(&train_scaled);
-    let test_scaled_col = transpose_to_col_major(&test_scaled);
+    let _test_scaled_col = transpose_to_col_major(&test_scaled);
     let train_col = transpose_to_col_major(&train_row);
 
     let mut results = Vec::new();
@@ -751,7 +757,7 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
 fn test_classification_wine() -> Vec<TestResult> {
     println!("\n  Loading wine dataset...");
     let (cols, rows, target, feat_names) = load_dataset("wine");
-    let n_features = feat_names.len();
+    let _n_features = feat_names.len();
     let (train_row, _train_col, train_target, test_row, _test_col, test_target) =
         stratified_split(&rows, &cols, &target, 0.7);
 
@@ -887,7 +893,7 @@ fn test_classification_wine() -> Vec<TestResult> {
 
 fn test_regression_california() -> Vec<TestResult> {
     println!("\n  Loading california housing dataset...");
-    let (cols, rows, target, feat_names) = load_dataset("california");
+    let (_cols, rows, target, feat_names) = load_dataset("california");
     let n_features = feat_names.len();
 
     // Simple 70/30 split (not stratified for regression)
@@ -1238,7 +1244,7 @@ fn test_clustering_iris() -> Vec<TestResult> {
                 let t0 = Instant::now();
                 let preds = model.predict(&ds_pred);
                 let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let labels: Vec<usize> = preds.iter().map(|&l| l).collect();
+                let labels: Vec<usize> = preds.iter().copied().collect();
                 let sil = scry_learn::cluster::silhouette_score(&rows, &labels);
                 results.push(TestResult::ok(
                     "linfa",
@@ -1357,7 +1363,7 @@ fn test_clustering_iris() -> Vec<TestResult> {
 fn test_classification_digits() -> Vec<TestResult> {
     println!("\n  Loading digits dataset...");
     let (cols, rows, target, feat_names) = load_dataset("digits");
-    let n_features = feat_names.len();
+    let _n_features = feat_names.len();
     let (train_row, _train_col, train_target, test_row, _test_col, test_target) =
         stratified_split(&rows, &cols, &target, 0.7);
 
@@ -1528,7 +1534,7 @@ fn test_classification_digits() -> Vec<TestResult> {
 fn test_classification_spambase() -> Vec<TestResult> {
     println!("\n  Loading spambase dataset...");
     let (cols, rows, target, feat_names) = load_dataset("spambase");
-    let n_features = feat_names.len();
+    let _n_features = feat_names.len();
     let (train_row, _train_col, train_target, test_row, _test_col, test_target) =
         stratified_split(&rows, &cols, &target, 0.7);
 
@@ -1643,8 +1649,8 @@ fn print_results_table(title: &str, results: &[TestResult]) {
     println!("  {title}");
     println!("{}", "=".repeat(110));
     println!(
-        "  {:<14} {:<28} {:<10} {:<10} {:<12} {:<12} {}",
-        "Library", "Model", "Metric", "Value", "Train(ms)", "Predict(ms)", "Status"
+        "  {:<14} {:<28} {:<10} {:<10} {:<12} {:<12} Status",
+        "Library", "Model", "Metric", "Value", "Train(ms)", "Predict(ms)"
     );
     println!("  {}", "-".repeat(104));
 
@@ -1744,10 +1750,7 @@ fn main() {
             .filter(|r| r.library == *lib && r.status == "OK")
             .count();
         let failed = total - ok;
-        println!(
-            "  {:<14} Tested: {:<4} Succeeded: {:<4} Not available: {}",
-            lib, total, ok, failed
-        );
+        println!("  {lib:<14} Tested: {total:<4} Succeeded: {ok:<4} Not available: {failed}");
     }
 
     println!("\n{}", "=".repeat(110));
