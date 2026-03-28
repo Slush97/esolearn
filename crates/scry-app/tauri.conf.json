@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri/master/crates/tauri-config-schema/schema.json",
+  "productName": "scry-app",
+  "version": "0.1.0",
+  "identifier": "dev.esoc.scry-app",
+  "build": {
+    "frontendDist": "./frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "scry-cv workbench",
+        "width": 1400,
+        "height": 900,
+        "resizable": true
+      }
+    ]
+  }
+}

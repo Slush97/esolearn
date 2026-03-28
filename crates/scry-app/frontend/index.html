@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>scry-cv workbench</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="sidebar">
+    <h2>Operations</h2>
+    <div id="op-list"></div>
+  </div>
+
+  <div id="canvas-area">
+    <div id="canvas-wrapper">
+      <canvas id="img-canvas"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+    </div>
+    <div id="image-info"></div>
+  </div>
+
+  <div id="params">
+    <h2>Parameters</h2>
+    <div id="param-controls"></div>
+    <button id="apply-btn" style="display:none">Apply</button>
+  </div>
+
+  <div id="breadcrumbs">
+    <span id="crumb-label">Pipeline:</span>
+    <div id="crumb-list"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
