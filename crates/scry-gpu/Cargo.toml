@@ -44,6 +44,10 @@ pollster = "0.4"
 name = "bench_wgpu_compare"
 required-features = ["bench-wgpu"]
 
+[[example]]
+name = "bench_cuda_compare"
+required-features = ["cuda", "vulkan"]
+
 [lints.rust]
 missing_docs = "warn"
 unreachable_pub = "allow"
