@@ -18,7 +18,7 @@ pub trait DeviceBackend: Sized {
     #[cfg(feature = "quantize")]
     fn i8_from_vec(data: Vec<i8>) -> Self::I8Storage;
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &Self::I8Storage) -> Vec<i8>;
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8>;
 
     fn zeros(shape: &Shape) -> Self::Storage;
     fn ones(shape: &Shape) -> Self::Storage;

@@ -166,7 +166,7 @@ impl DeviceBackend for ScryGpuBackend {
     #[cfg(feature = "quantize")]
     fn i8_from_vec(data: Vec<i8>) -> Vec<i8> { data }
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &Vec<i8>) -> Vec<i8> { storage.clone() }
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8> { storage.to_vec() }
 
     fn zeros(shape: &Shape) -> Vec<f32> { CpuBackend::zeros(shape) }
     fn ones(shape: &Shape) -> Vec<f32> { CpuBackend::ones(shape) }

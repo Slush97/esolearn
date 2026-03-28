@@ -24,7 +24,7 @@ impl DeviceBackend for CpuBackend {
     #[cfg(feature = "quantize")]
     fn i8_from_vec(data: Vec<i8>) -> Vec<i8> { data }
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &Vec<i8>) -> Vec<i8> { storage.clone() }
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8> { storage.to_vec() }
 
     fn zeros(shape: &Shape) -> Vec<f32> {
         vec![0.0; shape.numel()]
