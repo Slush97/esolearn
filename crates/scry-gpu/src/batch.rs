@@ -37,7 +37,7 @@ enum BatchInner {
 
 impl Batch {
     #[cfg(feature = "vulkan")]
-    pub(crate) fn new_vulkan(vk_batch: crate::backend::vulkan::VulkanBatch) -> Self {
+    pub(crate) const fn new_vulkan(vk_batch: crate::backend::vulkan::VulkanBatch) -> Self {
         Self {
             inner: BatchInner::Vulkan(vk_batch),
         }

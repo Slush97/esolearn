@@ -565,6 +565,7 @@ impl Backend for VulkanBackend {
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)] // ctx MutexGuard must be held through submit
     fn dispatch_pipeline(
         &self,
         kernel: &VulkanKernel,
@@ -685,13 +686,14 @@ fn cache_path(props: &vk::PhysicalDeviceProperties) -> Option<std::path::PathBuf
 /// Try to load an existing pipeline cache blob, or create an empty one.
 unsafe fn create_pipeline_cache(
     device: &ash::Device,
-    path: &Option<std::path::PathBuf>,
+    path: Option<&std::path::PathBuf>,
 ) -> vk::PipelineCache {
-    let data = path.as_ref().and_then(|p| std::fs::read(p).ok());
-    let info = match &data {
-        Some(blob) => vk::PipelineCacheCreateInfo::default().initial_data(blob),
-        None => vk::PipelineCacheCreateInfo::default(),
-    };
+    let data = path.and_then(|p| std::fs::read(p).ok());
+    let info = data
+        .as_ref()
+        .map_or_else(vk::PipelineCacheCreateInfo::default, |blob| {
+            vk::PipelineCacheCreateInfo::default().initial_data(blob)
+        });
     // If loading fails (e.g. stale blob), fall back to empty cache.
     device
         .create_pipeline_cache(&info, None)
@@ -702,6 +704,7 @@ unsafe fn create_pipeline_cache(
 // ── Initialization ──
 
 impl VulkanBackend {
+    #[allow(clippy::too_many_lines)]
     unsafe fn init() -> Result<Self> {
         let entry = ash::Entry::linked();
 
@@ -790,7 +793,7 @@ impl VulkanBackend {
 
         // Pipeline cache — load from disk or create empty.
         let cp = cache_path(&props);
-        let pipeline_cache = create_pipeline_cache(&device, &cp);
+        let pipeline_cache = create_pipeline_cache(&device, cp.as_ref());
 
         // Memory allocator
         let allocator = gpu_allocator::vulkan::Allocator::new(

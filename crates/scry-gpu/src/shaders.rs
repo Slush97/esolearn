@@ -169,7 +169,7 @@ pub mod distance {
     /// **Bindings:**
     ///   - `@binding(0)` `queries: array<f32>` (read)
     ///   - `@binding(1)` `train: array<f32>` (read)
-    ///   - `@binding(2)` `dists: array<f32>` (read_write)
+    ///   - `@binding(2)` `dists: array<f32>` (`read_write`)
     pub const PAIRWISE_EUCLIDEAN: &str = "\
 struct Dims { n_q: u32, n_t: u32, dim: u32 }
 var<push_constant> dims: Dims;
