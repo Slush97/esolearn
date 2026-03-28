@@ -45,6 +45,32 @@ impl OnnxModel {
     }
 }
 
+impl OnnxModel {
+    /// Run inference and return all output tensors (for multi-output models like SCRFD).
+    pub fn forward_multi(&self, input: &[f32], input_shape: &[usize]) -> Result<Vec<Vec<f32>>> {
+        let shape: Vec<i64> = input_shape.iter().map(|&d| d as i64).collect();
+        let tensor = TensorRef::from_array_view((shape.as_slice(), input))
+            .map_err(|e| VisionError::Inference(e.to_string()))?;
+
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| VisionError::Inference("session lock poisoned".into()))?;
+        let outputs = session
+            .run(ort::inputs![tensor])
+            .map_err(|e| VisionError::Inference(e.to_string()))?;
+
+        let mut result = Vec::with_capacity(outputs.len());
+        for (_name, output) in outputs.iter() {
+            let (_shape, data) = output
+                .try_extract_tensor::<f32>()
+                .map_err(|e| VisionError::Inference(e.to_string()))?;
+            result.push(data.to_vec());
+        }
+        Ok(result)
+    }
+}
+
 impl VisionModel for OnnxModel {
     fn forward(&self, input: &[f32], input_shape: &[usize]) -> Result<Vec<f32>> {
         let shape: Vec<i64> = input_shape.iter().map(|&d| d as i64).collect();
@@ -67,8 +93,6 @@ impl VisionModel for OnnxModel {
     }
 
     fn output_shape(&self, _input_shape: &[usize]) -> Vec<usize> {
-        // ONNX models typically have dynamic output shapes (batch dim = -1),
-        // so static shape extraction is unreliable. Return empty.
         vec![]
     }
 }
