@@ -30,6 +30,14 @@ struct SubmissionContext {
     desc_pool: vk::DescriptorPool,
 }
 
+/// Reusable Vulkan resources for batch dispatch. Recycled via a free-list
+/// on `SharedState` to avoid per-batch create/destroy overhead.
+struct BatchResources {
+    cmd: vk::CommandBuffer,
+    fence: vk::Fence,
+    desc_pool: vk::DescriptorPool,
+}
+
 struct SharedState {
     device: ash::Device,
     /// Serializes queue submissions (both one-shot and batch paths).
@@ -38,6 +46,9 @@ struct SharedState {
     cmd_pool: Mutex<vk::CommandPool>,
     /// Serializes one-shot dispatch: record → submit → fence-wait.
     submit_ctx: Mutex<SubmissionContext>,
+    /// Recycled batch resources (cmd + fence + `desc_pool`) to avoid
+    /// per-batch Vulkan object creation/destruction.
+    batch_pool: Mutex<Vec<BatchResources>>,
     /// Vulkan pipeline cache — speeds up `create_compute_pipelines` by
     /// reusing driver-compiled ISA across calls and across process restarts
     /// (persisted to disk on drop, loaded on init).
@@ -71,6 +82,15 @@ impl Drop for SharedState {
             let ctx = self.submit_ctx.get_mut().unwrap();
             self.device.destroy_descriptor_pool(ctx.desc_pool, None);
             self.device.destroy_fence(ctx.fence, None);
+
+            // Drain the batch free-list.
+            let batch_pool = self.batch_pool.get_mut().unwrap();
+            for res in batch_pool.drain(..) {
+                self.device.destroy_descriptor_pool(res.desc_pool, None);
+                self.device.destroy_fence(res.fence, None);
+                // cmd buffers freed implicitly when cmd_pool is destroyed
+            }
+
             // cmd is freed implicitly when cmd_pool is destroyed
             let cmd_pool = *self.cmd_pool.get_mut().unwrap();
             self.device.destroy_command_pool(cmd_pool, None);
@@ -849,6 +869,7 @@ impl VulkanBackend {
             queue: Mutex::new(queue),
             cmd_pool: Mutex::new(cmd_pool),
             submit_ctx: Mutex::new(SubmissionContext { fence, cmd, desc_pool }),
+            batch_pool: Mutex::new(Vec::new()),
             pipeline_cache,
             cache_path: cp,
             allocator: std::mem::ManuallyDrop::new(Mutex::new(allocator)),
@@ -1065,13 +1086,26 @@ impl Drop for VulkanBatch {
     fn drop(&mut self) {
         unsafe {
             let device = &self.state.device;
-            if let Ok(cmd_pool) = self.state.cmd_pool.lock() {
-                device.free_command_buffers(*cmd_pool, &[self.cmd]);
-            }
-            device.destroy_fence(self.fence, None);
-            device.destroy_descriptor_pool(self.desc_pool, None);
+
+            // Destroy overflow pools (these are extra, not worth pooling).
             for pool in &self.overflow_pools {
                 device.destroy_descriptor_pool(*pool, None);
+            }
+
+            // Recycle the primary resources back to the free-list.
+            if let Ok(mut pool) = self.state.batch_pool.lock() {
+                pool.push(BatchResources {
+                    cmd: self.cmd,
+                    fence: self.fence,
+                    desc_pool: self.desc_pool,
+                });
+            } else {
+                // Poisoned mutex — fall back to destruction.
+                if let Ok(cmd_pool) = self.state.cmd_pool.lock() {
+                    device.free_command_buffers(*cmd_pool, &[self.cmd]);
+                }
+                device.destroy_fence(self.fence, None);
+                device.destroy_descriptor_pool(self.desc_pool, None);
             }
         }
     }
@@ -1081,30 +1115,69 @@ impl VulkanBackend {
     pub fn begin_batch(&self) -> Result<VulkanBatch> {
         let device = &self.state.device;
 
-        // Lock cmd_pool for the allocation only.
-        let cmd = {
-            let cmd_pool = self
-                .state
-                .cmd_pool
-                .lock()
-                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cmd pool"))?;
+        // Try to reuse recycled batch resources before allocating fresh ones.
+        let recycled = self
+            .state
+            .batch_pool
+            .lock()
+            .map_err(|_| backend_err(BackendOp::MutexPoisoned, "batch pool"))?
+            .pop();
+
+        let (cmd, fence, desc_pool) = if let Some(res) = recycled {
+            // Reset recycled resources for reuse.
             unsafe {
                 device
-                    .allocate_command_buffers(
-                        &vk::CommandBufferAllocateInfo::default()
-                            .command_pool(*cmd_pool)
-                            .level(vk::CommandBufferLevel::PRIMARY)
-                            .command_buffer_count(1),
+                    .reset_command_buffer(res.cmd, vk::CommandBufferResetFlags::empty())
+                    .map_err(|e| backend_err(BackendOp::ResetCommandBuffer, e))?;
+                device
+                    .reset_descriptor_pool(
+                        res.desc_pool,
+                        vk::DescriptorPoolResetFlags::empty(),
                     )
-                    .map_err(|e| backend_err(BackendOp::AllocCommandBuffer, e))?[0]
+                    .map_err(|e| backend_err(BackendOp::ResetDescriptorPool, e))?;
             }
-        };
+            (res.cmd, res.fence, res.desc_pool)
+        } else {
+            // Allocate fresh resources.
+            let cmd = {
+                let cmd_pool = self
+                    .state
+                    .cmd_pool
+                    .lock()
+                    .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cmd pool"))?;
+                unsafe {
+                    device
+                        .allocate_command_buffers(
+                            &vk::CommandBufferAllocateInfo::default()
+                                .command_pool(*cmd_pool)
+                                .level(vk::CommandBufferLevel::PRIMARY)
+                                .command_buffer_count(1),
+                        )
+                        .map_err(|e| backend_err(BackendOp::AllocCommandBuffer, e))?[0]
+                }
+            };
 
-        // Own fence — independent of the shared one-shot path.
-        let fence = unsafe {
-            device
-                .create_fence(&vk::FenceCreateInfo::default(), None)
-                .map_err(|e| backend_err(BackendOp::CreateFence, e))?
+            let fence = unsafe {
+                device
+                    .create_fence(&vk::FenceCreateInfo::default(), None)
+                    .map_err(|e| backend_err(BackendOp::CreateFence, e))?
+            };
+
+            let desc_pool = unsafe {
+                device
+                    .create_descriptor_pool(
+                        &vk::DescriptorPoolCreateInfo::default()
+                            .max_sets(BATCH_POOL_SETS)
+                            .pool_sizes(&[vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::STORAGE_BUFFER,
+                                descriptor_count: BATCH_POOL_DESCRIPTORS,
+                            }]),
+                        None,
+                    )
+                    .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?
+            };
+
+            (cmd, fence, desc_pool)
         };
 
         unsafe {
@@ -1116,20 +1189,6 @@ impl VulkanBackend {
                 )
                 .map_err(|e| backend_err(BackendOp::BeginCommandBuffer, e))?;
         }
-
-        let desc_pool = unsafe {
-            device
-                .create_descriptor_pool(
-                    &vk::DescriptorPoolCreateInfo::default()
-                        .max_sets(BATCH_POOL_SETS)
-                        .pool_sizes(&[vk::DescriptorPoolSize {
-                            ty: vk::DescriptorType::STORAGE_BUFFER,
-                            descriptor_count: BATCH_POOL_DESCRIPTORS,
-                        }]),
-                    None,
-                )
-                .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?
-        };
 
         Ok(VulkanBatch {
             cmd,
