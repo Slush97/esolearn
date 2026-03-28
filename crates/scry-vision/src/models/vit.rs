@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Vision Transformer (ViT) backbone.
+//! Vision Transformer (`ViT`) backbone.
 //!
 //! Implements non-causal multi-head self-attention for vision.
 //! Input: `[3, H, W]` → Output: `[embed_dim]` (CLS token embedding).
@@ -11,7 +11,7 @@ use scry_llm::tensor::Tensor;
 
 use crate::nn::PatchEmbedding;
 
-/// ViT configuration.
+/// `ViT` configuration.
 #[derive(Clone, Debug)]
 pub struct VitConfig {
     pub image_size: usize,
@@ -63,12 +63,13 @@ impl VitConfig {
         self.embed_dim / self.num_heads
     }
 
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     pub fn d_ff(&self) -> usize {
         (self.embed_dim as f32 * self.mlp_ratio) as usize
     }
 }
 
-/// Non-causal multi-head self-attention for ViT.
+/// Non-causal multi-head self-attention for `ViT`.
 ///
 /// Unlike GPT's causal attention, this has no mask — every token attends
 /// to every other token (bidirectional).
@@ -179,7 +180,7 @@ impl<B: MathBackend> VitAttention<B> {
     }
 }
 
-/// Feed-forward MLP for ViT blocks.
+/// Feed-forward MLP for `ViT` blocks.
 pub struct VitMlp<B: MathBackend> {
     pub fc1_weight: Tensor<B>,
     pub fc1_bias: Tensor<B>,
@@ -239,7 +240,7 @@ impl<B: MathBackend> VitMlp<B> {
     }
 }
 
-/// A single ViT transformer block (pre-norm).
+/// A single `ViT` transformer block (pre-norm).
 ///
 /// `x → LN → Attn → + → LN → MLP → +`
 pub struct VitBlock<B: MathBackend> {
@@ -305,7 +306,7 @@ pub struct Vit<B: MathBackend> {
     /// Positional embeddings: `[1 + num_patches, embed_dim]`.
     pub pos_embed: Tensor<B>,
     /// Optional pre-LN applied after positional embedding, before transformer blocks.
-    /// Present in OpenCLIP models, absent in vanilla ViT/DeiT.
+    /// Present in `OpenCLIP` models, absent in vanilla ViT/DeiT.
     pub ln_pre_gamma: Option<Tensor<B>>,
     pub ln_pre_beta: Option<Tensor<B>>,
     pub blocks: Vec<VitBlock<B>>,
@@ -316,7 +317,7 @@ pub struct Vit<B: MathBackend> {
 }
 
 impl<B: MathBackend> Vit<B> {
-    /// Create a zero-initialized ViT.
+    /// Create a zero-initialized `ViT`.
     pub fn new(config: VitConfig) -> Self {
         let num_patches = config.num_patches();
         let d = config.embed_dim;

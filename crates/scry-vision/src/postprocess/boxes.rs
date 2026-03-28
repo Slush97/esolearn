@@ -2,12 +2,12 @@
 //! YOLO bounding box decoding.
 //!
 //! Converts raw model outputs to `(x1, y1, x2, y2)` bounding boxes with class
-//! scores. Supports both anchor-free (YOLOv8/v11) and anchor-based (YOLOv5)
+//! scores. Supports both anchor-free (YOLOv8/v11) and anchor-based (`YOLOv5`)
 //! output formats.
 
 use super::nms::{BBox, Detection};
 
-/// Decode anchor-free YOLO outputs (YOLOv8, YOLOv11, YOLO-NAS).
+/// Decode anchor-free YOLO outputs (`YOLOv8`, `YOLOv11`, YOLO-NAS).
 ///
 /// # Input format
 ///
@@ -43,8 +43,8 @@ pub fn decode_anchor_free(
     let mut detections = Vec::new();
 
     for j in 0..num_proposals {
-        let cx = output[0 * num_proposals + j];
-        let cy = output[1 * num_proposals + j];
+        let cx = output[j];
+        let cy = output[num_proposals + j];
         let w = output[2 * num_proposals + j];
         let h = output[3 * num_proposals + j];
 
@@ -99,7 +99,7 @@ pub struct GridCell {
     pub anchor: Anchor,
 }
 
-/// Decode anchor-based YOLO outputs (YOLOv5).
+/// Decode anchor-based YOLO outputs (`YOLOv5`).
 ///
 /// # Input format
 ///
@@ -109,7 +109,7 @@ pub struct GridCell {
 /// - Column 4: objectness score (raw, pre-sigmoid)
 /// - Columns 5..: class scores (raw, pre-sigmoid)
 ///
-/// Decoding applies the YOLOv5 formula:
+/// Decoding applies the `YOLOv5` formula:
 /// ```text
 /// bx = (2 * sigmoid(tx) - 0.5 + gx) * stride
 /// by = (2 * sigmoid(ty) - 0.5 + gy) * stride

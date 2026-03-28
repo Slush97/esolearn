@@ -103,10 +103,10 @@ fn resize_bilinear(src: &ImageBuffer, dst_w: u32, dst_h: u32) -> ImageBuffer {
 
             let dst_idx = (dy * dst_w as usize + dx) * ch;
             for c in 0..ch {
-                let p00 = src.data[idx00 + c] as f32;
-                let p10 = src.data[idx10 + c] as f32;
-                let p01 = src.data[idx01 + c] as f32;
-                let p11 = src.data[idx11 + c] as f32;
+                let p00 = f32::from(src.data[idx00 + c]);
+                let p10 = f32::from(src.data[idx10 + c]);
+                let p01 = f32::from(src.data[idx01 + c]);
+                let p11 = f32::from(src.data[idx11 + c]);
                 let val = p00 * (1.0 - fx) * (1.0 - fy)
                     + p10 * fx * (1.0 - fy)
                     + p01 * (1.0 - fx) * fy

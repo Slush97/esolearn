@@ -3,7 +3,7 @@
 //!
 //! Supports both single-output and multi-output (9-tensor) SCRFD formats.
 //! Multi-output format: 3 strides × (scores, bbox offsets, keypoints).
-//! Preprocessing: Letterbox → ToTensor (InsightFace normalization).
+//! Preprocessing: Letterbox → `ToTensor` (`InsightFace` normalization).
 //! Postprocessing: grid-based decode → NMS → rescale.
 
 use scry_llm::backend::cpu::CpuBackend;
@@ -12,13 +12,13 @@ use crate::error::{Result, VisionError};
 use crate::image::ImageBuffer;
 use crate::pipeline::Detect;
 use crate::postprocess::boxes::rescale_detections;
-use crate::postprocess::nms::{nms, BBox, Detection};
+use crate::postprocess::nms::{nms, Detection};
 use crate::transform::resize::Letterbox;
 use crate::transform::to_tensor::ToTensor;
 
 /// SCRFD face detector.
 ///
-/// Handles the standard InsightFace multi-output format (9 tensors) as well
+/// Handles the standard `InsightFace` multi-output format (9 tensors) as well
 /// as single-output anchor-free format.
 pub struct ScrfdDetector {
     inner: ScrfdInner,
@@ -27,7 +27,7 @@ pub struct ScrfdDetector {
 }
 
 enum ScrfdInner {
-    /// Single-output model via VisionModel trait (for mocks and simple models).
+    /// Single-output model via `VisionModel` trait (for mocks and simple models).
     Single(Box<dyn crate::model::VisionModel>),
     /// Multi-output ONNX model (9 tensors: scores + bboxes + keypoints per stride).
     #[cfg(feature = "onnx")]
@@ -35,7 +35,7 @@ enum ScrfdInner {
 }
 
 impl ScrfdDetector {
-    /// Create from a single-output VisionModel (for mocks and simple models).
+    /// Create from a single-output `VisionModel` (for mocks and simple models).
     pub fn new(model: Box<dyn crate::model::VisionModel>, input_size: u32) -> Self {
         Self {
             inner: ScrfdInner::Single(model),
@@ -64,7 +64,7 @@ impl ScrfdDetector {
         })
     }
 
-    /// Preprocess: letterbox + InsightFace normalization.
+    /// Preprocess: letterbox + `InsightFace` normalization.
     fn preprocess(
         &self,
         image: &[u8],
@@ -127,7 +127,7 @@ impl Detect for ScrfdDetector {
     }
 }
 
-/// Decode single-output format: [5, num_proposals] (cx, cy, w, h, conf).
+/// Decode single-output format: [5, `num_proposals`] (cx, cy, w, h, conf).
 fn decode_single_output(output: &[f32], conf_threshold: f32) -> Result<Vec<Detection>> {
     let rows = 5;
     if output.len() % rows != 0 {
@@ -145,7 +145,8 @@ fn decode_single_output(output: &[f32], conf_threshold: f32) -> Result<Vec<Detec
     ))
 }
 
-/// Decode multi-output (9-tensor) InsightFace SCRFD format.
+#[cfg(feature = "onnx")]
+/// Decode multi-output (9-tensor) `InsightFace` SCRFD format.
 ///
 /// Outputs layout:
 /// - `[0,1,2]`: scores  `[N, 1]` per stride 8/16/32 (pre-sigmoid)

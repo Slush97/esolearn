@@ -2,7 +2,7 @@
 //! YOLO object detector (v8/v11, anchor-free).
 //!
 //! Composes the full detection pipeline:
-//! Letterbox → ToTensor → forward → decode → NMS → rescale.
+//! Letterbox → `ToTensor` → forward → decode → NMS → rescale.
 
 use scry_llm::backend::cpu::CpuBackend;
 
@@ -15,13 +15,13 @@ use crate::postprocess::nms::{nms, Detection};
 use crate::transform::resize::Letterbox;
 use crate::transform::to_tensor::ToTensor;
 
-/// YOLO object detector for anchor-free models (YOLOv8, YOLOv11).
+/// YOLO object detector for anchor-free models (`YOLOv8`, `YOLOv11`).
 ///
 /// Bundles the complete inference pipeline from raw RGB bytes to detections
 /// in original image coordinates:
 ///
 /// 1. **Letterbox** — aspect-preserving resize + pad to `input_size × input_size`
-/// 2. **ToTensor** — HWC u8 → CHW f32, scaled to 0..1
+/// 2. **`ToTensor`** — HWC u8 → CHW f32, scaled to 0..1
 /// 3. **Forward** — model inference via [`VisionModel`]
 /// 4. **Decode** — anchor-free box decoding (`cx,cy,w,h` → `x1,y1,x2,y2`)
 /// 5. **NMS** — per-class non-maximum suppression
@@ -48,7 +48,7 @@ impl YoloDetector {
         }
     }
 
-    /// Set the IoU threshold for NMS (default: 0.45).
+    /// Set the `IoU` threshold for NMS (default: 0.45).
     #[must_use]
     pub fn with_iou_threshold(mut self, iou_threshold: f32) -> Self {
         self.iou_threshold = iou_threshold;

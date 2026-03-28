@@ -55,7 +55,7 @@ impl ToTensor {
         }
     }
 
-    /// ImageNet normalization preset.
+    /// `ImageNet` normalization preset.
     #[must_use]
     pub fn imagenet() -> Self {
         Self::normalized([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -66,7 +66,7 @@ impl ToTensor {
     pub fn clip() -> Self {
         Self::normalized(
             [0.481_454_66, 0.457_827_5, 0.408_210_73],
-            [0.268_629_54, 0.261_302_58, 0.275_777_11],
+            [0.268_629_54, 0.261_302_6, 0.275_777_1],
         )
     }
 
@@ -90,7 +90,7 @@ impl ToTensor {
                 let src_idx = (y * w + x) * c;
                 let dst_pixel = y * w + x;
                 for ch in 0..c {
-                    let mut val = image.data[src_idx + ch] as f32 * scale;
+                    let mut val = f32::from(image.data[src_idx + ch]) * scale;
                     if let (Some(mean), Some(std)) = (&self.mean, &self.std) {
                         if ch < 3 {
                             val = (val - mean[ch]) / std[ch];

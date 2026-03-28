@@ -7,12 +7,12 @@
 //! Native architectures (use scry-llm tensors):
 //! - [`resnet`] — ResNet-18/34/50/101 backbone
 //! - [`vit`] — Vision Transformer backbone
-//! - [`clip`] — CLIP visual encoder (ViT + projection)
+//! - [`clip`] — CLIP visual encoder (`ViT` + projection)
 //!
 //! ONNX-based pipelines:
 //! - [`yolo`] — YOLO object detector (v8/v11)
 //! - [`scrfd`] — SCRFD face detector
-//! - [`arcface`] — ArcFace face embedder
+//! - [`arcface`] — `ArcFace` face embedder
 
 pub mod arcface;
 pub mod clip;

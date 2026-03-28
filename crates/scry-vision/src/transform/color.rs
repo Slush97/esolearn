@@ -84,11 +84,10 @@ fn rgb_to_gray(image: &ImageBuffer) -> Result<ImageBuffer> {
     let num_pixels = image.num_pixels();
     let mut data = vec![0u8; num_pixels];
 
-    for i in 0..num_pixels {
-        let src = i * ch;
-        let r = image.data[src] as f32;
-        let g = image.data[src + 1] as f32;
-        let b = image.data[src + 2] as f32;
+    for (i, pixel) in image.data.chunks_exact(ch).enumerate().take(num_pixels) {
+        let r = f32::from(pixel[0]);
+        let g = f32::from(pixel[1]);
+        let b = f32::from(pixel[2]);
         data[i] = (0.299 * r + 0.587 * g + 0.114 * b).round().clamp(0.0, 255.0) as u8;
     }
 

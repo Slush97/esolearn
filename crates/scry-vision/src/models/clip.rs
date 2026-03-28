@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! CLIP visual encoder.
 //!
-//! Wraps a ViT backbone with a projection head to produce embeddings
+//! Wraps a `ViT` backbone with a projection head to produce embeddings
 //! in CLIP's joint vision-language space.
 //!
 //! Input: `[3, H, W]` → Output: `[proj_dim]` (L2-normalized embedding).
@@ -54,7 +54,7 @@ impl ClipConfig {
     }
 }
 
-/// CLIP visual encoder: ViT + projection → L2-normalized embedding.
+/// CLIP visual encoder: `ViT` + projection → L2-normalized embedding.
 pub struct ClipVisual<B: MathBackend> {
     pub vit: Vit<B>,
     /// Projection weight: `[embed_dim, proj_dim]`.

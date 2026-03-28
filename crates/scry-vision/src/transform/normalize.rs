@@ -35,7 +35,7 @@ impl Normalize {
         Self { mean, std }
     }
 
-    /// ImageNet normalization: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225].
+    /// `ImageNet` normalization: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225].
     #[must_use]
     pub fn imagenet() -> Self {
         Self::new([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -46,7 +46,7 @@ impl Normalize {
     pub fn clip() -> Self {
         Self::new(
             [0.481_454_66, 0.457_827_5, 0.408_210_73],
-            [0.268_629_54, 0.261_302_58, 0.275_777_11],
+            [0.268_629_54, 0.261_302_6, 0.275_777_1],
         )
     }
 }
@@ -57,11 +57,11 @@ impl ImageTransform for Normalize {
         let mut data = image.data.clone();
 
         for pixel in data.chunks_exact_mut(ch) {
-            for c in 0..ch.min(3) {
-                let val = pixel[c] as f32 / 255.0;
+            for (c, px) in pixel.iter_mut().enumerate().take(ch.min(3)) {
+                let val = f32::from(*px) / 255.0;
                 let normalized = (val - self.mean[c]) / self.std[c];
                 // Map back to 0..255 for u8 storage
-                pixel[c] = (normalized * 255.0).round().clamp(0.0, 255.0) as u8;
+                *px = (normalized * 255.0).round().clamp(0.0, 255.0) as u8;
             }
         }
 

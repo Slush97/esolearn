@@ -70,7 +70,7 @@ pub enum SoftNmsMethod {
 ///
 /// Detections below `score_threshold` are discarded first. Then for each class,
 /// boxes are sorted by confidence descending and overlapping boxes with
-/// IoU > `iou_threshold` are suppressed.
+/// `IoU` > `iou_threshold` are suppressed.
 pub fn nms(detections: &[Detection], iou_threshold: f32, score_threshold: f32) -> Vec<Detection> {
     // Group by class
     let mut by_class: std::collections::HashMap<u32, Vec<&Detection>> =
@@ -82,7 +82,7 @@ pub fn nms(detections: &[Detection], iou_threshold: f32, score_threshold: f32) -
     }
 
     let mut result = Vec::new();
-    for (_, dets) in &mut by_class {
+    for dets in by_class.values_mut() {
         dets.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
         let mut suppressed = vec![false; dets.len()];
 

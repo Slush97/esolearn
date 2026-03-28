@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Patch embedding for Vision Transformer (ViT).
+//! Patch embedding for Vision Transformer (`ViT`).
 //!
 //! Splits an image into non-overlapping patches, flattens each patch,
 //! and projects to the embedding dimension.
@@ -28,7 +28,7 @@ pub struct PatchEmbedding<B: MathBackend> {
 }
 
 impl<B: MathBackend> PatchEmbedding<B> {
-    /// Create a zero-initialized PatchEmbedding (for testing; real usage loads from checkpoint).
+    /// Create a zero-initialized `PatchEmbedding` (for testing; real usage loads from checkpoint).
     pub fn new(in_channels: usize, embed_dim: usize, patch_size: usize) -> Self {
         let patch_len = in_channels * patch_size * patch_size;
         Self {

@@ -2,7 +2,7 @@
 //! 2D affine transform for image warping.
 //!
 //! Primary use case: face alignment via landmark-based similarity transforms
-//! (ArcFace, CosFace). Given source landmarks and a canonical target template,
+//! (`ArcFace`, `CosFace`). Given source landmarks and a canonical target template,
 //! computes the 2×3 affine matrix and warps the image.
 
 use crate::error::Result;
@@ -118,8 +118,8 @@ impl AffineTransform {
 impl ImageTransform for AffineTransform {
     fn apply(&self, image: &ImageBuffer) -> Result<ImageBuffer> {
         let ch = image.channels as usize;
-        let src_w = image.width as i64;
-        let src_h = image.height as i64;
+        let src_w = i64::from(image.width);
+        let src_h = i64::from(image.height);
         let mut data = vec![self.fill; self.out_width as usize * self.out_height as usize * ch];
 
         let inv = self.inverse();
@@ -152,10 +152,10 @@ impl ImageTransform for AffineTransform {
                 let dst_idx = (dy as usize * self.out_width as usize + dx as usize) * ch;
 
                 for c in 0..ch {
-                    let p00 = image.data[idx00 + c] as f32;
-                    let p10 = image.data[idx10 + c] as f32;
-                    let p01 = image.data[idx01 + c] as f32;
-                    let p11 = image.data[idx11 + c] as f32;
+                    let p00 = f32::from(image.data[idx00 + c]);
+                    let p10 = f32::from(image.data[idx10 + c]);
+                    let p01 = f32::from(image.data[idx01 + c]);
+                    let p11 = f32::from(image.data[idx11 + c]);
                     let val = p00 * (1.0 - fx) * (1.0 - fy)
                         + p10 * fx * (1.0 - fy)
                         + p01 * (1.0 - fx) * fy

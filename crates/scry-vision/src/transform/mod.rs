@@ -9,11 +9,17 @@
 //! trait, these transforms have no `fit` step — all parameters are known at
 //! construction time (deterministic inference preprocessing).
 
+// Pixel coordinate casts (f32→u8, i64→usize) are safe after clamping/bounds checks.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 pub mod affine;
+#[allow(clippy::cast_sign_loss)]
 pub mod color;
 pub mod crop;
+#[allow(clippy::cast_sign_loss)]
 pub mod normalize;
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 pub mod pad;
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 pub mod resize;
 pub mod to_tensor;
 

@@ -219,8 +219,9 @@ impl<B: MathBackend> Conv2d<B> {
     /// Reduces arithmetic cost by ~2.25× through domain transforms:
     ///   1. Transform 3×3 filters to 4×4: U = G · g · Gᵀ  (cached as `B::Storage`)
     ///   2. Extract 4×4 input tiles and transform: V = Bᵀ · d · B
-    ///   3. Batched matmul per transform position: M_p = U_p · V_p
+    ///   3. Batched matmul per transform position: `M_p` = `U_p` · `V_p`
     ///   4. Inverse-transform to 2×2 output tiles: Y = Aᵀ · M · A
+    #[allow(clippy::too_many_lines)]
     fn forward_winograd(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let (c_in, h_in, w_in) = (dims[0], dims[1], dims[2]);
@@ -230,8 +231,8 @@ impl<B: MathBackend> Conv2d<B> {
         // stride=1, pad=1, kernel=3 → output = input size
         let h_out = h_in;
         let w_out = w_in;
-        let tiles_h = (h_out + 1) / 2;
-        let tiles_w = (w_out + 1) / 2;
+        let tiles_h = h_out.div_ceil(2);
+        let tiles_w = w_out.div_ceil(2);
         let num_tiles = tiles_h * tiles_w;
 
         // ── Filter transform (cached as B::Storage, computed once) ──
@@ -308,10 +309,10 @@ impl<B: MathBackend> Conv2d<B> {
                     for j in 0..4 {
                         let (t0, t1, t2, t3) =
                             (tmp[j], tmp[4 + j], tmp[8 + j], tmp[12 + j]);
-                        v_bufs[0 * 4 + j][v_base] = t0 - t2;
-                        v_bufs[1 * 4 + j][v_base] = t1 + t2;
-                        v_bufs[2 * 4 + j][v_base] = t2 - t1;
-                        v_bufs[3 * 4 + j][v_base] = t1 - t3;
+                        v_bufs[j][v_base] = t0 - t2;
+                        v_bufs[4 + j][v_base] = t1 + t2;
+                        v_bufs[8 + j][v_base] = t2 - t1;
+                        v_bufs[12 + j][v_base] = t1 - t3;
                     }
                 }
             }
@@ -340,8 +341,7 @@ impl<B: MathBackend> Conv2d<B> {
         let mut output = vec![0.0f32; c_out * h_out * w_out];
         let bias = self.bias.to_vec();
 
-        for oc in 0..c_out {
-            let b = bias[oc];
+        for (oc, &b) in bias.iter().enumerate().take(c_out) {
             let out_base = oc * h_out * w_out;
             for ty in 0..tiles_h {
                 for tx in 0..tiles_w {

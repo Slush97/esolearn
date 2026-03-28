@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! ResNet backbone for image classification and feature extraction.
+//! `ResNet` backbone for image classification and feature extraction.
 //!
-//! Supports ResNet-18/34 (BasicBlock) and ResNet-50/101/152 (Bottleneck).
+//! Supports ResNet-18/34 (`BasicBlock`) and ResNet-50/101/152 (Bottleneck).
 //! Input: `[3, H, W]` → Output: `[num_classes]` or feature vector.
 
 use scry_llm::backend::MathBackend;
@@ -40,7 +40,7 @@ pub struct BasicBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> BasicBlock<B> {
-    /// Expansion factor (output channels = in_channels * expansion).
+    /// Expansion factor (output channels = `in_channels` * expansion).
     pub const EXPANSION: usize = 1;
 
     pub fn new(in_channels: usize, out_channels: usize, stride: usize) -> Self {
@@ -173,12 +173,12 @@ impl<B: MathBackend> ResNetStage<B> {
     }
 }
 
-/// ResNet configuration.
+/// `ResNet` configuration.
 #[derive(Clone, Debug)]
 pub struct ResNetConfig {
     /// Number of blocks in each of the 4 stages.
     pub layers: [usize; 4],
-    /// Use Bottleneck blocks (ResNet-50+) vs BasicBlock (ResNet-18/34).
+    /// Use Bottleneck blocks (ResNet-50+) vs `BasicBlock` (ResNet-18/34).
     pub bottleneck: bool,
     /// Number of output classes (0 = feature extractor only, no FC layer).
     pub num_classes: usize,
@@ -202,9 +202,9 @@ impl ResNetConfig {
     }
 }
 
-/// ResNet backbone.
+/// `ResNet` backbone.
 ///
-/// Architecture: Conv7×7 → BN → ReLU → MaxPool → 4 stages → AvgPool → FC
+/// Architecture: Conv7×7 → BN → `ReLU` → `MaxPool` → 4 stages → `AvgPool` → FC
 pub struct ResNet<B: MathBackend> {
     pub conv1: Conv2d<B>,
     pub bn1: BatchNorm2d<B>,
@@ -218,7 +218,7 @@ pub struct ResNet<B: MathBackend> {
 }
 
 impl<B: MathBackend> ResNet<B> {
-    /// Create a zero-initialized ResNet (for testing; real usage loads from checkpoint).
+    /// Create a zero-initialized `ResNet` (for testing; real usage loads from checkpoint).
     pub fn new(config: ResNetConfig) -> Self {
         let (stages, feature_dim) = Self::make_stages(&config);
 
@@ -529,13 +529,13 @@ impl<B: MathBackend> ResNet<B> {
     }
 }
 
-/// ResNet image classifier implementing the [`Classify`] pipeline trait.
+/// `ResNet` image classifier implementing the [`Classify`] pipeline trait.
 ///
-/// Handles standard ImageNet preprocessing internally:
+/// Handles standard `ImageNet` preprocessing internally:
 ///
 /// 1. **Resize** — bilinear resize to `input_size × input_size` (default 224)
-/// 2. **ToTensor** — HWC u8 → CHW f32 with ImageNet normalization
-/// 3. **Forward** — ResNet inference → logits
+/// 2. **`ToTensor`** — HWC u8 → CHW f32 with `ImageNet` normalization
+/// 3. **Forward** — `ResNet` inference → logits
 /// 4. **Top-k softmax** — logits → sorted `(class_id, score)` pairs
 pub struct ResNetClassifier<B: MathBackend> {
     pub model: ResNet<B>,

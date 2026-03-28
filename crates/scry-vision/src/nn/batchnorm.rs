@@ -29,9 +29,9 @@ pub struct BatchNorm2d<B: MathBackend> {
 }
 
 impl<B: MathBackend> BatchNorm2d<B> {
-    /// Create a BatchNorm2d with identity initialization.
+    /// Create a `BatchNorm2d` with identity initialization.
     ///
-    /// weight=1, bias=0, running_mean=0, running_var=1 → identity transform.
+    /// weight=1, bias=0, `running_mean=0`, `running_var=1` → identity transform.
     pub fn new(num_features: usize, eps: f32) -> Self {
         Self {
             weight: Tensor::from_vec(vec![1.0; num_features], Shape::new(&[num_features])),

@@ -103,13 +103,13 @@ impl Pad {
     }
 
     fn map_coord(&self, dst: u32, pad_before: u32, src_len: u32) -> u32 {
-        let rel = dst as i64 - pad_before as i64;
+        let rel = i64::from(dst) - i64::from(pad_before);
         match self.mode {
             PadMode::Constant(_) => {
                 // Clamp — the outer loop handles overwriting with the constant
-                rel.clamp(0, src_len as i64 - 1) as u32
+                rel.clamp(0, i64::from(src_len) - 1) as u32
             }
-            PadMode::Edge => rel.clamp(0, src_len as i64 - 1) as u32,
+            PadMode::Edge => rel.clamp(0, i64::from(src_len) - 1) as u32,
             PadMode::Reflect => reflect(rel, src_len),
         }
     }
@@ -120,7 +120,7 @@ fn reflect(coord: i64, len: u32) -> u32 {
     if len <= 1 {
         return 0;
     }
-    let len = len as i64;
+    let len = i64::from(len);
     // Bring into range [0, 2*(len-1))
     let period = 2 * (len - 1);
     let mut c = coord % period;

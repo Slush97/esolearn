@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! ArcFace face embedding (ONNX-based).
+//! `ArcFace` face embedding (ONNX-based).
 //!
-//! Wraps an ArcFace ONNX model and implements the [`Embed`] pipeline trait.
-//! Preprocessing: AffineTransform (face alignment) → ToTensor (normalize).
+//! Wraps an `ArcFace` ONNX model and implements the [`Embed`] pipeline trait.
+//! Preprocessing: `AffineTransform` (face alignment) → `ToTensor` (normalize).
 
 use scry_llm::backend::cpu::CpuBackend;
 
@@ -15,7 +15,7 @@ use crate::transform::resize::{InterpolationMode, Resize};
 use crate::transform::to_tensor::ToTensor;
 use crate::transform::ImageTransform;
 
-/// ArcFace face embedder.
+/// `ArcFace` face embedder.
 ///
 /// Expects a pre-cropped/aligned face image. For full pipeline usage,
 /// first detect faces with SCRFD, align with [`AffineTransform`], then embed.
