@@ -197,7 +197,7 @@ fn kernel_reuse_different_sizes() {
         let result: Vec<f32> = output.download().expect("download failed");
         for (i, (&got, &src)) in result.iter().zip(data.iter()).enumerate() {
             assert!(
-                (got - src * 2.0).abs() < f32::EPSILON,
+                src.mul_add(-2.0, got).abs() < f32::EPSILON,
                 "mismatch at index {i}: got {got}, expected {}",
                 src * 2.0
             );
@@ -346,11 +346,11 @@ fn workgroup_boundary_alignment() {
 
         // Check first and last element.
         assert!(
-            (result[0] - data[0] * 2.0).abs() < f32::EPSILON,
+            data[0].mul_add(-2.0, result[0]).abs() < f32::EPSILON,
             "first element wrong for n={n}"
         );
         assert!(
-            (result[n - 1] - data[n - 1] * 2.0).abs() < f32::EPSILON,
+            data[n - 1].mul_add(-2.0, result[n - 1]).abs() < f32::EPSILON,
             "last element wrong for n={n}"
         );
     }
@@ -782,4 +782,437 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let result2: Vec<f32> = output2.download().expect("download failed");
     assert_eq!(result2, vec![0.5, 1.0, 1.5, 2.0]);
+}
+
+// ── Built-in shader tests: matmul ──
+
+/// CPU reference matmul for verification.
+#[allow(clippy::many_single_char_names)]
+fn cpu_matmul(a: &[f32], b: &[f32], m: usize, n: usize, k: usize) -> Vec<f32> {
+    let mut c = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0;
+            for p in 0..k {
+                sum += a[i * k + p] * b[p * n + j];
+            }
+            c[i * n + j] = sum;
+        }
+    }
+    c
+}
+
+fn assert_matmul_close(got: &[f32], expected: &[f32], label: &str, tol: f32) {
+    assert_eq!(got.len(), expected.len(), "{label}: length mismatch");
+    let cols = (expected.len() as f64).sqrt() as usize;
+    let cols = cols.max(1);
+    for (i, (&g, &e)) in got.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (g - e).abs() <= tol,
+            "{label}: mismatch at [{}, {}]: got {g}, expected {e}",
+            i / cols,
+            i % cols,
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_tiled_16x16_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::TILED_16X16)
+        .expect("compile tiled matmul");
+
+    // 32x32 matmul (2 tiles per dimension)
+    let m: u32 = 32;
+    let n: u32 = 32;
+    let k: u32 = 32;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i % 7) as f32 - 3.0).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i % 11) as f32 - 5.0).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(16), m.div_ceil(16), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "tiled_16x16 32x32", 0.1);
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_tiled_16x16_non_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::TILED_16X16)
+        .expect("compile tiled matmul");
+
+    // Non-square: 20x48 * 48x36 = 20x36 (non-multiple-of-16 dims)
+    let m: u32 = 20;
+    let n: u32 = 36;
+    let k: u32 = 48;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.01).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i as f32).mul_add(-0.005, 1.0)).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(16), m.div_ceil(16), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "tiled_16x16 20x36", 0.5);
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_coarse_64x64_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::COARSE_64X64)
+        .expect("compile coarse matmul");
+
+    // 128x128 matmul (2 tiles per dimension at 64x64)
+    let m: u32 = 128;
+    let n: u32 = 128;
+    let k: u32 = 128;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i % 13) as f32 - 6.0).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i % 9) as f32 - 4.0).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(64), m.div_ceil(64), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "coarse_64x64 128x128", 1.0);
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_coarse_64x64_non_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::COARSE_64X64)
+        .expect("compile coarse matmul");
+
+    // Non-square: 50x100 * 100x70 = 50x70
+    let m: u32 = 50;
+    let n: u32 = 70;
+    let k: u32 = 100;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i as f32).mul_add(0.01, -25.0)).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i as f32).mul_add(0.01, -35.0)).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(64), m.div_ceil(64), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "coarse_64x64 50x70", 1.0);
+}
+
+#[test]
+fn matmul_identity() {
+    // A * I = A — sanity check with identity matrix
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::TILED_16X16)
+        .expect("compile tiled matmul");
+
+    let m: u32 = 16;
+    let n: u32 = 16;
+    let k: u32 = 16;
+
+    let a: Vec<f32> = (0..m * k).map(|i| i as f32 + 1.0).collect();
+    let mut identity = vec![0.0f32; (k * n) as usize];
+    for i in 0..n {
+        identity[(i * n + i) as usize] = 1.0;
+    }
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&identity).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(16), m.div_ceil(16), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &a, "identity", 0.001);
+}
+
+// ── Built-in shader tests: pairwise distance ──
+
+#[test]
+fn pairwise_euclidean_basic() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::distance::PAIRWISE_EUCLIDEAN)
+        .expect("compile pairwise euclidean");
+
+    // 2 query points, 3 train points, 3 dimensions
+    let n_q: u32 = 2;
+    let n_t: u32 = 3;
+    let dim: u32 = 3;
+
+    let queries = [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0]; // q0=(1,0,0), q1=(0,1,0)
+    let train = [1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]; // t0=(1,0,0), t1=(0,1,0), t2=(0,0,1)
+
+    let buf_q = gpu.upload(&queries).unwrap();
+    let buf_t = gpu.upload(&train).unwrap();
+    let buf_d = gpu.alloc::<f32>((n_q * n_t) as usize).unwrap();
+
+    let dims = [n_q, n_t, dim];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+
+    gpu.run_configured(
+        &kernel,
+        &[&buf_q, &buf_t, &buf_d],
+        [(n_q * n_t).div_ceil(256), 1, 1],
+        Some(push),
+    )
+    .unwrap();
+
+    let result = buf_d.download().unwrap();
+    // D[0][0] = dist(q0, t0) = 0.0 (same point)
+    // D[0][1] = dist(q0, t1) = 1+1+0 = 2.0
+    // D[0][2] = dist(q0, t2) = 1+0+1 = 2.0
+    // D[1][0] = dist(q1, t0) = 1+1+0 = 2.0
+    // D[1][1] = dist(q1, t1) = 0.0
+    // D[1][2] = dist(q1, t2) = 0+1+1 = 2.0
+    let expected = [0.0, 2.0, 2.0, 2.0, 0.0, 2.0];
+
+    for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (g - e).abs() < 0.001,
+            "dist[{i}] = {g}, expected {e}",
+        );
+    }
+}
+
+#[test]
+fn pairwise_euclidean_scaled() {
+    // Verify with known distances: points along a line
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::distance::PAIRWISE_EUCLIDEAN)
+        .expect("compile pairwise euclidean");
+
+    let n_q: u32 = 3;
+    let n_t: u32 = 3;
+    let dim: u32 = 1;
+
+    // Points at 0, 3, 7 on a 1D line
+    let queries = [0.0f32, 3.0, 7.0];
+    let train = [0.0f32, 3.0, 7.0];
+
+    let buf_q = gpu.upload(&queries).unwrap();
+    let buf_t = gpu.upload(&train).unwrap();
+    let buf_d = gpu.alloc::<f32>((n_q * n_t) as usize).unwrap();
+
+    let dims = [n_q, n_t, dim];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+
+    gpu.run_configured(
+        &kernel,
+        &[&buf_q, &buf_t, &buf_d],
+        [(n_q * n_t).div_ceil(256), 1, 1],
+        Some(push),
+    )
+    .unwrap();
+
+    let result = buf_d.download().unwrap();
+    // Squared distances: |qi - tj|^2
+    let expected = [
+        0.0, 9.0, 49.0, // q=0 vs t=0,3,7
+        9.0, 0.0, 16.0, // q=3 vs t=0,3,7
+        49.0, 16.0, 0.0, // q=7 vs t=0,3,7
+    ];
+
+    for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (g - e).abs() < 0.001,
+            "dist[{i}] = {g}, expected {e}",
+        );
+    }
+}
+
+// ── Error path tests ──
+
+#[test]
+fn compile_invalid_wgsl_returns_shader_error() {
+    let gpu = gpu();
+
+    let bad_shader = "this is not valid WGSL at all!!!";
+    let err = gpu.compile(bad_shader).unwrap_err();
+
+    match err {
+        scry_gpu::GpuError::ShaderCompilation(_) => {} // expected
+        other => panic!("expected ShaderCompilation, got: {other}"),
+    }
+}
+
+#[test]
+fn compile_missing_entry_point() {
+    let gpu = gpu();
+
+    // Valid WGSL but entry point is "process", not "main"
+    let shader = "\
+@group(0) @binding(0) var<storage, read_write> buf: array<f32>;
+
+@compute @workgroup_size(64)
+fn process(@builtin(global_invocation_id) gid: vec3<u32>) {
+    buf[gid.x] = 0.0;
+}";
+
+    let err = gpu.compile(shader).unwrap_err(); // default looks for "main"
+
+    match err {
+        scry_gpu::GpuError::MissingEntryPoint { ref name } => {
+            assert_eq!(name, "main");
+        }
+        other => panic!("expected MissingEntryPoint, got: {other}"),
+    }
+
+    // But compiling with the correct name succeeds
+    let kernel = gpu.compile_named(shader, "process").unwrap();
+    assert_eq!(kernel.entry_point(), "process");
+}
+
+#[test]
+fn compile_named_entry_point() {
+    let gpu = gpu();
+
+    let shader = "\
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> output: array<f32>;
+
+@compute @workgroup_size(64)
+fn double_it(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i < arrayLength(&input) {
+        output[i] = input[i] * 2.0;
+    }
+}";
+
+    let kernel = gpu.compile_named(shader, "double_it").unwrap();
+    assert_eq!(kernel.entry_point(), "double_it");
+    assert_eq!(kernel.binding_count(), 2);
+
+    let input = gpu.upload(&[5.0f32, 10.0]).unwrap();
+    let output = gpu.alloc::<f32>(2).unwrap();
+    gpu.run(&kernel, &[&input, &output], 2).unwrap();
+
+    assert_eq!(output.download().unwrap(), vec![10.0, 20.0]);
+}
+
+// ── Large batch (descriptor pool overflow) ──
+
+#[test]
+fn batch_large_descriptor_pool_overflow() {
+    // >64 dispatches in a single batch to exercise pool overflow logic
+    // (VulkanBatch uses pools of 64 sets each)
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let n = 100; // well over the 64-set pool limit
+    let input = gpu.upload(&[1.0f32]).unwrap();
+    let mut bufs: Vec<scry_gpu::Buffer<f32>> = Vec::with_capacity(n);
+    for _ in 0..n {
+        bufs.push(gpu.alloc::<f32>(1).unwrap());
+    }
+
+    let mut batch = gpu.batch().unwrap();
+    // First dispatch: input → bufs[0]
+    batch.run(&kernel, &[&input, &bufs[0]], 1).unwrap();
+    batch.barrier();
+
+    // Chain: bufs[i-1] → bufs[i], doubling each time
+    for i in 1..n {
+        batch.run(&kernel, &[&bufs[i - 1], &bufs[i]], 1).unwrap();
+        batch.barrier();
+    }
+    batch.submit().unwrap();
+
+    // After 100 doublings: 1.0 * 2^100 — but f32 can only hold 2^128.
+    // Check a few milestones.
+    let r0 = bufs[0].download().unwrap();
+    assert!((r0[0] - 2.0).abs() < 0.001, "buf[0] = {}, expected 2.0", r0[0]);
+
+    let r9 = bufs[9].download().unwrap();
+    assert!(
+        (r9[0] - 1024.0).abs() < 0.01,
+        "buf[9] = {}, expected 1024.0 (2^10)",
+        r9[0],
+    );
+
+    // buf[20] = 2^21 = 2097152
+    let r20 = bufs[20].download().unwrap();
+    assert!(
+        (r20[0] - 2_097_152.0).abs() < 1.0,
+        "buf[20] = {}, expected 2097152.0 (2^21)",
+        r20[0],
+    );
+}
+
+// ── Buffer edge cases ──
+
+#[test]
+fn buffer_len_and_byte_size() {
+    let gpu = gpu();
+    let buf = gpu.upload(&[1.0f32, 2.0, 3.0]).unwrap();
+    assert_eq!(buf.len(), 3);
+    assert_eq!(buf.byte_size(), 12); // 3 * 4 bytes
+    assert!(!buf.is_empty());
+
+    let buf_u32 = gpu.upload(&[0u32; 100]).unwrap();
+    assert_eq!(buf_u32.len(), 100);
+    assert_eq!(buf_u32.byte_size(), 400);
+}
+
+#[test]
+fn alloc_download_is_zeroed_or_deterministic() {
+    // GPU alloc doesn't guarantee zeroed memory, but download should succeed
+    let gpu = gpu();
+    let buf = gpu.alloc::<f32>(64).unwrap();
+    let data = buf.download().unwrap();
+    assert_eq!(data.len(), 64);
+    // We don't assert values — uninitialized GPU memory is undefined.
+    // This test verifies the alloc→download path doesn't crash.
 }
