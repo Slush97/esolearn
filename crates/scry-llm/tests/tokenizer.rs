@@ -28,7 +28,11 @@ fn known_tokenizations() {
 
     // "Hello world" -> [15496, 995]
     let ids = tok.encode("Hello world");
-    assert_eq!(ids, vec![15496, 995], "Hello world tokenization mismatch: {ids:?}");
+    assert_eq!(
+        ids,
+        vec![15496, 995],
+        "Hello world tokenization mismatch: {ids:?}"
+    );
 
     // "Hello" alone
     let ids = tok.encode("Hello");
@@ -78,7 +82,10 @@ fn empty_input() {
     assert!(ids.is_empty(), "empty input should produce no tokens");
 
     let decoded = tok.decode(&[]);
-    assert!(decoded.is_empty(), "decoding empty tokens should produce empty string");
+    assert!(
+        decoded.is_empty(),
+        "decoding empty tokens should produce empty string"
+    );
 }
 
 #[test]
@@ -136,10 +143,22 @@ fn make_test_hf_json() -> String {
     let mut vocab = serde_json::Map::new();
     // Byte-level unicode chars for ASCII letters (these are identity-mapped in bytes_to_unicode)
     let byte_chars = [
-        ("H", 0), ("e", 1), ("l", 2), ("o", 3), ("Ġ", 4), // Ġ = byte 0x20 (space) mapped to U+0120
-        ("w", 5), ("r", 6), ("d", 7), ("!", 8), (".", 9),
-        ("He", 10), ("ll", 11), ("Hello", 12),
-        ("wo", 13), ("rld", 14), ("world", 15),
+        ("H", 0),
+        ("e", 1),
+        ("l", 2),
+        ("o", 3),
+        ("Ġ", 4), // Ġ = byte 0x20 (space) mapped to U+0120
+        ("w", 5),
+        ("r", 6),
+        ("d", 7),
+        ("!", 8),
+        (".", 9),
+        ("He", 10),
+        ("ll", 11),
+        ("Hello", 12),
+        ("wo", 13),
+        ("rld", 14),
+        ("world", 15),
         ("Ġworld", 16),
     ];
     for (tok, id) in &byte_chars {
@@ -147,9 +166,7 @@ fn make_test_hf_json() -> String {
     }
 
     let merges = vec![
-        "H e", "l l", "He ll", "Hell o",
-        "w o", "r l", "rl d", "wo rld",
-        "Ġ world",
+        "H e", "l l", "He ll", "Hell o", "w o", "r l", "rl d", "wo rld", "Ġ world",
     ];
 
     let added_tokens = vec![

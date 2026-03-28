@@ -20,7 +20,10 @@ fn llama_pretrained_logits() {
     let config_path = model_dir.join("config.json");
     let tokenizer_path = model_dir.join("tokenizer.json");
     if !config_path.exists() || !tokenizer_path.exists() {
-        println!("  Skipping: model files not found at {}", model_dir.display());
+        println!(
+            "  Skipping: model files not found at {}",
+            model_dir.display()
+        );
         println!("  Download with:");
         println!("    huggingface-cli download meta-llama/Llama-3.2-1B --local-dir tests/fixtures/llama-3.2-1b/");
         return;
@@ -36,7 +39,10 @@ fn llama_pretrained_logits() {
     shard_paths.sort();
 
     if shard_paths.is_empty() {
-        println!("  Skipping: no .safetensors files in {}", model_dir.display());
+        println!(
+            "  Skipping: no .safetensors files in {}",
+            model_dir.display()
+        );
         return;
     }
 
@@ -47,12 +53,18 @@ fn llama_pretrained_logits() {
     let config_json: serde_json::Value =
         serde_json::from_str(&config_str).expect("failed to parse config.json");
     let config = LlamaConfig::from_hf_config(&config_json).expect("failed to parse LlamaConfig");
-    println!("  Config: {}h {}l {}kv vocab={}", config.hidden_size, config.n_layers, config.n_kv_heads, config.vocab_size);
+    println!(
+        "  Config: {}h {}l {}kv vocab={}",
+        config.hidden_size, config.n_layers, config.n_kv_heads, config.vocab_size
+    );
 
     // Load model
-    let shard_refs: Vec<&std::path::Path> = shard_paths.iter().map(std::path::PathBuf::as_path).collect();
-    let model =
-        LlamaModel::<Cpu>::from_safetensors(config.clone(), &shard_refs).expect("failed to load model");
+    let shard_refs: Vec<&std::path::Path> = shard_paths
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect();
+    let model = LlamaModel::<Cpu>::from_safetensors(config.clone(), &shard_refs)
+        .expect("failed to load model");
 
     // Parameter count
     let n_params = model.n_params();
@@ -63,8 +75,7 @@ fn llama_pretrained_logits() {
     );
 
     // Load tokenizer
-    let tokenizer =
-        HfTokenizer::from_file(&tokenizer_path).expect("failed to load tokenizer.json");
+    let tokenizer = HfTokenizer::from_file(&tokenizer_path).expect("failed to load tokenizer.json");
     println!("  Vocab size: {}", tokenizer.vocab_size());
 
     // Encode a test prompt (Llama 3 requires BOS token)
@@ -160,12 +171,14 @@ fn llama_pretrained_generate() {
         serde_json::from_str(&config_str).expect("failed to parse config.json");
     let config = LlamaConfig::from_hf_config(&config_json).expect("failed to parse LlamaConfig");
 
-    let shard_refs: Vec<&std::path::Path> = shard_paths.iter().map(std::path::PathBuf::as_path).collect();
+    let shard_refs: Vec<&std::path::Path> = shard_paths
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect();
     let model =
         LlamaModel::<Cpu>::from_safetensors(config, &shard_refs).expect("failed to load model");
 
-    let tokenizer =
-        HfTokenizer::from_file(&tokenizer_path).expect("failed to load tokenizer.json");
+    let tokenizer = HfTokenizer::from_file(&tokenizer_path).expect("failed to load tokenizer.json");
 
     let prompt = "The capital of France is";
     let bos = tokenizer.bos_id().expect("tokenizer should have BOS token");
@@ -183,7 +196,11 @@ fn llama_pretrained_generate() {
     let mut rng = fastrand::Rng::with_seed(42);
     let generated = generate(&model, &prompt_tokens, &config, &mut rng);
 
-    let all_tokens: Vec<usize> = prompt_tokens.iter().copied().chain(generated.iter().copied()).collect();
+    let all_tokens: Vec<usize> = prompt_tokens
+        .iter()
+        .copied()
+        .chain(generated.iter().copied())
+        .collect();
     let output = tokenizer.decode(&all_tokens);
     println!("  Generated: {output:?}");
 

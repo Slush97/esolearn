@@ -359,5 +359,4 @@ fn cv_benchmark_with_charts() {
         linfa_rf_mean > 0.90,
         "linfa RF CV accuracy {linfa_rf_mean:.2} < 0.90"
     );
-
 }

@@ -125,12 +125,8 @@ fn main() {
         let feat_names: Vec<String> = (0..features.len()).map(|i| format!("f{i}")).collect();
 
         // Scale features first (sklearn used StandardScaler)
-        let mut ds = scry_learn::dataset::Dataset::new(
-            features,
-            target.clone(),
-            feat_names,
-            "target",
-        );
+        let mut ds =
+            scry_learn::dataset::Dataset::new(features, target.clone(), feat_names, "target");
         let mut scaler = scry_learn::preprocess::StandardScaler::new();
         scry_learn::preprocess::Transformer::fit(&mut scaler, &ds).unwrap();
         scry_learn::preprocess::Transformer::transform(&scaler, &mut ds).unwrap();

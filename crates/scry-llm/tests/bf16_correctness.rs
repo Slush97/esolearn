@@ -105,16 +105,30 @@ fn bf16_layernorm_forward() {
     let beta = rand_vec(d, 22);
     let shape = Shape::new(&[rows, d]);
 
-    let (cpu_out, cpu_mean, cpu_rstd) =
-        CpuBackend::layernorm(&input, &gamma, &beta, &shape, 1e-5);
+    let (cpu_out, cpu_mean, cpu_rstd) = CpuBackend::layernorm(&input, &gamma, &beta, &shape, 1e-5);
     let gi = CudaBackend::from_vec(input, &shape);
     let gg = CudaBackend::from_vec(gamma, &Shape::new(&[d]));
     let gb = CudaBackend::from_vec(beta, &Shape::new(&[d]));
     let (go, gm, gr) = CudaBackend::layernorm(&gi, &gg, &gb, &shape, 1e-5);
 
-    assert_close(&cpu_out, &CudaBackend::to_vec(&go), 2e-2, "bf16_layernorm_fwd_out");
-    assert_close(&cpu_mean, &CudaBackend::to_vec(&gm), 1e-2, "bf16_layernorm_fwd_mean");
-    assert_close(&cpu_rstd, &CudaBackend::to_vec(&gr), 2e-2, "bf16_layernorm_fwd_rstd");
+    assert_close(
+        &cpu_out,
+        &CudaBackend::to_vec(&go),
+        2e-2,
+        "bf16_layernorm_fwd_out",
+    );
+    assert_close(
+        &cpu_mean,
+        &CudaBackend::to_vec(&gm),
+        1e-2,
+        "bf16_layernorm_fwd_mean",
+    );
+    assert_close(
+        &cpu_rstd,
+        &CudaBackend::to_vec(&gr),
+        2e-2,
+        "bf16_layernorm_fwd_rstd",
+    );
 }
 
 #[test]

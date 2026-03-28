@@ -272,10 +272,15 @@ impl MLPRegressor {
         sizes.extend_from_slice(&self.hidden_layers);
         sizes.push(1);
 
-        let mut net = Network::new_with_dropout(&sizes, self.activation, self.seed, self.dropout_rate);
+        let mut net =
+            Network::new_with_dropout(&sizes, self.activation, self.seed, self.dropout_rate);
         let param_sizes = net.param_group_sizes();
-        let mut optimizer =
-            OptimizerState::new_with_schedule(self.optimizer_kind, self.learning_rate, &param_sizes, self.lr_schedule);
+        let mut optimizer = OptimizerState::new_with_schedule(
+            self.optimizer_kind,
+            self.learning_rate,
+            &param_sizes,
+            self.lr_schedule,
+        );
 
         let batch_size = self.batch_size.min(train_n);
         let mut rng = FastRng::new(self.seed.wrapping_add(1));
@@ -537,7 +542,8 @@ impl PartialFit for MLPRegressor {
             sizes.extend_from_slice(&self.hidden_layers);
             sizes.push(1);
 
-            let net = Network::new_with_dropout(&sizes, self.activation, self.seed, self.dropout_rate);
+            let net =
+                Network::new_with_dropout(&sizes, self.activation, self.seed, self.dropout_rate);
             self.network_weights = net.save_weights();
             self.network_dims = net.layer_dims();
             self.n_features = n_features;

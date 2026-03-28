@@ -63,9 +63,7 @@ fn load_target_csv(name: &str) -> Vec<f64> {
 }
 
 /// Load a dataset from fixture CSVs. Returns (col_major_features, row_major_features, target, feature_names).
-fn load_dataset(
-    base: &str,
-) -> (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<String>) {
+fn load_dataset(base: &str) -> (Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<f64>, Vec<String>) {
     let (cols, feat_names) = load_features_csv(&format!("{base}_features.csv"));
     let target = load_target_csv(&format!("{base}_target.csv"));
     let n_samples = target.len();
@@ -172,10 +170,7 @@ fn rmse(y_true: &[f64], y_pred: &[f64]) -> f64 {
 // Standardization (needed for linear models across all libraries)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn standardize(
-    train_row: &[Vec<f64>],
-    test_row: &[Vec<f64>],
-) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+fn standardize(train_row: &[Vec<f64>], test_row: &[Vec<f64>]) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
     let n_features = train_row[0].len();
     let n_train = train_row.len();
 
@@ -185,7 +180,10 @@ fn standardize(
     for j in 0..n_features {
         let sum: f64 = train_row.iter().map(|r| r[j]).sum();
         means[j] = sum / n_train as f64;
-        let var: f64 = train_row.iter().map(|r| (r[j] - means[j]).powi(2)).sum::<f64>()
+        let var: f64 = train_row
+            .iter()
+            .map(|r| (r[j] - means[j]).powi(2))
+            .sum::<f64>()
             / n_train as f64;
         stds[j] = var.sqrt().max(1e-12);
     }
@@ -297,16 +295,26 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = dt.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Decision Tree", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Decision Tree",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
         let y: Vec<i32> = train_target.iter().map(|&t| t as i32).collect();
-        let params = smartcore::tree::decision_tree_classifier::DecisionTreeClassifierParameters::default()
-            .with_max_depth(10);
+        let params =
+            smartcore::tree::decision_tree_classifier::DecisionTreeClassifierParameters::default()
+                .with_max_depth(10);
         let t0 = Instant::now();
-        let model = smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(&x, &y, params).unwrap();
+        let model =
+            smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(&x, &y, params)
+                .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -314,14 +322,22 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Decision Tree", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Decision Tree",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa: decision tree
     {
         use linfa::prelude::*;
         let flat: Vec<f64> = train_row.iter().flat_map(|r| r.iter().copied()).collect();
         let x = ndarray::Array2::from_shape_vec((train_row.len(), n_features), flat).unwrap();
-        let y = ndarray::Array1::from_vec(train_target.iter().map(|&t| t as usize).collect::<Vec<_>>());
+        let y =
+            ndarray::Array1::from_vec(train_target.iter().map(|&t| t as usize).collect::<Vec<_>>());
         let ds = linfa::Dataset::new(x, y);
         let t0 = Instant::now();
         let model = linfa_trees::DecisionTree::params()
@@ -330,14 +346,22 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
             .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let flat_test: Vec<f64> = test_row.iter().flat_map(|r| r.iter().copied()).collect();
-        let x_test = ndarray::Array2::from_shape_vec((test_row.len(), n_features), flat_test).unwrap();
+        let x_test =
+            ndarray::Array2::from_shape_vec((test_row.len(), n_features), flat_test).unwrap();
         let ds_test = linfa::DatasetBase::from(x_test);
         let t0 = Instant::now();
         let preds = model.predict(&ds_test);
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("linfa", "Decision Tree", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "linfa",
+            "Decision Tree",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
 
     // --- Random Forest ---
@@ -360,7 +384,14 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = rf.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
@@ -370,7 +401,10 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
             .with_n_trees(100)
             .with_max_depth(10);
         let t0 = Instant::now();
-        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(&x, &y, params).unwrap();
+        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
+            &x, &y, params,
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -378,10 +412,21 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa: no random forest in linfa-trees, so skip
-    results.push(TestResult::err("linfa", "Random Forest", "Not implemented in linfa"));
+    results.push(TestResult::err(
+        "linfa",
+        "Random Forest",
+        "Not implemented in linfa",
+    ));
 
     // --- Logistic Regression (scaled data) ---
     // scry-learn
@@ -402,7 +447,14 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = lr.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Logistic Regression", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Logistic Regression",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
@@ -410,23 +462,38 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let y: Vec<i32> = train_target.iter().map(|&t| t as i32).collect();
         let t0 = Instant::now();
         let model = smartcore::linear::logistic_regression::LogisticRegression::fit(
-            &x, &y, Default::default(),
-        ).unwrap();
+            &x,
+            &y,
+            Default::default(),
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<i32> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Logistic Regression", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Logistic Regression",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa-logistic
     {
         use linfa::prelude::*;
-        let flat: Vec<f64> = train_scaled.iter().flat_map(|r| r.iter().copied()).collect();
+        let flat: Vec<f64> = train_scaled
+            .iter()
+            .flat_map(|r| r.iter().copied())
+            .collect();
         let x = ndarray::Array2::from_shape_vec((train_scaled.len(), n_features), flat).unwrap();
-        let y = ndarray::Array1::from_vec(train_target.iter().map(|&t| t > 0.5).collect::<Vec<_>>());
+        let y =
+            ndarray::Array1::from_vec(train_target.iter().map(|&t| t > 0.5).collect::<Vec<_>>());
         let ds = linfa::Dataset::new(x, y);
         let t0 = Instant::now();
         let result = linfa_logistic::LogisticRegression::default()
@@ -435,17 +502,32 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         match result {
             Ok(model) => {
                 let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let flat_test: Vec<f64> = test_scaled.iter().flat_map(|r| r.iter().copied()).collect();
-                let x_test = ndarray::Array2::from_shape_vec((test_scaled.len(), n_features), flat_test).unwrap();
+                let flat_test: Vec<f64> =
+                    test_scaled.iter().flat_map(|r| r.iter().copied()).collect();
+                let x_test =
+                    ndarray::Array2::from_shape_vec((test_scaled.len(), n_features), flat_test)
+                        .unwrap();
                 let ds_test = linfa::DatasetBase::from(x_test);
                 let t0 = Instant::now();
                 let preds = model.predict(&ds_test);
                 let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let preds_f64: Vec<f64> = preds.iter().map(|&p| if p { 1.0 } else { 0.0 }).collect();
+                let preds_f64: Vec<f64> =
+                    preds.iter().map(|&p| if p { 1.0 } else { 0.0 }).collect();
                 let acc = accuracy_score(&test_target, &preds_f64);
-                results.push(TestResult::ok("linfa", "Logistic Regression", "Accuracy", acc, train_ms, pred_ms));
+                results.push(TestResult::ok(
+                    "linfa",
+                    "Logistic Regression",
+                    "Accuracy",
+                    acc,
+                    train_ms,
+                    pred_ms,
+                ));
             }
-            Err(e) => results.push(TestResult::err("linfa", "Logistic Regression", &format!("{e}"))),
+            Err(e) => results.push(TestResult::err(
+                "linfa",
+                "Logistic Regression",
+                &format!("{e}"),
+            )),
         }
     }
 
@@ -466,25 +548,46 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = knn.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "KNN (k=5)", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "KNN (k=5)",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_scaled).unwrap();
         let y: Vec<i32> = train_target.iter().map(|&t| t as i32).collect();
-        let params = smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(5);
+        let params =
+            smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(5);
         let t0 = Instant::now();
-        let model = smartcore::neighbors::knn_classifier::KNNClassifier::fit(&x, &y, params).unwrap();
+        let model =
+            smartcore::neighbors::knn_classifier::KNNClassifier::fit(&x, &y, params).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<i32> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "KNN (k=5)", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "KNN (k=5)",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "KNN (k=5)", "linfa-nn has no classifier wrapper"));
+    results.push(TestResult::err(
+        "linfa",
+        "KNN (k=5)",
+        "linfa-nn has no classifier wrapper",
+    ));
 
     // --- Gaussian Naive Bayes ---
     // scry-learn
@@ -503,14 +606,22 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = gnb.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Gaussian NB", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Gaussian NB",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
         let y: Vec<u32> = train_target.iter().map(|&t| t as u32).collect();
         let t0 = Instant::now();
-        let model = smartcore::naive_bayes::gaussian::GaussianNB::fit(&x, &y, Default::default()).unwrap();
+        let model =
+            smartcore::naive_bayes::gaussian::GaussianNB::fit(&x, &y, Default::default()).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -518,9 +629,20 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Gaussian NB", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Gaussian NB",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "Gaussian NB", "Not implemented in linfa"));
+    results.push(TestResult::err(
+        "linfa",
+        "Gaussian NB",
+        "Not implemented in linfa",
+    ));
 
     // --- LinearSVC (scaled) ---
     // scry-learn
@@ -539,7 +661,14 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = svc.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "LinearSVC", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "LinearSVC",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore (kernel SVM with linear kernel — different algorithm)
     {
@@ -552,14 +681,26 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let t0 = Instant::now();
         let model = smartcore::svm::svc::SVC::fit(&x, &y, &params).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds_f64: Vec<f64> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "SVM (kernel=linear)", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "SVM (kernel=linear)",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "SVM", "linfa-svm requires additional setup"));
+    results.push(TestResult::err(
+        "linfa",
+        "SVM",
+        "linfa-svm requires additional setup",
+    ));
 
     // --- Gradient Boosting (scry-learn only — unique capability) ---
     {
@@ -580,10 +721,25 @@ fn test_classification_breast_cancer() -> Vec<TestResult> {
         let preds = gb.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Gradient Boosting", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Gradient Boosting",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("smartcore", "Gradient Boosting", "Not implemented"));
-    results.push(TestResult::err("linfa", "Gradient Boosting", "Not implemented"));
+    results.push(TestResult::err(
+        "smartcore",
+        "Gradient Boosting",
+        "Not implemented",
+    ));
+    results.push(TestResult::err(
+        "linfa",
+        "Gradient Boosting",
+        "Not implemented",
+    ));
 
     results
 }
@@ -608,10 +764,15 @@ fn test_classification_wine() -> Vec<TestResult> {
     // --- Random Forest ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut rf = scry_learn::tree::RandomForestClassifier::new()
-            .n_estimators(100).max_depth(10).seed(42);
+            .n_estimators(100)
+            .max_depth(10)
+            .seed(42);
         let t0 = Instant::now();
         rf.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -619,7 +780,14 @@ fn test_classification_wine() -> Vec<TestResult> {
         let preds = rf.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
@@ -627,7 +795,10 @@ fn test_classification_wine() -> Vec<TestResult> {
         let params = smartcore::ensemble::random_forest_classifier::RandomForestClassifierParameters::default()
             .with_n_trees(100).with_max_depth(10);
         let t0 = Instant::now();
-        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(&x, &y, params).unwrap();
+        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
+            &x, &y, params,
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -635,17 +806,28 @@ fn test_classification_wine() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     results.push(TestResult::err("linfa", "Random Forest", "Not implemented"));
 
     // --- Logistic Regression (multiclass) ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_scaled_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_scaled_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut lr = scry_learn::linear::LogisticRegression::new()
-            .max_iter(500).learning_rate(0.01);
+            .max_iter(500)
+            .learning_rate(0.01);
         let t0 = Instant::now();
         lr.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -653,26 +835,48 @@ fn test_classification_wine() -> Vec<TestResult> {
         let preds = lr.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Logistic Regression", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Logistic Regression",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_scaled).unwrap();
         let y: Vec<i32> = train_target.iter().map(|&t| t as i32).collect();
         let t0 = Instant::now();
         let model = smartcore::linear::logistic_regression::LogisticRegression::fit(
-            &x, &y, Default::default(),
-        ).unwrap();
+            &x,
+            &y,
+            Default::default(),
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<i32> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Logistic Regression", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Logistic Regression",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa-logistic only supports binary classification
-    results.push(TestResult::err("linfa", "Logistic Regression", "Binary only (no multiclass)"));
+    results.push(TestResult::err(
+        "linfa",
+        "Logistic Regression",
+        "Binary only (no multiclass)",
+    ));
 
     results
 }
@@ -703,7 +907,10 @@ fn test_regression_california() -> Vec<TestResult> {
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_scaled_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_scaled_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut ridge = scry_learn::linear::Ridge::new(1.0);
         let t0 = Instant::now();
@@ -713,7 +920,14 @@ fn test_regression_california() -> Vec<TestResult> {
         let preds = ridge.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Ridge Regression", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Ridge Regression",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
@@ -721,24 +935,43 @@ fn test_regression_california() -> Vec<TestResult> {
         let params = smartcore::linear::ridge_regression::RidgeRegressionParameters::default()
             .with_alpha(1.0);
         let t0 = Instant::now();
-        let model = smartcore::linear::ridge_regression::RidgeRegression::fit(&x, &train_target, params).unwrap();
+        let model =
+            smartcore::linear::ridge_regression::RidgeRegression::fit(&x, &train_target, params)
+                .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<f64> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("smartcore", "Ridge Regression", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Ridge Regression",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "Ridge Regression", "Not implemented in linfa"));
+    results.push(TestResult::err(
+        "linfa",
+        "Ridge Regression",
+        "Not implemented in linfa",
+    ));
 
     // --- Lasso Regression ---
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_scaled_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_scaled_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
-        let mut lasso = scry_learn::linear::LassoRegression::new().alpha(0.1).max_iter(1000);
+        let mut lasso = scry_learn::linear::LassoRegression::new()
+            .alpha(0.1)
+            .max_iter(1000);
         let t0 = Instant::now();
         lasso.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -746,12 +979,22 @@ fn test_regression_california() -> Vec<TestResult> {
         let preds = lasso.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Lasso Regression", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Lasso Regression",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa-elasticnet
     {
         use linfa::prelude::*;
-        let flat: Vec<f64> = train_scaled.iter().flat_map(|r| r.iter().copied()).collect();
+        let flat: Vec<f64> = train_scaled
+            .iter()
+            .flat_map(|r| r.iter().copied())
+            .collect();
         let x = ndarray::Array2::from_shape_vec((train_scaled.len(), n_features), flat).unwrap();
         let y = ndarray::Array1::from_vec(train_target.clone());
         let ds = linfa::Dataset::new(x, y);
@@ -763,16 +1006,30 @@ fn test_regression_california() -> Vec<TestResult> {
         match result {
             Ok(model) => {
                 let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let flat_test: Vec<f64> = test_scaled.iter().flat_map(|r| r.iter().copied()).collect();
-                let x_test = ndarray::Array2::from_shape_vec((test_scaled.len(), n_features), flat_test).unwrap();
+                let flat_test: Vec<f64> =
+                    test_scaled.iter().flat_map(|r| r.iter().copied()).collect();
+                let x_test =
+                    ndarray::Array2::from_shape_vec((test_scaled.len(), n_features), flat_test)
+                        .unwrap();
                 let ds_test = linfa::DatasetBase::from(x_test);
                 let t0 = Instant::now();
                 let preds = model.predict(&ds_test);
                 let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 let r2 = r2_score(&test_target, preds.as_slice().unwrap());
-                results.push(TestResult::ok("linfa", "Lasso (ElasticNet)", "R2", r2, train_ms, pred_ms));
+                results.push(TestResult::ok(
+                    "linfa",
+                    "Lasso (ElasticNet)",
+                    "R2",
+                    r2,
+                    train_ms,
+                    pred_ms,
+                ));
             }
-            Err(e) => results.push(TestResult::err("linfa", "Lasso (ElasticNet)", &format!("{e}"))),
+            Err(e) => results.push(TestResult::err(
+                "linfa",
+                "Lasso (ElasticNet)",
+                &format!("{e}"),
+            )),
         }
     }
     // smartcore lasso
@@ -784,14 +1041,27 @@ fn test_regression_california() -> Vec<TestResult> {
         match result {
             Ok(model) => {
                 let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-                let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+                let x_test =
+                    smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled)
+                        .unwrap();
                 let t0 = Instant::now();
                 let preds: Vec<f64> = model.predict(&x_test).unwrap();
                 let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 let r2 = r2_score(&test_target, &preds);
-                results.push(TestResult::ok("smartcore", "Lasso Regression", "R2", r2, train_ms, pred_ms));
+                results.push(TestResult::ok(
+                    "smartcore",
+                    "Lasso Regression",
+                    "R2",
+                    r2,
+                    train_ms,
+                    pred_ms,
+                ));
             }
-            Err(e) => results.push(TestResult::err("smartcore", "Lasso Regression", &format!("{e}"))),
+            Err(e) => results.push(TestResult::err(
+                "smartcore",
+                "Lasso Regression",
+                &format!("{e}"),
+            )),
         }
     }
 
@@ -799,7 +1069,10 @@ fn test_regression_california() -> Vec<TestResult> {
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut dt = scry_learn::tree::DecisionTreeRegressor::new().max_depth(10);
         let t0 = Instant::now();
@@ -809,30 +1082,57 @@ fn test_regression_california() -> Vec<TestResult> {
         let preds = dt.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Decision Tree Regressor", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Decision Tree Regressor",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
-        let params = smartcore::tree::decision_tree_regressor::DecisionTreeRegressorParameters::default()
-            .with_max_depth(10);
+        let params =
+            smartcore::tree::decision_tree_regressor::DecisionTreeRegressorParameters::default()
+                .with_max_depth(10);
         let t0 = Instant::now();
-        let model = smartcore::tree::decision_tree_regressor::DecisionTreeRegressor::fit(&x, &train_target, params).unwrap();
+        let model = smartcore::tree::decision_tree_regressor::DecisionTreeRegressor::fit(
+            &x,
+            &train_target,
+            params,
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
         let preds: Vec<f64> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("smartcore", "Decision Tree Regressor", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Decision Tree Regressor",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "Decision Tree Regressor", "linfa-trees: classification only"));
+    results.push(TestResult::err(
+        "linfa",
+        "Decision Tree Regressor",
+        "linfa-trees: classification only",
+    ));
 
     // --- KNN Regressor ---
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_scaled_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_scaled_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut knn = scry_learn::neighbors::KnnRegressor::new().k(5);
         let t0 = Instant::now();
@@ -842,21 +1142,39 @@ fn test_regression_california() -> Vec<TestResult> {
         let preds = knn.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "KNN Regressor (k=5)", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "KNN Regressor (k=5)",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
     // smartcore
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_scaled).unwrap();
-        let params = smartcore::neighbors::knn_regressor::KNNRegressorParameters::default().with_k(5);
+        let params =
+            smartcore::neighbors::knn_regressor::KNNRegressorParameters::default().with_k(5);
         let t0 = Instant::now();
-        let model = smartcore::neighbors::knn_regressor::KNNRegressor::fit(&x, &train_target, params).unwrap();
+        let model =
+            smartcore::neighbors::knn_regressor::KNNRegressor::fit(&x, &train_target, params)
+                .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<f64> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let r2 = r2_score(&test_target, &preds);
-        results.push(TestResult::ok("smartcore", "KNN Regressor (k=5)", "R2", r2, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "KNN Regressor (k=5)",
+            "R2",
+            r2,
+            train_ms,
+            pred_ms,
+        ));
     }
     results.push(TestResult::err("linfa", "KNN Regressor", "Not implemented"));
 
@@ -878,7 +1196,10 @@ fn test_clustering_iris() -> Vec<TestResult> {
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            cols.clone(), target.clone(), feat_names.clone(), "target",
+            cols.clone(),
+            target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut km = scry_learn::cluster::KMeans::new(3).seed(42).max_iter(100);
         let t0 = Instant::now();
@@ -889,7 +1210,14 @@ fn test_clustering_iris() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         // Compute silhouette score
         let sil = scry_learn::cluster::silhouette_score(&rows, &labels);
-        results.push(TestResult::ok("scry-learn", "K-Means (k=3)", "Silhouette", sil, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "K-Means (k=3)",
+            "Silhouette",
+            sil,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa-clustering
     {
@@ -912,7 +1240,14 @@ fn test_clustering_iris() -> Vec<TestResult> {
                 let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 let labels: Vec<usize> = preds.iter().map(|&l| l).collect();
                 let sil = scry_learn::cluster::silhouette_score(&rows, &labels);
-                results.push(TestResult::ok("linfa", "K-Means (k=3)", "Silhouette", sil, train_ms, pred_ms));
+                results.push(TestResult::ok(
+                    "linfa",
+                    "K-Means (k=3)",
+                    "Silhouette",
+                    sil,
+                    train_ms,
+                    pred_ms,
+                ));
             }
             Err(e) => results.push(TestResult::err("linfa", "K-Means", &format!("{e}"))),
         }
@@ -924,7 +1259,10 @@ fn test_clustering_iris() -> Vec<TestResult> {
     // scry-learn
     {
         let data = scry_learn::dataset::Dataset::new(
-            cols.clone(), target.clone(), feat_names.clone(), "target",
+            cols.clone(),
+            target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut dbscan = scry_learn::cluster::Dbscan::new(0.5, 5);
         let t0 = Instant::now();
@@ -933,20 +1271,35 @@ fn test_clustering_iris() -> Vec<TestResult> {
         let t0 = Instant::now();
         let labels = dbscan.predict(&rows).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let n_clusters = labels.iter().filter(|&&l| l >= 0).map(|l| *l as i64).collect::<std::collections::HashSet<_>>().len();
+        let n_clusters = labels
+            .iter()
+            .filter(|&&l| l >= 0)
+            .map(|l| *l as i64)
+            .collect::<std::collections::HashSet<_>>()
+            .len();
         // Filter noise for silhouette
-        let non_noise: Vec<(usize, usize)> = labels.iter().enumerate()
+        let non_noise: Vec<(usize, usize)> = labels
+            .iter()
+            .enumerate()
             .filter(|(_, &l)| l >= 0)
             .map(|(i, &l)| (i, l as usize))
             .collect();
         let sil = if non_noise.len() > 1 {
-            let filtered_rows: Vec<Vec<f64>> = non_noise.iter().map(|(i, _)| rows[*i].clone()).collect();
+            let filtered_rows: Vec<Vec<f64>> =
+                non_noise.iter().map(|(i, _)| rows[*i].clone()).collect();
             let filtered_labels: Vec<usize> = non_noise.iter().map(|(_, l)| *l).collect();
             scry_learn::cluster::silhouette_score(&filtered_rows, &filtered_labels)
         } else {
             f64::NAN
         };
-        results.push(TestResult::ok("scry-learn", &format!("DBSCAN ({n_clusters} clusters)"), "Silhouette", sil, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            &format!("DBSCAN ({n_clusters} clusters)"),
+            "Silhouette",
+            sil,
+            train_ms,
+            pred_ms,
+        ));
     }
     // linfa DBSCAN
     {
@@ -962,18 +1315,32 @@ fn test_clustering_iris() -> Vec<TestResult> {
             Ok(clustered) => {
                 let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
                 let labels: Vec<Option<usize>> = clustered.targets().iter().copied().collect();
-                let n_clusters = labels.iter().filter_map(|l| *l).collect::<std::collections::HashSet<_>>().len();
-                let non_noise: Vec<(usize, usize)> = labels.iter().enumerate()
+                let n_clusters = labels
+                    .iter()
+                    .filter_map(|l| *l)
+                    .collect::<std::collections::HashSet<_>>()
+                    .len();
+                let non_noise: Vec<(usize, usize)> = labels
+                    .iter()
+                    .enumerate()
                     .filter_map(|(i, l)| l.map(|c| (i, c)))
                     .collect();
                 let sil = if non_noise.len() > 1 {
-                    let filtered_rows: Vec<Vec<f64>> = non_noise.iter().map(|(i, _)| rows[*i].clone()).collect();
+                    let filtered_rows: Vec<Vec<f64>> =
+                        non_noise.iter().map(|(i, _)| rows[*i].clone()).collect();
                     let filtered_labels: Vec<usize> = non_noise.iter().map(|(_, l)| *l).collect();
                     scry_learn::cluster::silhouette_score(&filtered_rows, &filtered_labels)
                 } else {
                     f64::NAN
                 };
-                results.push(TestResult::ok("linfa", &format!("DBSCAN ({n_clusters} clusters)"), "Silhouette", sil, train_ms, 0.0));
+                results.push(TestResult::ok(
+                    "linfa",
+                    &format!("DBSCAN ({n_clusters} clusters)"),
+                    "Silhouette",
+                    sil,
+                    train_ms,
+                    0.0,
+                ));
             }
             Err(e) => results.push(TestResult::err("linfa", "DBSCAN", &format!("{e}"))),
         }
@@ -1003,10 +1370,15 @@ fn test_classification_digits() -> Vec<TestResult> {
     // --- Random Forest ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut rf = scry_learn::tree::RandomForestClassifier::new()
-            .n_estimators(100).max_depth(20).seed(42);
+            .n_estimators(100)
+            .max_depth(20)
+            .seed(42);
         let t0 = Instant::now();
         rf.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -1014,7 +1386,14 @@ fn test_classification_digits() -> Vec<TestResult> {
         let preds = rf.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
@@ -1022,7 +1401,10 @@ fn test_classification_digits() -> Vec<TestResult> {
         let params = smartcore::ensemble::random_forest_classifier::RandomForestClassifierParameters::default()
             .with_n_trees(100).with_max_depth(20);
         let t0 = Instant::now();
-        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(&x, &y, params).unwrap();
+        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
+            &x, &y, params,
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -1030,14 +1412,24 @@ fn test_classification_digits() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     results.push(TestResult::err("linfa", "Random Forest", "Not implemented"));
 
     // --- KNN ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_scaled_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_scaled_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut knn = scry_learn::neighbors::KnnClassifier::new().k(3);
         let t0 = Instant::now();
@@ -1047,32 +1439,58 @@ fn test_classification_digits() -> Vec<TestResult> {
         let preds = knn.predict(&test_scaled).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "KNN (k=3)", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "KNN (k=3)",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_scaled).unwrap();
         let y: Vec<i32> = train_target.iter().map(|&t| t as i32).collect();
-        let params = smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(3);
+        let params =
+            smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(3);
         let t0 = Instant::now();
-        let model = smartcore::neighbors::knn_classifier::KNNClassifier::fit(&x, &y, params).unwrap();
+        let model =
+            smartcore::neighbors::knn_classifier::KNNClassifier::fit(&x, &y, params).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
+        let x_test =
+            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_scaled).unwrap();
         let t0 = Instant::now();
         let preds: Vec<i32> = model.predict(&x_test).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "KNN (k=3)", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "KNN (k=3)",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("linfa", "KNN (k=3)", "No classifier wrapper"));
+    results.push(TestResult::err(
+        "linfa",
+        "KNN (k=3)",
+        "No classifier wrapper",
+    ));
 
     // --- HistGradientBoosting (scry-learn exclusive) ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut hgb = scry_learn::tree::HistGradientBoostingClassifier::new()
-            .n_estimators(100).max_depth(6).learning_rate(0.1);
+            .n_estimators(100)
+            .max_depth(6)
+            .learning_rate(0.1);
         let t0 = Instant::now();
         hgb.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -1080,10 +1498,25 @@ fn test_classification_digits() -> Vec<TestResult> {
         let preds = hgb.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "HistGradientBoosting", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "HistGradientBoosting",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("smartcore", "HistGradientBoosting", "Not implemented"));
-    results.push(TestResult::err("linfa", "HistGradientBoosting", "Not implemented"));
+    results.push(TestResult::err(
+        "smartcore",
+        "HistGradientBoosting",
+        "Not implemented",
+    ));
+    results.push(TestResult::err(
+        "linfa",
+        "HistGradientBoosting",
+        "Not implemented",
+    ));
 
     results
 }
@@ -1106,10 +1539,15 @@ fn test_classification_spambase() -> Vec<TestResult> {
     // --- Random Forest ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut rf = scry_learn::tree::RandomForestClassifier::new()
-            .n_estimators(100).max_depth(15).seed(42);
+            .n_estimators(100)
+            .max_depth(15)
+            .seed(42);
         let t0 = Instant::now();
         rf.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -1117,7 +1555,14 @@ fn test_classification_spambase() -> Vec<TestResult> {
         let preds = rf.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     {
         let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&train_row).unwrap();
@@ -1125,7 +1570,10 @@ fn test_classification_spambase() -> Vec<TestResult> {
         let params = smartcore::ensemble::random_forest_classifier::RandomForestClassifierParameters::default()
             .with_n_trees(100).with_max_depth(15);
         let t0 = Instant::now();
-        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(&x, &y, params).unwrap();
+        let model = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
+            &x, &y, params,
+        )
+        .unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let x_test = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&test_row).unwrap();
         let t0 = Instant::now();
@@ -1133,17 +1581,29 @@ fn test_classification_spambase() -> Vec<TestResult> {
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let preds_f64: Vec<f64> = preds.iter().map(|&p| p as f64).collect();
         let acc = accuracy_score(&test_target, &preds_f64);
-        results.push(TestResult::ok("smartcore", "Random Forest", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "smartcore",
+            "Random Forest",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
     results.push(TestResult::err("linfa", "Random Forest", "Not implemented"));
 
     // --- Gradient Boosting (scry-learn exclusive) ---
     {
         let data = scry_learn::dataset::Dataset::new(
-            train_col.clone(), train_target.clone(), feat_names.clone(), "target",
+            train_col.clone(),
+            train_target.clone(),
+            feat_names.clone(),
+            "target",
         );
         let mut gb = scry_learn::tree::GradientBoostingClassifier::new()
-            .n_estimators(100).max_depth(5).learning_rate(0.1);
+            .n_estimators(100)
+            .max_depth(5)
+            .learning_rate(0.1);
         let t0 = Instant::now();
         gb.fit(&data).unwrap();
         let train_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -1151,10 +1611,25 @@ fn test_classification_spambase() -> Vec<TestResult> {
         let preds = gb.predict(&test_row).unwrap();
         let pred_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let acc = accuracy_score(&test_target, &preds);
-        results.push(TestResult::ok("scry-learn", "Gradient Boosting", "Accuracy", acc, train_ms, pred_ms));
+        results.push(TestResult::ok(
+            "scry-learn",
+            "Gradient Boosting",
+            "Accuracy",
+            acc,
+            train_ms,
+            pred_ms,
+        ));
     }
-    results.push(TestResult::err("smartcore", "Gradient Boosting", "Not implemented"));
-    results.push(TestResult::err("linfa", "Gradient Boosting", "Not implemented"));
+    results.push(TestResult::err(
+        "smartcore",
+        "Gradient Boosting",
+        "Not implemented",
+    ));
+    results.push(TestResult::err(
+        "linfa",
+        "Gradient Boosting",
+        "Not implemented",
+    ));
 
     results
 }
@@ -1177,7 +1652,13 @@ fn print_results_table(title: &str, results: &[TestResult]) {
         if r.status == "OK" {
             println!(
                 "  {:<14} {:<28} {:<10} {:<10.4} {:<12.2} {:<12.2} {}",
-                r.library, r.model, r.metric_name, r.metric_value, r.train_ms, r.predict_ms, r.status
+                r.library,
+                r.model,
+                r.metric_name,
+                r.metric_value,
+                r.train_ms,
+                r.predict_ms,
+                r.status
             );
         } else {
             println!(
@@ -1242,7 +1723,8 @@ fn main() {
     );
 
     // ── Summary ──
-    let all_results: Vec<&TestResult> = bc_results.iter()
+    let all_results: Vec<&TestResult> = bc_results
+        .iter()
         .chain(wine_results.iter())
         .chain(cal_results.iter())
         .chain(cluster_results.iter())
@@ -1257,9 +1739,15 @@ fn main() {
     let libs = ["scry-learn", "smartcore", "linfa"];
     for lib in &libs {
         let total = all_results.iter().filter(|r| r.library == *lib).count();
-        let ok = all_results.iter().filter(|r| r.library == *lib && r.status == "OK").count();
+        let ok = all_results
+            .iter()
+            .filter(|r| r.library == *lib && r.status == "OK")
+            .count();
         let failed = total - ok;
-        println!("  {:<14} Tested: {:<4} Succeeded: {:<4} Not available: {}", lib, total, ok, failed);
+        println!(
+            "  {:<14} Tested: {:<4} Succeeded: {:<4} Not available: {}",
+            lib, total, ok, failed
+        );
     }
 
     println!("\n{}", "=".repeat(110));

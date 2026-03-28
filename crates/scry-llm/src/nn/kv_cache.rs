@@ -99,12 +99,20 @@ impl<B: MathBackend> LlamaLayerKvCache<B> {
     pub fn append(&mut self, k_row: &B::Storage, v_row: &B::Storage) {
         let kv_dim = self.n_kv_heads * self.head_dim;
         B::scatter_rows(
-            &mut self.k_cache, k_row,
-            self.max_seq_len, kv_dim, self.seq_len, 1,
+            &mut self.k_cache,
+            k_row,
+            self.max_seq_len,
+            kv_dim,
+            self.seq_len,
+            1,
         );
         B::scatter_rows(
-            &mut self.v_cache, v_row,
-            self.max_seq_len, kv_dim, self.seq_len, 1,
+            &mut self.v_cache,
+            v_row,
+            self.max_seq_len,
+            kv_dim,
+            self.seq_len,
+            1,
         );
         self.seq_len += 1;
     }
@@ -128,12 +136,7 @@ pub struct LlamaKvCache<B: MathBackend> {
 }
 
 impl<B: MathBackend> LlamaKvCache<B> {
-    pub fn new(
-        n_layers: usize,
-        max_seq_len: usize,
-        n_kv_heads: usize,
-        head_dim: usize,
-    ) -> Self {
+    pub fn new(n_layers: usize, max_seq_len: usize, n_kv_heads: usize, head_dim: usize) -> Self {
         let layers = (0..n_layers)
             .map(|_| LlamaLayerKvCache::new(max_seq_len, n_kv_heads, head_dim))
             .collect();

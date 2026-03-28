@@ -40,10 +40,7 @@ fn kmeans_identical_points() {
 #[test]
 fn dbscan_tiny_eps_all_noise() {
     // Very small eps — all points should be noise
-    let features = vec![
-        vec![0.0, 1.0, 2.0, 3.0, 4.0],
-        vec![0.0, 1.0, 2.0, 3.0, 4.0],
-    ];
+    let features = vec![vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![0.0, 1.0, 2.0, 3.0, 4.0]];
     let data = make_dataset(features, vec![0.0; 5]);
 
     let mut db = scry_learn::cluster::Dbscan::new(1e-10, 2);

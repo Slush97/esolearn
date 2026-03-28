@@ -124,8 +124,7 @@ fn layernorm_forward() {
     let beta = rand_vec(d, 22);
     let shape = Shape::new(&[rows, d]);
 
-    let (cpu_out, cpu_mean, cpu_rstd) =
-        CpuBackend::layernorm(&input, &gamma, &beta, &shape, 1e-5);
+    let (cpu_out, cpu_mean, cpu_rstd) = CpuBackend::layernorm(&input, &gamma, &beta, &shape, 1e-5);
     let gi = CudaBackend::from_vec(input, &shape);
     let gg = CudaBackend::from_vec(gamma, &Shape::new(&[d]));
     let gb = CudaBackend::from_vec(beta, &Shape::new(&[d]));
@@ -243,8 +242,7 @@ fn concat_rows_op() {
     let cpu = CpuBackend::concat_rows(&a, &b, a_rows, b_rows, cols);
     let ga = CudaBackend::from_vec(a, &Shape::new(&[a_rows, cols]));
     let gb = CudaBackend::from_vec(b, &Shape::new(&[b_rows, cols]));
-    let gpu =
-        CudaBackend::to_vec(&CudaBackend::concat_rows(&ga, &gb, a_rows, b_rows, cols));
+    let gpu = CudaBackend::to_vec(&CudaBackend::concat_rows(&ga, &gb, a_rows, b_rows, cols));
 
     assert_close(&cpu, &gpu, 1e-6, "concat_rows");
 }
@@ -261,11 +259,7 @@ fn gather_columns_op() {
     let cpu = CpuBackend::gather_columns(&data, rows, total_cols, col_start, col_count);
     let gd = CudaBackend::from_vec(data, &Shape::new(&[rows, total_cols]));
     let gpu = CudaBackend::to_vec(&CudaBackend::gather_columns(
-        &gd,
-        rows,
-        total_cols,
-        col_start,
-        col_count,
+        &gd, rows, total_cols, col_start, col_count,
     ));
 
     assert_close(&cpu, &gpu, 1e-6, "gather_columns");
@@ -282,11 +276,25 @@ fn scatter_columns_op() {
     let src_data = rand_vec(rows * col_count, 121);
 
     let mut cpu_dst = dst_data.clone();
-    CpuBackend::scatter_columns(&mut cpu_dst, &src_data, rows, total_cols, col_start, col_count);
+    CpuBackend::scatter_columns(
+        &mut cpu_dst,
+        &src_data,
+        rows,
+        total_cols,
+        col_start,
+        col_count,
+    );
 
     let mut gpu_dst = CudaBackend::from_vec(dst_data, &Shape::new(&[rows, total_cols]));
     let gpu_src = CudaBackend::from_vec(src_data, &Shape::new(&[rows, col_count]));
-    CudaBackend::scatter_columns(&mut gpu_dst, &gpu_src, rows, total_cols, col_start, col_count);
+    CudaBackend::scatter_columns(
+        &mut gpu_dst,
+        &gpu_src,
+        rows,
+        total_cols,
+        col_start,
+        col_count,
+    );
 
     assert_close(
         &cpu_dst,
@@ -346,7 +354,10 @@ fn sum_op() {
     let gpu_sum = CudaBackend::sum(&gd);
 
     let diff = (cpu_sum - gpu_sum).abs();
-    assert!(diff < 1e-3, "sum: cpu={cpu_sum}, gpu={gpu_sum}, diff={diff}");
+    assert!(
+        diff < 1e-3,
+        "sum: cpu={cpu_sum}, gpu={gpu_sum}, diff={diff}"
+    );
 }
 
 // ---- Full forward pass comparison ----

@@ -242,6 +242,9 @@ mod tests {
         let out2 = layer.forward(&input, 1, true);
 
         // Very unlikely (< 1e-6) that two independent masks produce identical output.
-        assert_ne!(out1, out2, "successive calls should produce different masks");
+        assert_ne!(
+            out1, out2,
+            "successive calls should produce different masks"
+        );
     }
 }

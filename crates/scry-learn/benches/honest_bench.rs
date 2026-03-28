@@ -196,10 +196,7 @@ fn load_features_csv(name: &str) -> (Vec<Vec<f64>>, Vec<String>) {
     let mut rows: Vec<Vec<f64>> = Vec::new();
     for result in rdr.records() {
         let record = result.unwrap();
-        let row: Vec<f64> = record
-            .iter()
-            .map(|s| s.parse::<f64>().unwrap())
-            .collect();
+        let row: Vec<f64> = record.iter().map(|s| s.parse::<f64>().unwrap()).collect();
         rows.push(row);
     }
     let mut cols = vec![vec![0.0; rows.len()]; n_cols];
@@ -349,8 +346,7 @@ fn bench_cold_start(c: &mut Criterion) {
     // ── DT cold start ──
     group.bench_function("scry-learn/dt", |b| {
         b.iter(|| {
-            let mut dt =
-                scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
+            let mut dt = scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
             dt.fit(black_box(&scry_ds)).unwrap();
             dt.predict(black_box(&single_row)).unwrap()
         });
@@ -439,8 +435,8 @@ fn bench_training(c: &mut Criterion) {
             &ds_name,
             |b, _| {
                 b.iter(|| {
-                    let mut dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                        .max_depth(DT_MAX_DEPTH);
+                    let mut dt =
+                        scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
                     dt.fit(black_box(&scry_ds)).unwrap();
                 });
             },
@@ -523,8 +519,7 @@ fn bench_training(c: &mut Criterion) {
 
         group.bench_function("logreg/scry-learn/breast_cancer", |b| {
             b.iter(|| {
-                let mut lr =
-                    scry_learn::prelude::LogisticRegression::new().max_iter(LR_MAX_ITER);
+                let mut lr = scry_learn::prelude::LogisticRegression::new().max_iter(LR_MAX_ITER);
                 lr.fit(black_box(&scry_ds)).unwrap();
             });
         });
@@ -573,8 +568,9 @@ fn bench_training(c: &mut Criterion) {
             &ds_name,
             |b, _| {
                 b.iter(|| {
-                    let mut km =
-                        scry_learn::prelude::KMeans::new(KM_K).seed(42).max_iter(KM_MAX_ITER);
+                    let mut km = scry_learn::prelude::KMeans::new(KM_K)
+                        .seed(42)
+                        .max_iter(KM_MAX_ITER);
                     km.fit(black_box(&scry_ds)).unwrap();
                 });
             },
@@ -620,8 +616,8 @@ fn bench_prediction(c: &mut Criterion) {
         let linfa_ds = to_linfa_dataset(&rows, &target);
 
         // ── Train all models once ──
-        let mut scry_dt = scry_learn::prelude::DecisionTreeClassifier::new()
-            .max_depth(DT_MAX_DEPTH);
+        let mut scry_dt =
+            scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
         scry_dt.fit(&scry_ds).unwrap();
 
         let sm_dt = smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(
@@ -691,7 +687,9 @@ fn bench_prediction(c: &mut Criterion) {
             .with_n_trees(RF_N_TREES as u16)
             .with_max_depth(RF_MAX_DEPTH as u16);
         let sm_rf = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
-            &sm_x, &target_i32, sm_rf_params,
+            &sm_x,
+            &target_i32,
+            sm_rf_params,
         )
         .unwrap();
 
@@ -844,7 +842,9 @@ fn bench_memory(c: &mut Criterion) {
             .with_n_trees(RF_N_TREES as u16)
             .with_max_depth(RF_MAX_DEPTH as u16);
         let rf = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
-            &sm_x, &target_i32, sm_rf_params,
+            &sm_x,
+            &target_i32,
+            sm_rf_params,
         )
         .unwrap();
         let after = counting_alloc::current();
@@ -967,8 +967,8 @@ fn bench_scaling(c: &mut Criterion) {
         // DT scaling
         group.bench_with_input(BenchmarkId::new("dt_train/scry-learn", n), &n, |b, _| {
             b.iter(|| {
-                let mut dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                    .max_depth(DT_MAX_DEPTH);
+                let mut dt =
+                    scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
                 dt.fit(black_box(&scry_ds)).unwrap();
             });
         });
@@ -1023,21 +1023,13 @@ fn bench_scaling(c: &mut Criterion) {
             .unwrap();
 
             let matrix = scry_ds.feature_matrix();
-            group.bench_with_input(
-                BenchmarkId::new("knn_predict/scry-learn", n),
-                &n,
-                |b, _| {
-                    b.iter(|| scry_knn.predict(black_box(&matrix)).unwrap());
-                },
-            );
+            group.bench_with_input(BenchmarkId::new("knn_predict/scry-learn", n), &n, |b, _| {
+                b.iter(|| scry_knn.predict(black_box(&matrix)).unwrap());
+            });
 
-            group.bench_with_input(
-                BenchmarkId::new("knn_predict/smartcore", n),
-                &n,
-                |b, _| {
-                    b.iter(|| sm_knn.predict(black_box(&sm_x)).unwrap());
-                },
-            );
+            group.bench_with_input(BenchmarkId::new("knn_predict/smartcore", n), &n, |b, _| {
+                b.iter(|| sm_knn.predict(black_box(&sm_x)).unwrap());
+            });
         }
     }
 
@@ -1066,8 +1058,7 @@ fn bench_concurrent(c: &mut Criterion) {
     let scry_ds = to_scry_dataset(&cols, &target, &names);
     let sm_x = to_smartcore_matrix(&rows);
 
-    let mut scry_dt =
-        scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
+    let mut scry_dt = scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
     scry_dt.fit(&scry_ds).unwrap();
 
     let sm_dt = smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(

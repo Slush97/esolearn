@@ -685,7 +685,10 @@ mod tests {
 
         // Predict on a point away from the constant feature value.
         let preds2 = nb.predict(&[vec![10.0, 10.0]]).unwrap();
-        assert!(preds2[0].is_finite(), "off-center prediction should be finite");
+        assert!(
+            preds2[0].is_finite(),
+            "off-center prediction should be finite"
+        );
     }
 
     #[test]

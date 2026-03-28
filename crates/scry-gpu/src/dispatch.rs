@@ -80,9 +80,5 @@ pub fn extract_workgroup_size(module: &naga::Module, entry: &str) -> [u32; 3] {
 pub fn calc_dispatch(invocations: u32, workgroup_size: [u32; 3]) -> [u32; 3] {
     let ceil_div = |a: u32, b: u32| a.div_ceil(b);
 
-    [
-        ceil_div(invocations, workgroup_size[0]).min(65535),
-        1,
-        1,
-    ]
+    [ceil_div(invocations, workgroup_size[0]).min(65535), 1, 1]
 }

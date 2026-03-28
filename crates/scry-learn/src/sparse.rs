@@ -179,8 +179,7 @@ impl CsrMatrix {
             let row_start = final_indices.len();
             for &(col, val) in &pairs {
                 // The guard `final_indices.len() > row_start` ensures non-empty.
-                if final_indices.len() > row_start
-                    && final_indices[final_indices.len() - 1] == col
+                if final_indices.len() > row_start && final_indices[final_indices.len() - 1] == col
                 {
                     let last = final_data.len() - 1;
                     final_data[last] += val;

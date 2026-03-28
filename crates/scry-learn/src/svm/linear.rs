@@ -872,7 +872,9 @@ fn platt_fit(decision_values: &[f64], labels: &[f64]) -> (f64, f64) {
         let da = -(h22 * g1 - h21 * g2) / det;
         let db = -(h11 * g2 - h21 * g1) / det;
 
-        if da.abs() < crate::constants::PLATT_CONVERGENCE && db.abs() < crate::constants::PLATT_CONVERGENCE {
+        if da.abs() < crate::constants::PLATT_CONVERGENCE
+            && db.abs() < crate::constants::PLATT_CONVERGENCE
+        {
             break;
         }
 

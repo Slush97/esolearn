@@ -87,8 +87,7 @@ fn bench_dt_training(c: &mut Criterion) {
             (0..10).map(|i| format!("f{i}")).collect(),
             "target",
         );
-        let x =
-            smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&features).unwrap();
+        let x = smartcore::linalg::basic::matrix::DenseMatrix::from_2d_vec(&features).unwrap();
 
         group.bench_with_input(BenchmarkId::new("scry-learn", n), &n, |b, _| {
             b.iter(|| {
@@ -348,8 +347,7 @@ fn bench_logreg_training(c: &mut Criterion) {
 
     group.bench_function("scry-learn/1k", |b| {
         b.iter(|| {
-            let mut lr = scry_learn::prelude::LogisticRegression::new()
-                .max_iter(200);
+            let mut lr = scry_learn::prelude::LogisticRegression::new().max_iter(200);
             lr.fit(black_box(&data)).unwrap();
         });
     });
@@ -589,7 +587,9 @@ fn bench_lasso_training(c: &mut Criterion) {
 
     group.bench_function("scry-learn/1k", |b| {
         b.iter(|| {
-            let mut lasso = scry_learn::prelude::LassoRegression::new().alpha(0.1).max_iter(1000);
+            let mut lasso = scry_learn::prelude::LassoRegression::new()
+                .alpha(0.1)
+                .max_iter(1000);
             lasso.fit(black_box(&data)).unwrap();
         });
     });

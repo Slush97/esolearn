@@ -124,4 +124,3 @@ pub(crate) const KMEANS_PAR_THRESHOLD: usize = 5_000;
 /// Minimum n² kernel matrix size to parallelize SVM kernel computation.
 #[cfg(feature = "experimental")]
 pub(crate) const SVM_KERNEL_PAR_THRESHOLD: usize = 10_000;
-

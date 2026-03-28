@@ -4,12 +4,27 @@
 use crate::features::keypoint::{BinaryDescriptor, FloatDescriptor};
 use crate::matching::match_types::DMatch;
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
+macro_rules! maybe_par_iter {
+    ($range:expr) => {{
+        #[cfg(feature = "rayon")]
+        {
+            $range.into_par_iter()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            $range.into_iter()
+        }
+    }};
+}
+
 /// Find the best match for each query descriptor in the train set (Hamming distance).
 pub fn match_binary(query: &[BinaryDescriptor], train: &[BinaryDescriptor]) -> Vec<DMatch> {
-    query
-        .iter()
-        .enumerate()
-        .filter_map(|(qi, qd)| {
+    maybe_par_iter!(0..query.len())
+        .filter_map(|qi| {
+            let qd = &query[qi];
             let mut best_dist = u32::MAX;
             let mut best_idx = 0;
             for (ti, td) in train.iter().enumerate() {
@@ -38,10 +53,9 @@ pub fn knn_match_binary(
     train: &[BinaryDescriptor],
     k: usize,
 ) -> Vec<Vec<DMatch>> {
-    query
-        .iter()
-        .enumerate()
-        .map(|(qi, qd)| {
+    maybe_par_iter!(0..query.len())
+        .map(|qi| {
+            let qd = &query[qi];
             let mut dists: Vec<(usize, u32)> = train
                 .iter()
                 .enumerate()
@@ -63,10 +77,9 @@ pub fn knn_match_binary(
 
 /// Find the best match for each query descriptor (L2 distance).
 pub fn match_float(query: &[FloatDescriptor], train: &[FloatDescriptor]) -> Vec<DMatch> {
-    query
-        .iter()
-        .enumerate()
-        .filter_map(|(qi, qd)| {
+    maybe_par_iter!(0..query.len())
+        .filter_map(|qi| {
+            let qd = &query[qi];
             let mut best_dist = f32::INFINITY;
             let mut best_idx = 0;
             for (ti, td) in train.iter().enumerate() {
@@ -95,16 +108,17 @@ pub fn knn_match_float(
     train: &[FloatDescriptor],
     k: usize,
 ) -> Vec<Vec<DMatch>> {
-    query
-        .iter()
-        .enumerate()
-        .map(|(qi, qd)| {
+    maybe_par_iter!(0..query.len())
+        .map(|qi| {
+            let qd = &query[qi];
             let mut dists: Vec<(usize, f32)> = train
                 .iter()
                 .enumerate()
                 .map(|(ti, td)| (ti, qd.l2_distance(td)))
                 .collect();
-            dists.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            dists.sort_unstable_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
             dists
                 .into_iter()
                 .take(k)
@@ -125,9 +139,15 @@ mod tests {
     #[test]
     fn binary_self_match() {
         let descs = vec![
-            BinaryDescriptor { data: vec![0x00, 0xFF] },
-            BinaryDescriptor { data: vec![0xFF, 0x00] },
-            BinaryDescriptor { data: vec![0xAB, 0xCD] },
+            BinaryDescriptor {
+                data: vec![0x00, 0xFF],
+            },
+            BinaryDescriptor {
+                data: vec![0xFF, 0x00],
+            },
+            BinaryDescriptor {
+                data: vec![0xAB, 0xCD],
+            },
         ];
         let matches = match_binary(&descs, &descs);
         assert_eq!(matches.len(), 3);
@@ -140,8 +160,12 @@ mod tests {
     #[test]
     fn float_self_match() {
         let descs = vec![
-            FloatDescriptor { data: vec![1.0, 0.0] },
-            FloatDescriptor { data: vec![0.0, 1.0] },
+            FloatDescriptor {
+                data: vec![1.0, 0.0],
+            },
+            FloatDescriptor {
+                data: vec![0.0, 1.0],
+            },
         ];
         let matches = match_float(&descs, &descs);
         assert_eq!(matches.len(), 2);
@@ -162,7 +186,6 @@ mod tests {
         assert_eq!(knn.len(), 3);
         for matches in &knn {
             assert_eq!(matches.len(), 2);
-            // First match should be exact (distance 0)
             assert_eq!(matches[0].distance, 0.0);
         }
     }

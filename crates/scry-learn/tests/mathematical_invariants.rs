@@ -21,32 +21,23 @@ use scry_learn::tree::{
 // Helper: build a simple dataset
 // ═══════════════════════════════════════════════════════════════════
 
-fn make_simple_dataset(
-    f1: Vec<f64>,
-    f2: Vec<f64>,
-    target: Vec<f64>,
-) -> Dataset {
-    Dataset::new(
-        vec![f1, f2],
-        target,
-        vec!["x1".into(), "x2".into()],
-        "y",
-    )
+fn make_simple_dataset(f1: Vec<f64>, f2: Vec<f64>, target: Vec<f64>) -> Dataset {
+    Dataset::new(vec![f1, f2], target, vec!["x1".into(), "x2".into()], "y")
 }
 
 fn make_iris_subset() -> Dataset {
     // 20 well-separated samples, 2 features, 2 classes
     let f1 = vec![
-        1.0, 1.1, 1.2, 0.9, 0.8, 1.3, 1.4, 0.7, 1.5, 1.0,
-        5.0, 5.1, 5.2, 4.9, 4.8, 5.3, 5.4, 4.7, 5.5, 5.0,
+        1.0, 1.1, 1.2, 0.9, 0.8, 1.3, 1.4, 0.7, 1.5, 1.0, 5.0, 5.1, 5.2, 4.9, 4.8, 5.3, 5.4, 4.7,
+        5.5, 5.0,
     ];
     let f2 = vec![
-        1.0, 0.9, 1.1, 1.2, 0.8, 1.3, 0.7, 1.4, 1.5, 1.0,
-        5.0, 4.9, 5.1, 5.2, 4.8, 5.3, 4.7, 5.4, 5.5, 5.0,
+        1.0, 0.9, 1.1, 1.2, 0.8, 1.3, 0.7, 1.4, 1.5, 1.0, 5.0, 4.9, 5.1, 5.2, 4.8, 5.3, 4.7, 5.4,
+        5.5, 5.0,
     ];
     let target = vec![
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0,
     ];
     make_simple_dataset(f1, f2, target)
 }
@@ -382,10 +373,7 @@ fn invariant_gaussian_nb_probabilities_valid() {
             );
         }
         let sum: f64 = p.iter().sum();
-        assert!(
-            (sum - 1.0).abs() < 1e-6,
-            "Sample {i}: prob sum = {sum}"
-        );
+        assert!((sum - 1.0).abs() < 1e-6, "Sample {i}: prob sum = {sum}");
     }
 }
 
@@ -624,10 +612,7 @@ fn invariant_knn_proba_valid() {
 
     for (i, p) in probas.iter().enumerate() {
         let sum: f64 = p.iter().sum();
-        assert!(
-            (sum - 1.0).abs() < 1e-6,
-            "KNN sample {i}: prob sum = {sum}"
-        );
+        assert!((sum - 1.0).abs() < 1e-6, "KNN sample {i}: prob sum = {sum}");
         for &pc in p {
             assert!((0.0..=1.0).contains(&pc), "KNN prob {pc} not in [0,1]");
         }
@@ -733,10 +718,7 @@ fn invariant_softmax_numerical_stability() {
 fn invariant_gaussian_nb_zero_variance_no_nan() {
     // All samples have identical features — variance is 0 before smoothing
     let data = Dataset::new(
-        vec![
-            vec![5.0, 5.0, 5.0, 5.0],
-            vec![3.0, 3.0, 3.0, 3.0],
-        ],
+        vec![vec![5.0, 5.0, 5.0, 5.0], vec![3.0, 3.0, 3.0, 3.0]],
         vec![0.0, 0.0, 1.0, 1.0],
         vec!["f0".into(), "f1".into()],
         "class",
@@ -785,12 +767,7 @@ fn invariant_confusion_matrix_sums_to_n() {
         .zip(y_pred.iter())
         .filter(|(a, b)| (**a - **b).abs() < 0.5)
         .count();
-    let diag_sum: usize = cm
-        .matrix
-        .iter()
-        .enumerate()
-        .map(|(i, row)| row[i])
-        .sum();
+    let diag_sum: usize = cm.matrix.iter().enumerate().map(|(i, row)| row[i]).sum();
     assert_eq!(
         diag_sum, n_correct,
         "CM diagonal sum {diag_sum} != correct count {n_correct}"

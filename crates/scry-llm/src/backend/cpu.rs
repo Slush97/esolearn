@@ -22,9 +22,13 @@ impl DeviceBackend for CpuBackend {
     type I8Storage = Vec<i8>;
 
     #[cfg(feature = "quantize")]
-    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> { data }
+    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> {
+        data
+    }
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &[i8]) -> Vec<i8> { storage.to_vec() }
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8> {
+        storage.to_vec()
+    }
 
     fn zeros(shape: &Shape) -> Vec<f32> {
         vec![0.0; shape.numel()]
@@ -99,7 +103,11 @@ impl MathBackend for CpuBackend {
         // Fast path: same shape — direct elementwise add (no broadcast math)
         if a_shape == b_shape {
             if out_numel >= PAR_THRESHOLD {
-                return a.par_iter().zip(b.par_iter()).map(|(&x, &y)| x + y).collect();
+                return a
+                    .par_iter()
+                    .zip(b.par_iter())
+                    .map(|(&x, &y)| x + y)
+                    .collect();
             }
             return a.iter().zip(b.iter()).map(|(&x, &y)| x + y).collect();
         }
@@ -111,9 +119,7 @@ impl MathBackend for CpuBackend {
         if out_dims.len() == 2 {
             let (rows, cols) = (out_dims[0], out_dims[1]);
             // b is [1, M] or [M] broadcast over [N, M]
-            if a_dims == out_dims && b.len() == cols
-                && (b_dims == [1, cols] || b_dims == [cols])
-            {
+            if a_dims == out_dims && b.len() == cols && (b_dims == [1, cols] || b_dims == [cols]) {
                 let mut result = vec![0.0f32; out_numel];
                 for r in 0..rows {
                     let row_start = r * cols;
@@ -124,9 +130,7 @@ impl MathBackend for CpuBackend {
                 return result;
             }
             // a is [1, M] or [M] broadcast over [N, M]
-            if b_dims == out_dims && a.len() == cols
-                && (a_dims == [1, cols] || a_dims == [cols])
-            {
+            if b_dims == out_dims && a.len() == cols && (a_dims == [1, cols] || a_dims == [cols]) {
                 let mut result = vec![0.0f32; out_numel];
                 for r in 0..rows {
                     let row_start = r * cols;
@@ -299,7 +303,11 @@ impl MathBackend for CpuBackend {
         let mut output = vec![0.0f32; input.len()];
 
         let process_row = |out_row: &mut [f32], in_row: &[f32]| {
-            let max_val = in_row.iter().copied().map(|x| x * scale).fold(f32::NEG_INFINITY, f32::max);
+            let max_val = in_row
+                .iter()
+                .copied()
+                .map(|x| x * scale)
+                .fold(f32::NEG_INFINITY, f32::max);
             let mut sum = 0.0f64;
             for i in 0..last {
                 let e = f64::from((in_row[i] * scale - max_val).exp());
@@ -397,12 +405,9 @@ impl MathBackend for CpuBackend {
                     process_row(i, out_row);
                 });
         } else {
-            output
-                .chunks_mut(d)
-                .enumerate()
-                .for_each(|(i, out_row)| {
-                    process_row(i, out_row);
-                });
+            output.chunks_mut(d).enumerate().for_each(|(i, out_row)| {
+                process_row(i, out_row);
+            });
         }
 
         output
@@ -422,30 +427,31 @@ impl MathBackend for CpuBackend {
         let mut means = vec![0.0f32; rows];
         let mut rstds = vec![0.0f32; rows];
 
-        let process_row = |i: usize, out_row: &mut [f32], mean_out: &mut f32, rstd_out: &mut f32| {
-            let start = i * d;
-            let slice = &input[start..start + d];
+        let process_row =
+            |i: usize, out_row: &mut [f32], mean_out: &mut f32, rstd_out: &mut f32| {
+                let start = i * d;
+                let slice = &input[start..start + d];
 
-            let mean = slice.iter().map(|&x| f64::from(x)).sum::<f64>() / d as f64;
-            *mean_out = mean as f32;
+                let mean = slice.iter().map(|&x| f64::from(x)).sum::<f64>() / d as f64;
+                *mean_out = mean as f32;
 
-            let var = slice
-                .iter()
-                .map(|&x| {
-                    let diff = f64::from(x) - mean;
-                    diff * diff
-                })
-                .sum::<f64>()
-                / d as f64;
+                let var = slice
+                    .iter()
+                    .map(|&x| {
+                        let diff = f64::from(x) - mean;
+                        diff * diff
+                    })
+                    .sum::<f64>()
+                    / d as f64;
 
-            let rstd = 1.0 / (var + f64::from(eps)).sqrt();
-            *rstd_out = rstd as f32;
+                let rstd = 1.0 / (var + f64::from(eps)).sqrt();
+                *rstd_out = rstd as f32;
 
-            for j in 0..d {
-                let norm = (f64::from(slice[j]) - mean) * rstd;
-                out_row[j] = (norm * f64::from(gamma[j]) + f64::from(beta[j])) as f32;
-            }
-        };
+                for j in 0..d {
+                    let norm = (f64::from(slice[j]) - mean) * rstd;
+                    out_row[j] = (norm * f64::from(gamma[j]) + f64::from(beta[j])) as f32;
+                }
+            };
 
         if input.len() >= PAR_THRESHOLD {
             output
@@ -565,12 +571,7 @@ impl MathBackend for CpuBackend {
 
     // ---- Llama-specific ops ----
 
-    fn rmsnorm(
-        input: &Vec<f32>,
-        weight: &Vec<f32>,
-        shape: &Shape,
-        eps: f32,
-    ) -> Vec<f32> {
+    fn rmsnorm(input: &Vec<f32>, weight: &Vec<f32>, shape: &Shape, eps: f32) -> Vec<f32> {
         let dims = shape.dims();
         let d = *dims.last().unwrap();
         let n = input.len() / d;
@@ -597,13 +598,7 @@ impl MathBackend for CpuBackend {
         output
     }
 
-    fn rope(
-        input: &Vec<f32>,
-        shape: &Shape,
-        pos: usize,
-        head_dim: usize,
-        theta: f32,
-    ) -> Vec<f32> {
+    fn rope(input: &Vec<f32>, shape: &Shape, pos: usize, head_dim: usize, theta: f32) -> Vec<f32> {
         let dims = shape.dims();
         let total_elements = input.len();
         let last_dim = *dims.last().unwrap();
@@ -833,13 +828,15 @@ fn gemv_trans_b_into(vec: &[f32], mat_t: &[f32], k: usize, n: usize, out: &mut [
         let row = &mat_t[j * k..];
         let (mut a0, mut a1, mut a2, mut a3) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         for p in (0..k4).step_by(4) {
-            a0 += vec[p]     * row[p];
+            a0 += vec[p] * row[p];
             a1 += vec[p + 1] * row[p + 1];
             a2 += vec[p + 2] * row[p + 2];
             a3 += vec[p + 3] * row[p + 3];
         }
         let mut acc = a0 + a1 + a2 + a3;
-        for p in k4..k { acc += vec[p] * row[p]; }
+        for p in k4..k {
+            acc += vec[p] * row[p];
+        }
         out[j] = acc;
     }
 }
@@ -847,7 +844,9 @@ fn gemv_trans_b_into(vec: &[f32], mat_t: &[f32], k: usize, n: usize, out: &mut [
 /// GEMV for `vec[1, k] @ mat[k, n]` writing directly into `out` (no allocation).
 #[inline]
 fn gemv_into(vec: &[f32], mat: &[f32], k: usize, n: usize, out: &mut [f32]) {
-    for j in 0..n { out[j] = 0.0; }
+    for j in 0..n {
+        out[j] = 0.0;
+    }
     let k4 = k & !3;
     for p in (0..k4).step_by(4) {
         let v0 = vec[p];
@@ -1091,17 +1090,17 @@ fn matmul_cblas(
             CBLAS_LAYOUT::CblasRowMajor,
             transa,
             transb,
-            m as i32,   // M
-            n as i32,   // N
-            k as i32,   // K
-            1.0,        // alpha
+            m as i32, // M
+            n as i32, // N
+            k as i32, // K
+            1.0,      // alpha
             a.as_ptr(),
             lda,
             b.as_ptr(),
             ldb,
-            0.0,        // beta
+            0.0, // beta
             c.as_mut_ptr(),
-            n as i32,   // ldc
+            n as i32, // ldc
         );
     }
 
@@ -1248,7 +1247,7 @@ fn matmul_dnnl(
             m as i64,
             n as i64,
             k as i64,
-            1.0,         // alpha
+            1.0, // alpha
             a.as_ptr(),
             lda,
             b.as_ptr(),
@@ -1304,12 +1303,12 @@ fn matmul_bias_cblas(
             m as i32,
             n as i32,
             k as i32,
-            1.0,        // alpha
+            1.0, // alpha
             a.as_ptr(),
             lda,
             b.as_ptr(),
             ldb,
-            1.0,        // beta = 1.0 → C = alpha*A*B + 1.0*C (adds pre-filled bias)
+            1.0, // beta = 1.0 → C = alpha*A*B + 1.0*C (adds pre-filled bias)
             c.as_mut_ptr(),
             n as i32,
         );
@@ -1364,24 +1363,22 @@ fn matmul_strided_batched_impl(
             // non-overlapping slice so this is safe.
             c.par_chunks_mut(c_stride)
                 .enumerate()
-                .for_each(|(i, out_chunk)| {
-                    unsafe {
-                        dnnl_ffi::dnnl_sgemm(
-                            transa_c,
-                            transb_c,
-                            m as i64,
-                            n as i64,
-                            k as i64,
-                            1.0,
-                            a[i * a_stride..].as_ptr(),
-                            lda,
-                            b[i * b_stride..].as_ptr(),
-                            ldb,
-                            0.0,
-                            out_chunk.as_mut_ptr(),
-                            ldc,
-                        );
-                    }
+                .for_each(|(i, out_chunk)| unsafe {
+                    dnnl_ffi::dnnl_sgemm(
+                        transa_c,
+                        transb_c,
+                        m as i64,
+                        n as i64,
+                        k as i64,
+                        1.0,
+                        a[i * a_stride..].as_ptr(),
+                        lda,
+                        b[i * b_stride..].as_ptr(),
+                        ldb,
+                        0.0,
+                        out_chunk.as_mut_ptr(),
+                        ldc,
+                    );
                 });
         } else {
             unsafe {
@@ -1625,15 +1622,9 @@ mod tests {
             k_flat[dst..dst + d_model].copy_from_slice(&qkv[row + d_model..row + 2 * d_model]);
             v_flat[dst..dst + d_model].copy_from_slice(&qkv[row + 2 * d_model..row + 3 * d_model]);
         }
-        let q_ref = CpuBackend::reshape_for_heads(
-            &q_flat, 1, seq, n_heads, d_head,
-        );
-        let k_ref = CpuBackend::reshape_for_heads(
-            &k_flat, 1, seq, n_heads, d_head,
-        );
-        let v_ref = CpuBackend::reshape_for_heads(
-            &v_flat, 1, seq, n_heads, d_head,
-        );
+        let q_ref = CpuBackend::reshape_for_heads(&q_flat, 1, seq, n_heads, d_head);
+        let k_ref = CpuBackend::reshape_for_heads(&k_flat, 1, seq, n_heads, d_head);
+        let v_ref = CpuBackend::reshape_for_heads(&v_flat, 1, seq, n_heads, d_head);
         assert_eq!(q_heads, q_ref, "Q mismatch");
         assert_eq!(k_heads, k_ref, "K mismatch");
         assert_eq!(v_heads, v_ref, "V mismatch");
@@ -1655,9 +1646,8 @@ mod tests {
         for i in 0..batch {
             let a_slice = &a[i * m * k..(i + 1) * m * k];
             let b_slice = &b[i * k * n..(i + 1) * k * n];
-            let ref_c = CpuBackend::matmul(
-                &a_slice.to_vec(), &b_slice.to_vec(), m, k, n, false, false,
-            );
+            let ref_c =
+                CpuBackend::matmul(&a_slice.to_vec(), &b_slice.to_vec(), m, k, n, false, false);
             for j in 0..m * n {
                 assert!(
                     (result[i * m * n + j] - ref_c[j]).abs() < 1e-4,
@@ -1689,7 +1679,8 @@ mod tests {
         }
 
         // Fused path
-        let fused = CpuBackend::gather_reshape_repeat_kv(&cache, max_seq, cached_len, n_kv, n_q, hd);
+        let fused =
+            CpuBackend::gather_reshape_repeat_kv(&cache, max_seq, cached_len, n_kv, n_q, hd);
 
         // 3-step reference path
         let gathered = CpuBackend::gather_rows(&cache, max_seq, kv_dim, 0, cached_len);
@@ -1730,7 +1721,8 @@ mod tests {
             assert!(
                 (ref_c[i] - i8_c[i]).abs() < tolerance,
                 "mismatch at {i}: ref={}, i8={}, tol={tolerance}",
-                ref_c[i], i8_c[i]
+                ref_c[i],
+                i8_c[i]
             );
         }
     }
@@ -1757,7 +1749,8 @@ mod tests {
             assert!(
                 (ref_c[i] - i8_c[i]).abs() < tolerance,
                 "mismatch at {i}: ref={}, i8={}, tol={tolerance}",
-                ref_c[i], i8_c[i]
+                ref_c[i],
+                i8_c[i]
             );
         }
     }

@@ -645,9 +645,16 @@ mod tests {
             .metric(DistanceMetric::Cosine);
         hdb.fit(&data).unwrap();
 
-        assert_eq!(hdb.n_clusters(), 2, "should find 2 clusters with cosine metric");
+        assert_eq!(
+            hdb.n_clusters(),
+            2,
+            "should find 2 clusters with cosine metric"
+        );
         let labels = hdb.labels();
-        assert_ne!(labels[0], labels[n_per], "groups should have different labels");
+        assert_ne!(
+            labels[0], labels[n_per],
+            "groups should have different labels"
+        );
     }
 
     #[test]

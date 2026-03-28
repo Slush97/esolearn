@@ -302,9 +302,7 @@ fn high_dimensional_p_gt_n() {
     if lasso_result.is_ok() {
         let coeffs = lasso.coefficients();
         let zero_count = coeffs.iter().filter(|&&c| c.abs() < 1e-10).count();
-        println!(
-            "  Lasso sparsity: {zero_count}/{p} coefficients are zero"
-        );
+        println!("  Lasso sparsity: {zero_count}/{p} coefficients are zero");
         for &c in coeffs {
             assert!(c.is_finite(), "Lasso coefficient not finite: {c}");
         }

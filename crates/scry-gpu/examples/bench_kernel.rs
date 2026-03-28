@@ -20,7 +20,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 fn main() {
     let gpu = Device::auto().expect("no GPU found");
-    println!("Device: {} ({} MB)", gpu.name(), gpu.memory() / (1024 * 1024));
+    println!(
+        "Device: {} ({} MB)",
+        gpu.name(),
+        gpu.memory() / (1024 * 1024)
+    );
     println!();
 
     for &n in &[1_000, 10_000, 100_000] {
@@ -70,9 +74,15 @@ fn bench_at_size(gpu: &Device, n: usize) {
 
     let speedup = oneshot_per.as_nanos() as f64 / cached_per.as_nanos() as f64;
 
-    println!("  one-shot dispatch():  {:>8.2?} / iter  (total: {oneshot_total:.2?})", oneshot_per);
+    println!(
+        "  one-shot dispatch():  {:>8.2?} / iter  (total: {oneshot_total:.2?})",
+        oneshot_per
+    );
     println!("  compile() once:       {:>8.2?}", compile_time);
-    println!("  cached run():         {:>8.2?} / iter  (total: {cached_total:.2?})", cached_per);
+    println!(
+        "  cached run():         {:>8.2?} / iter  (total: {cached_total:.2?})",
+        cached_per
+    );
     println!("  speedup:              {speedup:.2}x");
     println!();
 }

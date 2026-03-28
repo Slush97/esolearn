@@ -15,9 +15,9 @@ use scry_learn::neural::{MLPClassifier, MLPRegressor};
 use scry_learn::pipeline::Pipeline;
 use scry_learn::preprocess::{MinMaxScaler, Pca, StandardScaler, Transformer};
 use scry_learn::split::train_test_split;
-use scry_learn::svm::{LinearSVC, LinearSVR};
 #[cfg(feature = "experimental")]
 use scry_learn::svm::{Kernel, KernelSVC, KernelSVR};
+use scry_learn::svm::{LinearSVC, LinearSVR};
 use scry_learn::tree::{
     DecisionTreeClassifier, DecisionTreeRegressor, GradientBoostingClassifier,
     GradientBoostingRegressor, HistGradientBoostingClassifier, HistGradientBoostingRegressor,

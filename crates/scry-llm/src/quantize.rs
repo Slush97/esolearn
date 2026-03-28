@@ -14,9 +14,7 @@ pub struct QuantMeta {
 /// Returns `(quantized_weights, metadata)`. The quantized value for each weight is
 /// `round(weight / scale)` clamped to `[-127, 127]`.
 pub fn quantize_symmetric(weights: &[f32]) -> (Vec<i8>, QuantMeta) {
-    let absmax = weights
-        .iter()
-        .fold(0.0f32, |acc, &w| acc.max(w.abs()));
+    let absmax = weights.iter().fold(0.0f32, |acc, &w| acc.max(w.abs()));
 
     if absmax == 0.0 {
         return (vec![0i8; weights.len()], QuantMeta { scale: 0.0 });

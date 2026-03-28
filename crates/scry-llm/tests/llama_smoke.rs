@@ -60,7 +60,10 @@ fn llama_kv_cache_forward() {
         let logits = model.forward_with_cache(tok, pos, &mut cache);
         let v = logits.to_vec();
         assert_eq!(v.len(), 32, "logits should be [1, vocab_size]");
-        assert!(v.iter().all(|x| x.is_finite()), "cache logits contain NaN/Inf at pos {pos}");
+        assert!(
+            v.iter().all(|x| x.is_finite()),
+            "cache logits contain NaN/Inf at pos {pos}"
+        );
         last_logits = v;
     }
     assert!(!last_logits.is_empty());
@@ -158,22 +161,44 @@ fn llama_generate_deterministic_greedy() {
     let mut rng2 = fastrand::Rng::with_seed(200);
     let tokens2 = generate(&model, &[0], &config, &mut rng2);
 
-    assert_eq!(tokens1, tokens2, "greedy generation should be deterministic");
+    assert_eq!(
+        tokens1, tokens2,
+        "greedy generation should be deterministic"
+    );
 }
 
 #[test]
 fn llama_generate_sampling() {
     let model = tiny_llama();
     let configs = [
-        SamplingConfig { temperature: 0.5, top_k: 5, top_p: 1.0, max_tokens: 4 },
-        SamplingConfig { temperature: 1.0, top_k: 0, top_p: 0.9, max_tokens: 4 },
-        SamplingConfig { temperature: 2.0, top_k: 10, top_p: 0.5, max_tokens: 4 },
+        SamplingConfig {
+            temperature: 0.5,
+            top_k: 5,
+            top_p: 1.0,
+            max_tokens: 4,
+        },
+        SamplingConfig {
+            temperature: 1.0,
+            top_k: 0,
+            top_p: 0.9,
+            max_tokens: 4,
+        },
+        SamplingConfig {
+            temperature: 2.0,
+            top_k: 10,
+            top_p: 0.5,
+            max_tokens: 4,
+        },
     ];
 
     for (i, config) in configs.iter().enumerate() {
         let mut rng = fastrand::Rng::with_seed(42 + i as u64);
         let tokens = generate(&model, &[0, 1, 2], config, &mut rng);
-        assert_eq!(tokens.len(), 4, "config {i} should produce max_tokens tokens");
+        assert_eq!(
+            tokens.len(),
+            4,
+            "config {i} should produce max_tokens tokens"
+        );
         for &t in &tokens {
             assert!(t < 32, "config {i}: token {t} out of vocab range");
         }
@@ -228,7 +253,10 @@ fn llama_untied_embeddings() {
     let mut rng = fastrand::Rng::with_seed(42);
     let model = LlamaModel::<Cpu>::new(config, &mut rng);
 
-    assert!(model.lm_head.is_some(), "untied model should have separate lm_head");
+    assert!(
+        model.lm_head.is_some(),
+        "untied model should have separate lm_head"
+    );
 
     let logits = model.forward(&[0, 1]);
     let v = logits.to_vec();

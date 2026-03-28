@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use cudarc::cublas::{CudaBlas, Gemm, GemmConfig};
 use cudarc::cublas::sys::cublasOperation_t;
+use cudarc::cublas::{CudaBlas, Gemm, GemmConfig};
 use cudarc::driver::{CudaContext, CudaSlice, CudaStream, LaunchConfig, PushKernelArg};
 
 use crate::backend::{DeviceBackend, MathBackend};
@@ -21,7 +21,6 @@ thread_local! {
 fn bf16_enabled() -> bool {
     BF16_MODE.with(std::cell::Cell::get)
 }
-
 
 /// Thread-local GPU context: device, stream, cuBLAS handle, compiled kernels.
 struct GpuCtx {
@@ -62,7 +61,9 @@ pub fn init_gpu_bf16(device_id: usize) {
 fn with_gpu<R>(f: impl FnOnce(&GpuCtx) -> R) -> R {
     GPU_CTX.with(|cell| {
         let borrow = cell.borrow();
-        let gpu = borrow.as_ref().expect("GPU not initialized — call init_gpu() first");
+        let gpu = borrow
+            .as_ref()
+            .expect("GPU not initialized — call init_gpu() first");
         f(gpu)
     })
 }
@@ -70,7 +71,9 @@ fn with_gpu<R>(f: impl FnOnce(&GpuCtx) -> R) -> R {
 fn with_gpu_mut<R>(f: impl FnOnce(&mut GpuCtx) -> R) -> R {
     GPU_CTX.with(|cell| {
         let mut borrow = cell.borrow_mut();
-        let gpu = borrow.as_mut().expect("GPU not initialized — call init_gpu() first");
+        let gpu = borrow
+            .as_mut()
+            .expect("GPU not initialized — call init_gpu() first");
         f(gpu)
     })
 }
@@ -93,15 +96,14 @@ pub struct GpuStorage {
 
 impl Clone for GpuStorage {
     fn clone(&self) -> Self {
-        let cloned = self
-            .inner
-            .try_clone()
-            .expect("failed to clone GPU storage");
+        let cloned = self.inner.try_clone().expect("failed to clone GPU storage");
         #[cfg(feature = "bf16")]
         {
             let bf16_cell = std::cell::OnceCell::new();
             if let Some(bf16) = self.bf16_data.get() {
-                bf16_cell.set(bf16.try_clone().expect("failed to clone bf16 GPU storage")).ok();
+                bf16_cell
+                    .set(bf16.try_clone().expect("failed to clone bf16 GPU storage"))
+                    .ok();
             }
             Self {
                 inner: cloned,
@@ -136,7 +138,10 @@ impl GpuStorage {
     #[cfg(feature = "bf16")]
     pub(crate) fn bf16_ref(&self) -> &CudaSlice<half::bf16> {
         self.bf16_data.get_or_init(|| {
-            assert!(!self.f32_is_stub, "bf16_ref: f32 is a stub but no bf16 data set — bug");
+            assert!(
+                !self.f32_is_stub,
+                "bf16_ref: f32 is a stub but no bf16 data set — bug"
+            );
             with_gpu(|gpu| bf16_ops::cast_f32_to_bf16(gpu, &self.inner, self.len))
         })
     }
@@ -189,9 +194,13 @@ impl DeviceBackend for CudaBackend {
     type I8Storage = Vec<i8>;
 
     #[cfg(feature = "quantize")]
-    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> { data }
+    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> {
+        data
+    }
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &[i8]) -> Vec<i8> { storage.to_vec() }
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8> {
+        storage.to_vec()
+    }
 
     fn zeros(shape: &Shape) -> GpuStorage {
         let n = shape.numel();
@@ -236,7 +245,9 @@ impl DeviceBackend for CudaBackend {
         if storage.f32_is_stub {
             // f32 is a placeholder — convert from bf16
             return with_gpu(|gpu| {
-                let bf16 = storage.bf16_data.get()
+                let bf16 = storage
+                    .bf16_data
+                    .get()
                     .expect("to_vec: f32 is stub but no bf16 data");
                 let bf16_host: Vec<half::bf16> = gpu.stream.clone_dtoh(bf16).unwrap();
                 bf16_host.iter().map(|&v| v.to_f32()).collect()
@@ -337,9 +348,7 @@ impl MathBackend for CudaBackend {
         // Common broadcast: [rows, cols] + [1, cols] or [cols]
         let out_dims = out_shape.dims();
         let b_dims = b_shape.dims();
-        if out_dims.len() == 2
-            && (b_dims == [1, out_dims[1]] || b_dims == [out_dims[1]])
-        {
+        if out_dims.len() == 2 && (b_dims == [1, out_dims[1]] || b_dims == [out_dims[1]]) {
             let rows = out_dims[0];
             let cols = out_dims[1];
             let n = rows * cols;
@@ -460,12 +469,7 @@ impl MathBackend for CudaBackend {
         })
     }
 
-    fn embedding(
-        weight: &GpuStorage,
-        indices: &[usize],
-        _vocab: usize,
-        dim: usize,
-    ) -> GpuStorage {
+    fn embedding(weight: &GpuStorage, indices: &[usize], _vocab: usize, dim: usize) -> GpuStorage {
         let n_indices = indices.len();
         let total = n_indices * dim;
         with_gpu(|gpu| {
@@ -476,7 +480,9 @@ impl MathBackend for CudaBackend {
             #[cfg(feature = "bf16")]
             if weight.f32_is_stub {
                 // Weight is bf16-only — use bf16 embedding kernel
-                let bf16_weight = weight.bf16_data.get()
+                let bf16_weight = weight
+                    .bf16_data
+                    .get()
                     .expect("embedding: f32 is stub but no bf16 data");
                 unsafe {
                     gpu.stream
@@ -604,12 +610,7 @@ impl MathBackend for CudaBackend {
 
     // ---- Llama-specific ops ----
 
-    fn rmsnorm(
-        input: &GpuStorage,
-        weight: &GpuStorage,
-        shape: &Shape,
-        eps: f32,
-    ) -> GpuStorage {
+    fn rmsnorm(input: &GpuStorage, weight: &GpuStorage, shape: &Shape, eps: f32) -> GpuStorage {
         let dims = shape.dims();
         let d = *dims.last().unwrap();
         let rows = input.len / d;
@@ -952,23 +953,21 @@ impl MathBackend for CudaBackend {
         col_count: usize,
     ) {
         let n = rows * col_count;
-        with_gpu(|gpu| {
-            unsafe {
-                gpu.stream
-                    .launch_builder(&gpu.kernels.scatter_columns)
-                    .arg(&mut dst.inner)
-                    .arg(&src.inner)
-                    .arg(&rows)
-                    .arg(&total_cols)
-                    .arg(&col_start)
-                    .arg(&col_count)
-                    .launch(LaunchConfig {
-                        grid_dim: (grid_for(n, BLOCK), 1, 1),
-                        block_dim: (BLOCK, 1, 1),
-                        shared_mem_bytes: 0,
-                    })
-                    .unwrap();
-            }
+        with_gpu(|gpu| unsafe {
+            gpu.stream
+                .launch_builder(&gpu.kernels.scatter_columns)
+                .arg(&mut dst.inner)
+                .arg(&src.inner)
+                .arg(&rows)
+                .arg(&total_cols)
+                .arg(&col_start)
+                .arg(&col_count)
+                .launch(LaunchConfig {
+                    grid_dim: (grid_for(n, BLOCK), 1, 1),
+                    block_dim: (BLOCK, 1, 1),
+                    shared_mem_bytes: 0,
+                })
+                .unwrap();
         });
     }
 
@@ -1014,21 +1013,19 @@ impl MathBackend for CudaBackend {
         mask_value: f32,
     ) {
         let n = seq_len * seq_len;
-        with_gpu(|gpu| {
-            unsafe {
-                gpu.stream
-                    .launch_builder(&gpu.kernels.causal_mask_scale)
-                    .arg(&mut scores.inner)
-                    .arg(&seq_len)
-                    .arg(&scale)
-                    .arg(&mask_value)
-                    .launch(LaunchConfig {
-                        grid_dim: (grid_for(n, BLOCK), 1, 1),
-                        block_dim: (BLOCK, 1, 1),
-                        shared_mem_bytes: 0,
-                    })
-                    .unwrap();
-            }
+        with_gpu(|gpu| unsafe {
+            gpu.stream
+                .launch_builder(&gpu.kernels.causal_mask_scale)
+                .arg(&mut scores.inner)
+                .arg(&seq_len)
+                .arg(&scale)
+                .arg(&mask_value)
+                .launch(LaunchConfig {
+                    grid_dim: (grid_for(n, BLOCK), 1, 1),
+                    block_dim: (BLOCK, 1, 1),
+                    shared_mem_bytes: 0,
+                })
+                .unwrap();
         });
     }
 
@@ -1173,22 +1170,20 @@ impl MathBackend for CudaBackend {
         mask_value: f32,
     ) {
         let total = num_matrices * seq_len * seq_len;
-        with_gpu(|gpu| {
-            unsafe {
-                gpu.stream
-                    .launch_builder(&gpu.kernels.batched_causal_mask_scale)
-                    .arg(&mut scores.inner)
-                    .arg(&num_matrices)
-                    .arg(&seq_len)
-                    .arg(&scale)
-                    .arg(&mask_value)
-                    .launch(LaunchConfig {
-                        grid_dim: (grid_for(total, BLOCK), 1, 1),
-                        block_dim: (BLOCK, 1, 1),
-                        shared_mem_bytes: 0,
-                    })
-                    .unwrap();
-            }
+        with_gpu(|gpu| unsafe {
+            gpu.stream
+                .launch_builder(&gpu.kernels.batched_causal_mask_scale)
+                .arg(&mut scores.inner)
+                .arg(&num_matrices)
+                .arg(&seq_len)
+                .arg(&scale)
+                .arg(&mask_value)
+                .launch(LaunchConfig {
+                    grid_dim: (grid_for(total, BLOCK), 1, 1),
+                    block_dim: (BLOCK, 1, 1),
+                    shared_mem_bytes: 0,
+                })
+                .unwrap();
         });
     }
 }
@@ -1259,9 +1254,7 @@ mod bf16_ops {
             let beta: f32 = 0.0;
 
             unsafe {
-                use cudarc::cublas::sys::{
-                    cublasComputeType_t, cublasGemmAlgo_t, cudaDataType_t,
-                };
+                use cudarc::cublas::sys::{cublasComputeType_t, cublasGemmAlgo_t, cudaDataType_t};
                 use cudarc::driver::{DevicePtr, DevicePtrMut};
 
                 let (a_ptr, _a_rec) = a_bf16.device_ptr(&gpu.stream);
@@ -1295,5 +1288,4 @@ mod bf16_ops {
             GpuStorage::new(c_f32, m * n)
         })
     }
-
 }

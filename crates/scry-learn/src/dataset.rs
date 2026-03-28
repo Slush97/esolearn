@@ -564,10 +564,7 @@ impl Dataset {
         let labels = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"];
         let label_width = labels.iter().map(|l| l.len()).max().unwrap_or(0);
 
-        let col_widths: Vec<usize> = stats
-            .iter()
-            .map(|s| s.name.len().max(12))
-            .collect();
+        let col_widths: Vec<usize> = stats.iter().map(|s| s.name.len().max(12)).collect();
 
         // Header row.
         print!("{:>width$}", "", width = label_width);
@@ -949,17 +946,9 @@ mod tests {
 
     #[test]
     fn test_describe_summary() {
-        let features = vec![
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![10.0, 20.0, 30.0, 40.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0], vec![10.0, 20.0, 30.0, 40.0]];
         let target = vec![0.0, 1.0, 0.0, 1.0];
-        let ds = Dataset::new(
-            features,
-            target,
-            vec!["a".into(), "b".into()],
-            "t",
-        );
+        let ds = Dataset::new(features, target, vec!["a".into(), "b".into()], "t");
 
         let stats = ds.summary();
         assert_eq!(stats.len(), 3); // 2 features + 1 target

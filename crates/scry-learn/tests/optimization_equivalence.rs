@@ -182,8 +182,10 @@ fn sigmoid_equals_softmax_proof() {
         );
     }
 
-    println!("\n  max |sigmoid - softmax| across {n_trials} random + {} extreme = {max_err:.2e}",
-        extreme_cases.len());
+    println!(
+        "\n  max |sigmoid - softmax| across {n_trials} random + {} extreme = {max_err:.2e}",
+        extreme_cases.len()
+    );
     println!("  PASS: sigmoid ≡ softmax for binary classification\n");
 }
 
@@ -231,9 +233,7 @@ fn lasso_dense_matches_sparse() {
     );
 
     // Compare predictions on test set
-    let test_rows: Vec<Vec<f64>> = (0..test.n_samples())
-        .map(|i| test.sample(i))
-        .collect();
+    let test_rows: Vec<Vec<f64>> = (0..test.n_samples()).map(|i| test.sample(i)).collect();
     let pred_dense = lasso_dense.predict(&test_rows).unwrap();
     let pred_sparse = lasso_sparse.predict(&test_rows).unwrap();
     let mut max_pred_diff = 0.0_f64;
@@ -264,9 +264,7 @@ fn elastic_net_dense_matches_sparse() {
     let (train, test) = train_test_split(&data, 0.2, 42);
 
     let l1_ratios = [0.0, 0.25, 0.5, 0.75, 1.0];
-    let test_rows: Vec<Vec<f64>> = (0..test.n_samples())
-        .map(|i| test.sample(i))
-        .collect();
+    let test_rows: Vec<Vec<f64>> = (0..test.n_samples()).map(|i| test.sample(i)).collect();
 
     let csc = CscMatrix::from_dense(&train.features);
 
@@ -359,9 +357,7 @@ fn binary_logreg_matches_gd_solver() {
         .max_iter(2000);
     lr_gd.fit(&train).unwrap();
 
-    let test_rows: Vec<Vec<f64>> = (0..test.n_samples())
-        .map(|i| test.sample(i))
-        .collect();
+    let test_rows: Vec<Vec<f64>> = (0..test.n_samples()).map(|i| test.sample(i)).collect();
 
     let pred_lbfgs = lr_lbfgs.predict(&test_rows).unwrap();
     let pred_gd = lr_gd.predict(&test_rows).unwrap();
@@ -379,7 +375,10 @@ fn binary_logreg_matches_gd_solver() {
 
     println!("  L-BFGS accuracy = {acc_lbfgs:.4}");
     println!("  GD accuracy     = {acc_gd:.4}");
-    println!("  agreement       = {agreement:.4} ({n_agree}/{})", pred_lbfgs.len());
+    println!(
+        "  agreement       = {agreement:.4} ({n_agree}/{})",
+        pred_lbfgs.len()
+    );
 
     assert!(
         agreement >= 0.93,
@@ -393,7 +392,12 @@ fn binary_logreg_matches_gd_solver() {
     let mut proba_diffs: Vec<f64> = proba_lbfgs
         .iter()
         .zip(proba_gd.iter())
-        .map(|(a, b)| a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max))
+        .map(|(a, b)| {
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0, f64::max)
+        })
         .collect();
     proba_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median_diff = proba_diffs[proba_diffs.len() / 2];
@@ -427,9 +431,7 @@ fn lbfgs_allocation_count_bounded() {
 
     // First: 50 iterations
     let snap_before = AllocSnapshot::reset();
-    let mut lr_50 = LogisticRegression::new()
-        .solver(Solver::Lbfgs)
-        .max_iter(50);
+    let mut lr_50 = LogisticRegression::new().solver(Solver::Lbfgs).max_iter(50);
     lr_50.fit(&data_50).unwrap();
     let delta_50 = AllocSnapshot::now().delta_from(snap_before);
 
@@ -441,8 +443,16 @@ fn lbfgs_allocation_count_bounded() {
     lr_200.fit(&data_50b).unwrap();
     let delta_200 = AllocSnapshot::now().delta_from(snap_before);
 
-    println!("  50  iterations: {} allocs, peak {}", format_count(delta_50.alloc_count), format_bytes(delta_50.peak_increase));
-    println!("  200 iterations: {} allocs, peak {}", format_count(delta_200.alloc_count), format_bytes(delta_200.peak_increase));
+    println!(
+        "  50  iterations: {} allocs, peak {}",
+        format_count(delta_50.alloc_count),
+        format_bytes(delta_50.peak_increase)
+    );
+    println!(
+        "  200 iterations: {} allocs, peak {}",
+        format_count(delta_200.alloc_count),
+        format_bytes(delta_200.peak_increase)
+    );
 
     // Report per-iteration alloc rate for observability.
     // The 50-iter run may converge early (fewer actual iterations), so the
@@ -489,7 +499,10 @@ fn lasso_no_feature_matrix_allocation() {
 
     println!("  dataset: {n_samples} samples × {n_features} features");
     println!("  old feature_matrix would be: {old_alloc_bytes} bytes");
-    println!("  peak memory increase: {}", format_bytes(delta.peak_increase));
+    println!(
+        "  peak memory increase: {}",
+        format_bytes(delta.peak_increase)
+    );
     println!("  alloc count: {}", format_count(delta.alloc_count));
 
     // Peak includes residuals, beta, col_norm_sq, plus Dataset validation and
@@ -503,7 +516,10 @@ fn lasso_no_feature_matrix_allocation() {
         format_bytes(threshold)
     );
 
-    println!("  PASS: Lasso peak < {} (regression guard)\n", format_bytes(threshold));
+    println!(
+        "  PASS: Lasso peak < {} (regression guard)\n",
+        format_bytes(threshold)
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

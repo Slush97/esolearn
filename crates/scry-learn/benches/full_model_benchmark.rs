@@ -14,7 +14,9 @@
 #[path = "benchmark_config.rs"]
 mod benchmark_config;
 
-use benchmark_config::{gen_classification, SEED, to_row_major, configs, gen_regression, gen_multiclass, gen_anomaly};
+use benchmark_config::{
+    configs, gen_anomaly, gen_classification, gen_multiclass, gen_regression, to_row_major, SEED,
+};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 // ═══════════════════════════════════════════════════════════════════
@@ -32,8 +34,8 @@ fn bench_classifiers(c: &mut Criterion) {
     group.bench_function("DecisionTree/2k", |b| {
         b.iter(|| {
             let d = gen_classification(2000, 10, SEED);
-            let mut m = scry_learn::tree::DecisionTreeClassifier::new()
-                .max_depth(configs::DT_MAX_DEPTH);
+            let mut m =
+                scry_learn::tree::DecisionTreeClassifier::new().max_depth(configs::DT_MAX_DEPTH);
             m.fit(black_box(&d)).unwrap();
         });
     });
@@ -130,7 +132,9 @@ fn bench_classifiers(c: &mut Criterion) {
             b.iter(|| {
                 let d = gen_classification(200, 10, SEED);
                 let mut m = scry_learn::svm::KernelSVC::new()
-                    .kernel(scry_learn::svm::Kernel::RBF { gamma: configs::KSVC_GAMMA })
+                    .kernel(scry_learn::svm::Kernel::RBF {
+                        gamma: configs::KSVC_GAMMA,
+                    })
                     .c(configs::KSVC_C)
                     .max_iter(100);
                 m.fit(black_box(&d)).unwrap();
@@ -145,8 +149,7 @@ fn bench_classifiers(c: &mut Criterion) {
     pred_group.sample_size(20);
 
     // Pre-fit models for prediction benchmarking.
-    let mut dt = scry_learn::tree::DecisionTreeClassifier::new()
-        .max_depth(configs::DT_MAX_DEPTH);
+    let mut dt = scry_learn::tree::DecisionTreeClassifier::new().max_depth(configs::DT_MAX_DEPTH);
     dt.fit(&data).unwrap();
 
     let mut rf = scry_learn::tree::RandomForestClassifier::new()
@@ -207,8 +210,7 @@ fn bench_regressors(c: &mut Criterion) {
     group.bench_function("Lasso/2k", |b| {
         b.iter(|| {
             let d = gen_regression(2000, 10, SEED);
-            let mut m =
-                scry_learn::linear::LassoRegression::new().alpha(configs::LASSO_ALPHA);
+            let mut m = scry_learn::linear::LassoRegression::new().alpha(configs::LASSO_ALPHA);
             m.fit(black_box(&d)).unwrap();
         });
     });
@@ -228,8 +230,8 @@ fn bench_regressors(c: &mut Criterion) {
     group.bench_function("DecisionTreeRegressor/2k", |b| {
         b.iter(|| {
             let d = gen_regression(2000, 10, SEED);
-            let mut m = scry_learn::tree::DecisionTreeRegressor::new()
-                .max_depth(configs::DT_MAX_DEPTH);
+            let mut m =
+                scry_learn::tree::DecisionTreeRegressor::new().max_depth(configs::DT_MAX_DEPTH);
             m.fit(black_box(&d)).unwrap();
         });
     });
@@ -274,8 +276,7 @@ fn bench_regressors(c: &mut Criterion) {
     group.bench_function("KnnRegressor/2k", |b| {
         b.iter(|| {
             let d = gen_regression(2000, 10, SEED);
-            let mut m =
-                scry_learn::neighbors::KnnRegressor::new().k(configs::KNN_K);
+            let mut m = scry_learn::neighbors::KnnRegressor::new().k(configs::KNN_K);
             m.fit(black_box(&d)).unwrap();
         });
     });
@@ -295,8 +296,10 @@ fn bench_regressors(c: &mut Criterion) {
         group.bench_function("KernelSVR_RBF/200", |b| {
             b.iter(|| {
                 let d = gen_regression(200, 10, SEED);
-                let mut m = scry_learn::svm::KernelSVR::new()
-                    .kernel(scry_learn::svm::Kernel::RBF { gamma: configs::KSVC_GAMMA });
+                let mut m =
+                    scry_learn::svm::KernelSVR::new().kernel(scry_learn::svm::Kernel::RBF {
+                        gamma: configs::KSVC_GAMMA,
+                    });
                 m.fit(black_box(&d)).unwrap();
             });
         });
@@ -314,8 +317,7 @@ fn bench_regressors(c: &mut Criterion) {
     let mut lr = scry_learn::linear::LinearRegression::new();
     lr.fit(&data).unwrap();
 
-    let mut dt_r = scry_learn::tree::DecisionTreeRegressor::new()
-        .max_depth(configs::DT_MAX_DEPTH);
+    let mut dt_r = scry_learn::tree::DecisionTreeRegressor::new().max_depth(configs::DT_MAX_DEPTH);
     dt_r.fit(&data).unwrap();
 
     let mut rf_r = scry_learn::tree::RandomForestRegressor::new()
@@ -377,7 +379,8 @@ fn bench_clustering(c: &mut Criterion) {
     group.bench_function("DBSCAN/2k", |b| {
         b.iter(|| {
             let d = gen_multiclass(2000, 10, 3, SEED);
-            let mut m = scry_learn::cluster::Dbscan::new(configs::DBSCAN_EPS, configs::DBSCAN_MIN_SAMPLES);
+            let mut m =
+                scry_learn::cluster::Dbscan::new(configs::DBSCAN_EPS, configs::DBSCAN_MIN_SAMPLES);
             m.fit(black_box(&d)).unwrap();
         });
     });
@@ -417,19 +420,17 @@ fn bench_anomaly(c: &mut Criterion) {
     // ── IsolationForest fit ──
     group.bench_function("IsolationForest_fit/2k", |b| {
         b.iter(|| {
-            let mut m =
-                scry_learn::anomaly::IsolationForest::new()
-                    .n_estimators(configs::IFOREST_N_ESTIMATORS)
-                    .seed(SEED);
+            let mut m = scry_learn::anomaly::IsolationForest::new()
+                .n_estimators(configs::IFOREST_N_ESTIMATORS)
+                .seed(SEED);
             m.fit(black_box(&rows)).unwrap();
         });
     });
 
     // ── IsolationForest predict ──
-    let mut iforest =
-        scry_learn::anomaly::IsolationForest::new()
-            .n_estimators(configs::IFOREST_N_ESTIMATORS)
-            .seed(SEED);
+    let mut iforest = scry_learn::anomaly::IsolationForest::new()
+        .n_estimators(configs::IFOREST_N_ESTIMATORS)
+        .seed(SEED);
     iforest.fit(&rows).unwrap();
 
     group.bench_function("IsolationForest_predict/2k", |b| {

@@ -232,7 +232,12 @@ fn init_wgpu() -> WgpuCtx {
         cache: None,
     });
 
-    WgpuCtx { device, queue, pipeline, bgl }
+    WgpuCtx {
+        device,
+        queue,
+        pipeline,
+        bgl,
+    }
 }
 
 fn bgl_entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntry {
@@ -250,9 +255,9 @@ fn bgl_entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayout
 
 /// Dispatch with pre-allocated wgpu buffers (pure dispatch overhead).
 fn wgpu_dispatch(ctx: &WgpuCtx, bg: &wgpu::BindGroup, wg_x: u32, wg_y: u32) {
-    let mut enc =
-        ctx.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    let mut enc = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
@@ -272,21 +277,27 @@ fn wgpu_matmul_e2e(ctx: &WgpuCtx, a: &[f32], b: &[f32], n: u32) -> Vec<f32> {
     let elems = (n * n) as usize;
     let dims = [n, n, n, 0u32];
 
-    let dims_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(&dims),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let a_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(a),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let b_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::cast_slice(b),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let dims_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(&dims),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+    let a_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(a),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+    let b_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::cast_slice(b),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
     let c_buf = ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: (elems * 4) as u64,
@@ -304,16 +315,28 @@ fn wgpu_matmul_e2e(ctx: &WgpuCtx, a: &[f32], b: &[f32], n: u32) -> Vec<f32> {
         label: None,
         layout: &ctx.bgl,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: dims_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: a_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: b_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: c_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: dims_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: a_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: b_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: c_buf.as_entire_binding(),
+            },
         ],
     });
 
-    let mut enc =
-        ctx.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    let mut enc = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
@@ -342,7 +365,14 @@ fn wgpu_matmul_e2e(ctx: &WgpuCtx, a: &[f32], b: &[f32], n: u32) -> Vec<f32> {
 }
 
 /// Full end-to-end scry-gpu matmul: upload + dispatch + download.
-fn scry_matmul_e2e(dev: &Device, kernel: &Kernel, a: &[f32], b: &[f32], n: u32, tile: u32) -> Vec<f32> {
+fn scry_matmul_e2e(
+    dev: &Device,
+    kernel: &Kernel,
+    a: &[f32],
+    b: &[f32],
+    n: u32,
+    tile: u32,
+) -> Vec<f32> {
     let sa = dev.upload(a).unwrap();
     let sb = dev.upload(b).unwrap();
     let sc = dev.alloc::<f32>((n * n) as usize).unwrap();
@@ -376,7 +406,13 @@ fn main() {
     println!("═══ Dispatch throughput (pre-allocated buffers) ═══");
 
     for &n in &[256u32, 512, 1024, 2048, 4096] {
-        let iters: u32 = if n >= 4096 { 10 } else if n >= 2048 { 20 } else { 50 };
+        let iters: u32 = if n >= 4096 {
+            10
+        } else if n >= 2048 {
+            20
+        } else {
+            50
+        };
         let elems = (n * n) as usize;
         let flops = 2.0 * (n as f64).powi(3);
 
@@ -385,21 +421,27 @@ fn main() {
 
         // wgpu setup
         let wgpu_dims = [n, n, n, 0u32];
-        let wgpu_dims_buf = wctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&wgpu_dims),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let wgpu_a = wctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&a_data),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let wgpu_b = wctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(&b_data),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let wgpu_dims_buf = wctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&wgpu_dims),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+        let wgpu_a = wctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&a_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+        let wgpu_b = wctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&b_data),
+                usage: wgpu::BufferUsages::STORAGE,
+            });
         let wgpu_c = wctx.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: (elems * 4) as u64,
@@ -410,10 +452,22 @@ fn main() {
             label: None,
             layout: &wctx.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu_dims_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu_a.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu_b.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu_c.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu_dims_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu_a.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu_b.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu_c.as_entire_binding(),
+                },
             ],
         });
         let wg = n.div_ceil(16);
@@ -438,30 +492,42 @@ fn main() {
 
         // scry-gpu tiled 16×16
         scry.run_configured(
-            &scry_tiled, &[&scry_a, &scry_b, &scry_c],
-            [n.div_ceil(16), n.div_ceil(16), 1], Some(pc),
-        ).unwrap();
+            &scry_tiled,
+            &[&scry_a, &scry_b, &scry_c],
+            [n.div_ceil(16), n.div_ceil(16), 1],
+            Some(pc),
+        )
+        .unwrap();
         let start = Instant::now();
         for _ in 0..iters {
             scry.run_configured(
-                &scry_tiled, &[&scry_a, &scry_b, &scry_c],
-                [n.div_ceil(16), n.div_ceil(16), 1], Some(pc),
-            ).unwrap();
+                &scry_tiled,
+                &[&scry_a, &scry_b, &scry_c],
+                [n.div_ceil(16), n.div_ceil(16), 1],
+                Some(pc),
+            )
+            .unwrap();
         }
         let scry_tiled_t = start.elapsed() / iters;
         let scry_tiled_gf = flops / scry_tiled_t.as_secs_f64() / 1e9;
 
         // scry-gpu coarse 4×4
         scry.run_configured(
-            &scry_coarse, &[&scry_a, &scry_b, &scry_c],
-            [n.div_ceil(64), n.div_ceil(64), 1], Some(pc),
-        ).unwrap();
+            &scry_coarse,
+            &[&scry_a, &scry_b, &scry_c],
+            [n.div_ceil(64), n.div_ceil(64), 1],
+            Some(pc),
+        )
+        .unwrap();
         let start = Instant::now();
         for _ in 0..iters {
             scry.run_configured(
-                &scry_coarse, &[&scry_a, &scry_b, &scry_c],
-                [n.div_ceil(64), n.div_ceil(64), 1], Some(pc),
-            ).unwrap();
+                &scry_coarse,
+                &[&scry_a, &scry_b, &scry_c],
+                [n.div_ceil(64), n.div_ceil(64), 1],
+                Some(pc),
+            )
+            .unwrap();
         }
         let scry_coarse_t = start.elapsed() / iters;
         let scry_coarse_gf = flops / scry_coarse_t.as_secs_f64() / 1e9;
@@ -488,7 +554,13 @@ fn main() {
     println!("  simulates scry-llm's per-call pattern\n");
 
     for &n in &[256u32, 512, 1024, 2048] {
-        let iters: u32 = if n >= 2048 { 10 } else if n >= 1024 { 20 } else { 50 };
+        let iters: u32 = if n >= 2048 {
+            10
+        } else if n >= 1024 {
+            20
+        } else {
+            50
+        };
         let elems = (n * n) as usize;
         let flops = 2.0 * (n as f64).powi(3);
 

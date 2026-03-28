@@ -198,7 +198,8 @@ impl BpeTokenizer {
         let encoder: HashMap<String, usize> = serde_json::from_str(&vocab_data)
             .map_err(|e| format!("failed to parse vocab.json: {e}"))?;
 
-        let decoder: HashMap<usize, String> = encoder.iter().map(|(k, &v)| (v, k.clone())).collect();
+        let decoder: HashMap<usize, String> =
+            encoder.iter().map(|(k, &v)| (v, k.clone())).collect();
 
         let mut bpe_ranks = HashMap::new();
         for (rank, line) in merges_data.lines().enumerate() {
@@ -208,7 +209,11 @@ impl BpeTokenizer {
             }
             let parts: Vec<&str> = line.split(' ').collect();
             if parts.len() == 2 {
-                let actual_rank = if merges_data.lines().next().map_or(false, |l| l.starts_with('#')) {
+                let actual_rank = if merges_data
+                    .lines()
+                    .next()
+                    .map_or(false, |l| l.starts_with('#'))
+                {
                     rank - 1
                 } else {
                     rank
@@ -234,7 +239,10 @@ impl BpeTokenizer {
 
         for chunk in pre_tokenize(text) {
             // Convert bytes to unicode representation
-            let bpe_input: String = chunk.bytes().map(|b| self.byte_encoder[b as usize]).collect();
+            let bpe_input: String = chunk
+                .bytes()
+                .map(|b| self.byte_encoder[b as usize])
+                .collect();
 
             // Run BPE on this word
             let bpe_tokens = self.bpe(&bpe_input);
@@ -317,14 +325,17 @@ fn pre_tokenize_llama(text: &str) -> Vec<String> {
         }
 
         // `\s*[\r\n]+` — optional whitespace then newlines
-        if chars[i] == '\r' || chars[i] == '\n' || (chars[i].is_whitespace() && {
-            // Look ahead for a newline
-            let mut j = i;
-            while j < n && chars[j].is_whitespace() && chars[j] != '\r' && chars[j] != '\n' {
-                j += 1;
-            }
-            j < n && (chars[j] == '\r' || chars[j] == '\n')
-        }) {
+        if chars[i] == '\r'
+            || chars[i] == '\n'
+            || (chars[i].is_whitespace() && {
+                // Look ahead for a newline
+                let mut j = i;
+                while j < n && chars[j].is_whitespace() && chars[j] != '\r' && chars[j] != '\n' {
+                    j += 1;
+                }
+                j < n && (chars[j] == '\r' || chars[j] == '\n')
+            })
+        {
             let start = i;
             // Consume optional whitespace
             while i < n && chars[i].is_whitespace() && chars[i] != '\r' && chars[i] != '\n' {
@@ -339,7 +350,12 @@ fn pre_tokenize_llama(text: &str) -> Vec<String> {
         }
 
         // `[^\r\n\p{L}\p{N}]?\p{L}+` — optional non-letter/non-digit/non-newline, then letters
-        if chars[i].is_alphabetic() || (!chars[i].is_alphanumeric() && !is_newline(chars[i]) && i + 1 < n && chars[i + 1].is_alphabetic()) {
+        if chars[i].is_alphabetic()
+            || (!chars[i].is_alphanumeric()
+                && !is_newline(chars[i])
+                && i + 1 < n
+                && chars[i + 1].is_alphabetic())
+        {
             let start = i;
             // Optional leading non-letter/non-digit/non-newline
             if !chars[i].is_alphabetic() {
@@ -365,8 +381,7 @@ fn pre_tokenize_llama(text: &str) -> Vec<String> {
         }
 
         // ` ?[^\s\p{L}\p{N}]+[\r\n]*` — optional space, non-alnum-non-ws, optional trailing newlines
-        if (chars[i] == ' ' && i + 1 < n && is_punct_char(chars[i + 1]))
-            || is_punct_char(chars[i])
+        if (chars[i] == ' ' && i + 1 < n && is_punct_char(chars[i + 1])) || is_punct_char(chars[i])
         {
             let start = i;
             if chars[i] == ' ' {
@@ -473,7 +488,10 @@ impl HfTokenizer {
         let mut special_decoder = HashMap::new();
         if let Some(added) = root.get("added_tokens").and_then(|v| v.as_array()) {
             for tok in added {
-                let is_special = tok.get("special").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_special = tok
+                    .get("special")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if !is_special {
                     continue;
                 }
@@ -529,7 +547,10 @@ impl HfTokenizer {
     pub fn encode_ordinary(&self, text: &str) -> Vec<usize> {
         let mut token_ids = Vec::new();
         for chunk in pre_tokenize_llama(text) {
-            let bpe_input: String = chunk.bytes().map(|b| self.byte_encoder[b as usize]).collect();
+            let bpe_input: String = chunk
+                .bytes()
+                .map(|b| self.byte_encoder[b as usize])
+                .collect();
             for tok in bpe(&bpe_input, &self.bpe_ranks) {
                 if let Some(&id) = self.encoder.get(&tok) {
                     token_ids.push(id);
@@ -666,7 +687,10 @@ impl HfTokenizer {
     /// BPE-encode a single text segment (not a special token).
     fn encode_segment(&self, text: &str, token_ids: &mut Vec<usize>) {
         for chunk in pre_tokenize_llama(text) {
-            let bpe_input: String = chunk.bytes().map(|b| self.byte_encoder[b as usize]).collect();
+            let bpe_input: String = chunk
+                .bytes()
+                .map(|b| self.byte_encoder[b as usize])
+                .collect();
             for tok in bpe(&bpe_input, &self.bpe_ranks) {
                 if let Some(&id) = self.encoder.get(&tok) {
                     token_ids.push(id);

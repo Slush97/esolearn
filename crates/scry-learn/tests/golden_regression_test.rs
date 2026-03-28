@@ -106,8 +106,7 @@ fn golden_classification_accuracy() {
                 cross_val_score_stratified(&model, &model_data, 5, scorer, SEED).unwrap()
             }
             "MultinomialNB" => {
-                let model = scry_learn::naive_bayes::MultinomialNB::new()
-                    .alpha(configs::MNB_ALPHA);
+                let model = scry_learn::naive_bayes::MultinomialNB::new().alpha(configs::MNB_ALPHA);
                 cross_val_score_stratified(&model, &model_data, 5, scorer, SEED).unwrap()
             }
             "BernoulliNB" => {
@@ -213,8 +212,7 @@ fn golden_regression_r2() {
                 model.predict(&test_rows).unwrap()
             }
             "Ridge" => {
-                let mut model =
-                    scry_learn::linear::Ridge::new(configs::RIDGE_ALPHA);
+                let mut model = scry_learn::linear::Ridge::new(configs::RIDGE_ALPHA);
                 model.fit(&train).unwrap();
                 model.predict(&test_rows).unwrap()
             }
@@ -227,8 +225,7 @@ fn golden_regression_r2() {
                 model.predict(&test_rows).unwrap()
             }
             "KnnRegressor" => {
-                let mut model =
-                    scry_learn::neighbors::KnnRegressor::new().k(configs::KNN_K);
+                let mut model = scry_learn::neighbors::KnnRegressor::new().k(configs::KNN_K);
                 model.fit(&train).unwrap();
                 model.predict(&test_rows).unwrap()
             }
@@ -287,12 +284,7 @@ fn golden_regression_r2() {
         if !passed {
             failures.push(format!(
                 "{}/{}: expected R²={:.4} ± {:.4}, got {:.4} (Δ = {:+.4})",
-                baseline.model,
-                baseline.dataset,
-                baseline.expected,
-                baseline.tolerance,
-                r2,
-                delta,
+                baseline.model, baseline.dataset, baseline.expected, baseline.tolerance, r2, delta,
             ));
         }
 
@@ -441,7 +433,9 @@ fn golden_mlp_classifier() {
         println!("  {ds_name:<20} accuracy={acc:.4}  (min={min_acc:.2})  {status}");
 
         if !passed {
-            failures.push(format!("MLPClassifier/{ds_name}: accuracy={acc:.4} < {min_acc:.2}"));
+            failures.push(format!(
+                "MLPClassifier/{ds_name}: accuracy={acc:.4} < {min_acc:.2}"
+            ));
         }
     }
 
@@ -513,7 +507,9 @@ fn golden_clustering_metrics() {
             let status = if passed { "PASS" } else { "FAIL" };
             println!("  MiniBatchKMeans/{ds_name:10} sil={sil:.4} ari={ari:.4}  {status}");
             if !passed {
-                failures.push(format!("MiniBatchKMeans/{ds_name}: silhouette={sil:.4} <= 0"));
+                failures.push(format!(
+                    "MiniBatchKMeans/{ds_name}: silhouette={sil:.4} <= 0"
+                ));
             }
         }
 
@@ -551,9 +547,8 @@ fn golden_clustering_metrics() {
 
         // Agglomerative
         {
-            let mut model = scry_learn::cluster::AgglomerativeClustering::new(
-                configs::AGGLO_N_CLUSTERS,
-            );
+            let mut model =
+                scry_learn::cluster::AgglomerativeClustering::new(configs::AGGLO_N_CLUSTERS);
             model.fit(&scaled).unwrap();
             let labels = labels_usize_to_f64(model.labels());
             let sil = scry_learn::cluster::silhouette_score(&rows, model.labels());
@@ -635,8 +630,16 @@ fn golden_text_vectorizers() {
         let vocab_size = cv.n_features();
         assert!(vocab_size > 0, "CountVectorizer: empty vocabulary");
         assert_eq!(matrix.n_rows(), 5, "CountVectorizer: wrong n_rows");
-        assert_eq!(matrix.n_cols(), vocab_size, "CountVectorizer: cols != vocab");
-        println!("  CountVectorizer: vocab_size={vocab_size}, matrix={}x{}", matrix.n_rows(), matrix.n_cols());
+        assert_eq!(
+            matrix.n_cols(),
+            vocab_size,
+            "CountVectorizer: cols != vocab"
+        );
+        println!(
+            "  CountVectorizer: vocab_size={vocab_size}, matrix={}x{}",
+            matrix.n_rows(),
+            matrix.n_cols()
+        );
     }
 
     // TfidfVectorizer
@@ -647,7 +650,11 @@ fn golden_text_vectorizers() {
         let vocab_size = tfidf.n_features();
         assert!(vocab_size > 0, "TfidfVectorizer: empty vocabulary");
         assert_eq!(matrix.n_rows(), 5, "TfidfVectorizer: wrong n_rows");
-        assert_eq!(matrix.n_cols(), vocab_size, "TfidfVectorizer: cols != vocab");
+        assert_eq!(
+            matrix.n_cols(),
+            vocab_size,
+            "TfidfVectorizer: cols != vocab"
+        );
 
         // Check L2 norm of each row is approximately 1.0
         let dense = matrix.to_dense();

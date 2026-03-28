@@ -255,7 +255,11 @@ impl LogisticRegression {
         let mut max_logit = vec![0.0; n];
         let mut sum_exp = vec![0.0; n];
         let use_par = n * m >= crate::constants::LOGREG_PAR_THRESHOLD;
-        let mut feature_grad_buf = if use_par { vec![0.0; m * k] } else { Vec::new() };
+        let mut feature_grad_buf = if use_par {
+            vec![0.0; m * k]
+        } else {
+            Vec::new()
+        };
 
         lbfgs::minimize(
             &mut params,
@@ -339,12 +343,15 @@ impl LogisticRegression {
                 // Accumulate feature gradients column-by-column (cache-friendly).
                 if use_par {
                     let errors: &[f64] = &logits;
-                    feature_grad_buf.par_chunks_mut(k)
+                    feature_grad_buf
+                        .par_chunks_mut(k)
                         .zip(data.features.par_iter())
                         .for_each(|(chunk, feat_col)| {
                             for c in 0..k {
                                 let mut acc = 0.0;
-                                for i in 0..n { acc += errors[i * k + c] * feat_col[i]; }
+                                for i in 0..n {
+                                    acc += errors[i * k + c] * feat_col[i];
+                                }
                                 chunk[c] = acc;
                             }
                         });
@@ -421,7 +428,11 @@ impl LogisticRegression {
         } else {
             compute_sample_weights(&data.target, &self.class_weight)
         };
-        let target_bin: Vec<f64> = data.target.iter().map(|&t| if t as usize == 1 { 1.0 } else { 0.0 }).collect();
+        let target_bin: Vec<f64> = data
+            .target
+            .iter()
+            .map(|&t| if t as usize == 1 { 1.0 } else { 0.0 })
+            .collect();
 
         let alpha = self.alpha;
         let inv_n = 1.0 / n as f64;
@@ -496,18 +507,23 @@ impl LogisticRegression {
                 // Feature gradients column-by-column.
                 let errors: &[f64] = &prob;
                 if use_par {
-                    data.features.par_iter()
+                    data.features
+                        .par_iter()
                         .zip(grad[1..=m].par_iter_mut())
                         .for_each(|(col, g)| {
                             let mut acc = 0.0;
-                            for i in 0..n { acc += errors[i] * col[i]; }
+                            for i in 0..n {
+                                acc += errors[i] * col[i];
+                            }
                             *g = acc;
                         });
                 } else {
                     for j in 0..m {
                         let col = &data.features[j];
                         let mut acc = 0.0;
-                        for i in 0..n { acc += errors[i] * col[i]; }
+                        for i in 0..n {
+                            acc += errors[i] * col[i];
+                        }
                         grad[j + 1] = acc;
                     }
                 }

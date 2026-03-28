@@ -682,11 +682,7 @@ impl TreeEnsembleArrays {
 
     /// Append all nodes from a HistTree (histogram-based), converting bin
     /// thresholds to raw thresholds using the binner's bin edges.
-    fn append_hist_tree(
-        &mut self,
-        nodes: &[HistNodeView],
-        tree_id: i64,
-    ) {
+    fn append_hist_tree(&mut self, nodes: &[HistNodeView], tree_id: i64) {
         for (idx, node) in nodes.iter().enumerate() {
             self.nodes_treeids.push(tree_id);
             self.nodes_nodeids.push(idx as i64);
@@ -741,18 +737,14 @@ impl RegressorLeaves {
                 self.target_ids.push(0);
                 self.target_nodeids.push(idx as i64);
                 self.target_treeids.push(tree_id);
-                self.target_weights.push((tree.predictions[li] * scale) as f32);
+                self.target_weights
+                    .push((tree.predictions[li] * scale) as f32);
             }
         }
     }
 
     /// Extract leaf predictions from HistTree nodes.
-    fn append_hist_leaves(
-        &mut self,
-        nodes: &[HistNodeView],
-        tree_id: i64,
-        scale: f64,
-    ) {
+    fn append_hist_leaves(&mut self, nodes: &[HistNodeView], tree_id: i64, scale: f64) {
         for (idx, node) in nodes.iter().enumerate() {
             if let HistNodeView::Leaf { value } = node {
                 self.target_ids.push(0);
@@ -820,7 +812,10 @@ fn build_tree_ensemble_regressor(
     let mut attrs: Vec<(&str, AttrValue)> = vec![
         ("nodes_treeids", AttrValue::Ints(&arrays.nodes_treeids)),
         ("nodes_nodeids", AttrValue::Ints(&arrays.nodes_nodeids)),
-        ("nodes_featureids", AttrValue::Ints(&arrays.nodes_featureids)),
+        (
+            "nodes_featureids",
+            AttrValue::Ints(&arrays.nodes_featureids),
+        ),
         ("nodes_values", AttrValue::Floats(&arrays.nodes_values)),
         ("nodes_modes", AttrValue::Strings(&modes_refs)),
         (
@@ -843,13 +838,7 @@ fn build_tree_ensemble_regressor(
         attrs.push(("base_values", AttrValue::Floats(&base_vals_owned)));
     }
 
-    let node = build_node(
-        "TreeEnsembleRegressor",
-        &["X"],
-        &["Y"],
-        &attrs,
-        ML_DOMAIN,
-    );
+    let node = build_node("TreeEnsembleRegressor", &["X"], &["Y"], &attrs, ML_DOMAIN);
 
     let inputs = [build_value_info("X", &[-1, n_features as i64])];
     let outputs = [build_value_info("Y", &[-1, 1])];
@@ -873,7 +862,10 @@ fn build_tree_ensemble_classifier(
     let attrs: Vec<(&str, AttrValue)> = vec![
         ("nodes_treeids", AttrValue::Ints(&arrays.nodes_treeids)),
         ("nodes_nodeids", AttrValue::Ints(&arrays.nodes_nodeids)),
-        ("nodes_featureids", AttrValue::Ints(&arrays.nodes_featureids)),
+        (
+            "nodes_featureids",
+            AttrValue::Ints(&arrays.nodes_featureids),
+        ),
         ("nodes_values", AttrValue::Floats(&arrays.nodes_values)),
         ("nodes_modes", AttrValue::Strings(&modes_refs)),
         (
@@ -905,13 +897,7 @@ fn build_tree_ensemble_classifier(
     let label_out = build_value_info("label", &[-1]);
     let proba_out = build_value_info("probabilities", &[-1, n_classes as i64]);
 
-    let graph = build_graph(
-        graph_name,
-        &inputs,
-        &[label_out, proba_out],
-        &[node],
-        &[],
-    );
+    let graph = build_graph(graph_name, &inputs, &[label_out, proba_out], &[node], &[]);
     Ok(build_model(&graph, ML_DOMAIN))
 }
 

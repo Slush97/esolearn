@@ -355,10 +355,7 @@ fn bench_saxpy(gpu: &Device) {
 
         println!("  n = {:>3}", fmt_count(n));
 
-        for (name, kernel, invocations) in [
-            ("scalar", &scalar, n),
-            ("vec4  ", &vec4, n / 4),
-        ] {
+        for (name, kernel, invocations) in [("scalar", &scalar, n), ("vec4  ", &vec4, n / 4)] {
             // warmup
             gpu.run_with_push_constants(kernel, &[&a, &b, &out], invocations, pc)
                 .expect("warmup");
@@ -402,7 +399,9 @@ fn bench_reduce(gpu: &Device) {
     println!("  subgroup_size = {}", gpu.subgroup_size());
 
     let shmem = gpu.compile(REDUCE_SHADER).expect("compile shmem reduce");
-    let subgroup = gpu.compile(REDUCE_SUBGROUP_SHADER).expect("compile subgroup reduce");
+    let subgroup = gpu
+        .compile(REDUCE_SUBGROUP_SHADER)
+        .expect("compile subgroup reduce");
 
     for &n in &[1_000_000u32, 4_000_000, 16_000_000] {
         let iters: u32 = 100;
@@ -541,7 +540,9 @@ fn bench_matmul(gpu: &Device) {
         },
         MatmulKernel {
             name: "coarse+L2",
-            kernel: gpu.compile(MATMUL_COARSE_L2_SHADER).expect("compile coarse+L2"),
+            kernel: gpu
+                .compile(MATMUL_COARSE_L2_SHADER)
+                .expect("compile coarse+L2"),
             tile_m: 64,
             tile_n: 64,
         },
@@ -560,7 +561,13 @@ fn bench_matmul(gpu: &Device) {
     ];
 
     for &n in &[512u32, 1024, 2048, 4096] {
-        let iters: u32 = if n >= 4096 { 5 } else if n >= 2048 { 20 } else { 50 };
+        let iters: u32 = if n >= 4096 {
+            5
+        } else if n >= 2048 {
+            20
+        } else {
+            50
+        };
         let elems = (n * n) as usize;
 
         let a_data: Vec<f32> = (0..elems).map(|i| (i % 100) as f32 * 0.01).collect();

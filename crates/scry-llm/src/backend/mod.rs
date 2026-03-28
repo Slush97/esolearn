@@ -260,7 +260,15 @@ pub trait MathBackend: DeviceBackend {
     ) -> Self::Storage {
         let freqs_f32: Vec<f32> = freqs.iter().map(|&f| f as f32).collect();
         let freqs_storage = Self::from_vec(freqs_f32, &Shape::new(&[head_dim / 2]));
-        Self::rope_with_freqs_scaled_preloaded(input, seq, n_heads, head_dim, start_pos, &freqs_storage, scale)
+        Self::rope_with_freqs_scaled_preloaded(
+            input,
+            seq,
+            n_heads,
+            head_dim,
+            start_pos,
+            &freqs_storage,
+            scale,
+        )
     }
 
     /// `SwiGLU`: `silu(gate) * up` where `silu(x) = x / (1 + exp(-x))`

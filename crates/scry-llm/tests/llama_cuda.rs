@@ -20,8 +20,7 @@ mod cuda_tests {
     }
 
     #[cfg(all(feature = "safetensors", feature = "tokenizer"))]
-    fn load_model_and_tokenizer<B: scry_llm::backend::MathBackend>(
-    ) -> Option<(
+    fn load_model_and_tokenizer<B: scry_llm::backend::MathBackend>() -> Option<(
         scry_llm::nn::llama::LlamaModel<B>,
         scry_llm::nn::llama::LlamaConfig,
         scry_llm::tokenizer::HfTokenizer,
@@ -47,8 +46,7 @@ mod cuda_tests {
             .collect();
         shard_paths.sort();
 
-        let shard_refs: Vec<&std::path::Path> =
-            shard_paths.iter().map(PathBuf::as_path).collect();
+        let shard_refs: Vec<&std::path::Path> = shard_paths.iter().map(PathBuf::as_path).collect();
 
         let t0 = std::time::Instant::now();
         let model = LlamaModel::<B>::from_safetensors(config.clone(), &shard_refs).unwrap();

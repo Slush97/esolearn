@@ -80,11 +80,7 @@ fn accuracy_f64(y_true: &[f64], y_pred: &[f64]) -> f64 {
 
 /// Assert that all libraries achieve comparable accuracy.
 /// Prints a parity table to stderr and panics if any library is >ε apart.
-fn assert_accuracy_parity(
-    label: &str,
-    results: &[(&str, f64)],
-    epsilon: f64,
-) {
+fn assert_accuracy_parity(label: &str, results: &[(&str, f64)], epsilon: f64) {
     eprintln!("\n┌─ ACCURACY PARITY: {label}");
     for (name, acc) in results {
         eprintln!("│  {name:<24} {:.4} ({:.1}%)", acc, acc * 100.0);
@@ -99,9 +95,7 @@ fn assert_accuracy_parity(
                     "│  ⚠ PARITY VIOLATION: |{} - {}| = {:.4} > ε={:.4}",
                     results[i].0, results[j].0, diff, epsilon
                 );
-                eprintln!(
-                    "│  Timing comparison is UNRELIABLE — models converged differently."
-                );
+                eprintln!("│  Timing comparison is UNRELIABLE — models converged differently.");
             }
         }
     }
@@ -159,21 +153,24 @@ fn load_dataset(base: &str) -> (Vec<Vec<f64>>, Vec<f64>, Vec<String>) {
 }
 
 /// Build a scry-learn Dataset from loaded data.
-fn to_scry_dataset(cols: &[Vec<f64>], target: &[f64], names: &[String]) -> scry_learn::prelude::Dataset {
-    scry_learn::prelude::Dataset::new(
-        cols.to_vec(),
-        target.to_vec(),
-        names.to_vec(),
-        "target",
-    )
+fn to_scry_dataset(
+    cols: &[Vec<f64>],
+    target: &[f64],
+    names: &[String],
+) -> scry_learn::prelude::Dataset {
+    scry_learn::prelude::Dataset::new(cols.to_vec(), target.to_vec(), names.to_vec(), "target")
 }
 
 /// Build row-major matrix from column-major.
 fn to_row_major(cols: &[Vec<f64>]) -> Vec<Vec<f64>> {
-    if cols.is_empty() { return vec![]; }
+    if cols.is_empty() {
+        return vec![];
+    }
     let n = cols[0].len();
     let m = cols.len();
-    (0..n).map(|i| (0..m).map(|j| cols[j][i]).collect()).collect()
+    (0..n)
+        .map(|i| (0..m).map(|j| cols[j][i]).collect())
+        .collect()
 }
 
 /// Build smartcore DenseMatrix from row-major features.
@@ -331,8 +328,8 @@ fn bench_dt_train(c: &mut Criterion) {
 
         // ── Accuracy parity check (run once outside benchmark loop) ──
         {
-            let mut scry_dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                .max_depth(DT_MAX_DEPTH);
+            let mut scry_dt =
+                scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
             scry_dt.fit(&scry_ds).unwrap();
             let scry_preds = scry_dt.predict(&rows).unwrap();
             let scry_acc = accuracy_f64(&target, &scry_preds);
@@ -350,14 +347,19 @@ fn bench_dt_train(c: &mut Criterion) {
             use linfa::prelude::{Fit, Predict};
             let linfa_dt = linfa_trees::DecisionTree::params()
                 .max_depth(Some(DT_MAX_DEPTH))
-                .fit(&linfa_ds).unwrap();
+                .fit(&linfa_ds)
+                .unwrap();
             let linfa_preds_arr = linfa_dt.predict(&linfa_ds);
             let linfa_preds: Vec<f64> = linfa_preds_arr.iter().map(|&p| p as f64).collect();
             let linfa_acc = accuracy_f64(&target, &linfa_preds);
 
             assert_accuracy_parity(
                 &format!("DT train/{ds_name}"),
-                &[("scry-learn", scry_acc), ("smartcore", sm_acc), ("linfa-trees", linfa_acc)],
+                &[
+                    ("scry-learn", scry_acc),
+                    ("smartcore", sm_acc),
+                    ("linfa-trees", linfa_acc),
+                ],
                 0.05,
             );
         }
@@ -365,8 +367,8 @@ fn bench_dt_train(c: &mut Criterion) {
         // ── Criterion benchmarks ──
         group.bench_with_input(BenchmarkId::new("scry-learn", ds_name), &ds_name, |b, _| {
             b.iter(|| {
-                let mut dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                    .max_depth(DT_MAX_DEPTH);
+                let mut dt =
+                    scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
                 dt.fit(black_box(&scry_ds)).unwrap();
             });
         });
@@ -382,14 +384,19 @@ fn bench_dt_train(c: &mut Criterion) {
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("linfa-trees", ds_name), &ds_name, |b, _| {
-            use linfa::prelude::Fit;
-            b.iter(|| {
-                let _ = linfa_trees::DecisionTree::params()
-                    .max_depth(Some(DT_MAX_DEPTH))
-                    .fit(black_box(&linfa_ds)).unwrap();
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("linfa-trees", ds_name),
+            &ds_name,
+            |b, _| {
+                use linfa::prelude::Fit;
+                b.iter(|| {
+                    let _ = linfa_trees::DecisionTree::params()
+                        .max_depth(Some(DT_MAX_DEPTH))
+                        .fit(black_box(&linfa_ds))
+                        .unwrap();
+                });
+            },
+        );
     }
 
     group.finish();
@@ -415,8 +422,8 @@ fn bench_dt_predict(c: &mut Criterion) {
         let linfa_ds = to_linfa_dataset(&rows, &target);
 
         // Train all models once
-        let mut scry_dt = scry_learn::prelude::DecisionTreeClassifier::new()
-            .max_depth(DT_MAX_DEPTH);
+        let mut scry_dt =
+            scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
         scry_dt.fit(&scry_ds).unwrap();
 
         let sm_dt = smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(
@@ -424,12 +431,14 @@ fn bench_dt_predict(c: &mut Criterion) {
             &target_i32,
             smartcore::tree::decision_tree_classifier::DecisionTreeClassifierParameters::default()
                 .with_max_depth(DT_MAX_DEPTH as u16),
-        ).unwrap();
+        )
+        .unwrap();
 
         use linfa::prelude::{Fit, Predict};
         let linfa_dt = linfa_trees::DecisionTree::params()
             .max_depth(Some(DT_MAX_DEPTH))
-            .fit(&linfa_ds).unwrap();
+            .fit(&linfa_ds)
+            .unwrap();
 
         group.bench_with_input(BenchmarkId::new("scry-learn", ds_name), &ds_name, |b, _| {
             b.iter(|| scry_dt.predict(black_box(&rows)).unwrap());
@@ -439,9 +448,13 @@ fn bench_dt_predict(c: &mut Criterion) {
             b.iter(|| sm_dt.predict(black_box(&sm_x)).unwrap());
         });
 
-        group.bench_with_input(BenchmarkId::new("linfa-trees", ds_name), &ds_name, |b, _| {
-            b.iter(|| linfa_dt.predict(black_box(&linfa_ds)));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("linfa-trees", ds_name),
+            &ds_name,
+            |b, _| {
+                b.iter(|| linfa_dt.predict(black_box(&linfa_ds)));
+            },
+        );
     }
 
     group.finish();
@@ -479,8 +492,11 @@ fn bench_rf_train(c: &mut Criterion) {
                 .with_n_trees(RF_N_ESTIMATORS as u16)
                 .with_max_depth(RF_MAX_DEPTH as u16);
             let sm_rf = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
-                &sm_x, &target_i32, sm_params,
-            ).unwrap();
+                &sm_x,
+                &target_i32,
+                sm_params,
+            )
+            .unwrap();
             let sm_preds_i32: Vec<i32> = sm_rf.predict(&sm_x).unwrap();
             let sm_preds: Vec<f64> = sm_preds_i32.iter().map(|&p| p as f64).collect();
 
@@ -547,8 +563,11 @@ fn bench_rf_predict(c: &mut Criterion) {
             .with_n_trees(RF_N_ESTIMATORS as u16)
             .with_max_depth(RF_MAX_DEPTH as u16);
         let sm_rf = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
-            &sm_x, &target_i32, sm_params,
-        ).unwrap();
+            &sm_x,
+            &target_i32,
+            sm_params,
+        )
+        .unwrap();
 
         group.bench_with_input(BenchmarkId::new("scry-learn", ds_name), &ds_name, |b, _| {
             b.iter(|| scry_rf.predict(black_box(&rows)).unwrap());
@@ -580,13 +599,16 @@ fn bench_logreg_train(c: &mut Criterion) {
         // Adult features span 5 orders of magnitude (fnlwgt ~190K vs education ~10).
         // Without scaling, L-BFGS cannot converge in 200 iterations.
         // This matches sklearn best practice: Pipeline(StandardScaler(), LogReg()).
-        let cols: Vec<Vec<f64>> = cols.iter().map(|col| {
-            let n = col.len() as f64;
-            let mean = col.iter().sum::<f64>() / n;
-            let var = col.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-            let std = var.sqrt().max(1e-10); // avoid div by zero
-            col.iter().map(|x| (x - mean) / std).collect()
-        }).collect();
+        let cols: Vec<Vec<f64>> = cols
+            .iter()
+            .map(|col| {
+                let n = col.len() as f64;
+                let mean = col.iter().sum::<f64>() / n;
+                let var = col.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+                let std = var.sqrt().max(1e-10); // avoid div by zero
+                col.iter().map(|x| (x - mean) / std).collect()
+            })
+            .collect();
 
         let rows = to_row_major(&cols);
         let target_i32: Vec<i32> = target.iter().map(|&t| t as i32).collect();
@@ -597,25 +619,30 @@ fn bench_logreg_train(c: &mut Criterion) {
 
         // Accuracy parity
         {
-            let mut scry_lr = scry_learn::prelude::LogisticRegression::new()
-                .max_iter(LR_MAX_ITER);
+            let mut scry_lr = scry_learn::prelude::LogisticRegression::new().max_iter(LR_MAX_ITER);
             scry_lr.fit(&scry_ds).unwrap();
             let matrix = scry_ds.feature_matrix();
             let scry_preds = scry_lr.predict(&matrix).unwrap();
 
             let sm_lr = smartcore::linear::logistic_regression::LogisticRegression::fit(
-                &sm_x, &target_i32, Default::default(),
-            ).unwrap();
+                &sm_x,
+                &target_i32,
+                Default::default(),
+            )
+            .unwrap();
             let sm_preds_i32: Vec<i32> = sm_lr.predict(&sm_x).unwrap();
             let sm_preds: Vec<f64> = sm_preds_i32.iter().map(|&p| p as f64).collect();
 
             use linfa::prelude::{Fit, Predict};
             let linfa_lr = linfa_logistic::LogisticRegression::default()
                 .max_iterations(LR_MAX_ITER as u64)
-                .fit(&linfa_ds).unwrap();
+                .fit(&linfa_ds)
+                .unwrap();
             let linfa_preds_arr = linfa_lr.predict(&linfa_ds);
-            let linfa_preds: Vec<f64> = linfa_preds_arr.iter()
-                .map(|&p| if p { 1.0 } else { 0.0 }).collect();
+            let linfa_preds: Vec<f64> = linfa_preds_arr
+                .iter()
+                .map(|&p| if p { 1.0 } else { 0.0 })
+                .collect();
 
             assert_accuracy_parity(
                 &format!("LogReg train/{ds_name}"),
@@ -630,8 +657,7 @@ fn bench_logreg_train(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("scry-learn", ds_name), &ds_name, |b, _| {
             b.iter(|| {
-                let mut lr = scry_learn::prelude::LogisticRegression::new()
-                    .max_iter(LR_MAX_ITER);
+                let mut lr = scry_learn::prelude::LogisticRegression::new().max_iter(LR_MAX_ITER);
                 lr.fit(black_box(&scry_ds)).unwrap();
             });
         });
@@ -639,19 +665,27 @@ fn bench_logreg_train(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("smartcore", ds_name), &ds_name, |b, _| {
             b.iter(|| {
                 let _ = smartcore::linear::logistic_regression::LogisticRegression::fit(
-                    black_box(&sm_x), black_box(&target_i32), Default::default(),
-                ).unwrap();
+                    black_box(&sm_x),
+                    black_box(&target_i32),
+                    Default::default(),
+                )
+                .unwrap();
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("linfa-logistic", ds_name), &ds_name, |b, _| {
-            use linfa::prelude::Fit;
-            b.iter(|| {
-                let _ = linfa_logistic::LogisticRegression::default()
-                    .max_iterations(LR_MAX_ITER as u64)
-                    .fit(black_box(&linfa_ds)).unwrap();
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("linfa-logistic", ds_name),
+            &ds_name,
+            |b, _| {
+                use linfa::prelude::Fit;
+                b.iter(|| {
+                    let _ = linfa_logistic::LogisticRegression::default()
+                        .max_iterations(LR_MAX_ITER as u64)
+                        .fit(black_box(&linfa_ds))
+                        .unwrap();
+                });
+            },
+        );
     }
 
     group.finish();
@@ -671,13 +705,16 @@ fn bench_logreg_predict(c: &mut Criterion) {
         let (cols, target, names) = load_dataset(ds_name);
 
         // Z-score standardize — must match train benchmark exactly
-        let cols: Vec<Vec<f64>> = cols.iter().map(|col| {
-            let n = col.len() as f64;
-            let mean = col.iter().sum::<f64>() / n;
-            let var = col.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-            let std = var.sqrt().max(1e-10);
-            col.iter().map(|x| (x - mean) / std).collect()
-        }).collect();
+        let cols: Vec<Vec<f64>> = cols
+            .iter()
+            .map(|col| {
+                let n = col.len() as f64;
+                let mean = col.iter().sum::<f64>() / n;
+                let var = col.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+                let std = var.sqrt().max(1e-10);
+                col.iter().map(|x| (x - mean) / std).collect()
+            })
+            .collect();
 
         let rows = to_row_major(&cols);
         let target_i32: Vec<i32> = target.iter().map(|&t| t as i32).collect();
@@ -687,18 +724,21 @@ fn bench_logreg_predict(c: &mut Criterion) {
         let linfa_ds = to_linfa_dataset_bool(&rows, &target);
 
         // Train all models once
-        let mut scry_lr = scry_learn::prelude::LogisticRegression::new()
-            .max_iter(LR_MAX_ITER);
+        let mut scry_lr = scry_learn::prelude::LogisticRegression::new().max_iter(LR_MAX_ITER);
         scry_lr.fit(&scry_ds).unwrap();
 
         let sm_lr = smartcore::linear::logistic_regression::LogisticRegression::fit(
-            &sm_x, &target_i32, Default::default(),
-        ).unwrap();
+            &sm_x,
+            &target_i32,
+            Default::default(),
+        )
+        .unwrap();
 
         use linfa::prelude::{Fit, Predict};
         let linfa_lr = linfa_logistic::LogisticRegression::default()
             .max_iterations(LR_MAX_ITER as u64)
-            .fit(&linfa_ds).unwrap();
+            .fit(&linfa_ds)
+            .unwrap();
 
         let test_features = scry_ds.feature_matrix();
 
@@ -710,9 +750,13 @@ fn bench_logreg_predict(c: &mut Criterion) {
             b.iter(|| sm_lr.predict(black_box(&sm_x)).unwrap());
         });
 
-        group.bench_with_input(BenchmarkId::new("linfa-logistic", ds_name), &ds_name, |b, _| {
-            b.iter(|| linfa_lr.predict(black_box(&linfa_ds)));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("linfa-logistic", ds_name),
+            &ds_name,
+            |b, _| {
+                b.iter(|| linfa_lr.predict(black_box(&linfa_ds)));
+            },
+        );
     }
 
     group.finish();
@@ -740,9 +784,11 @@ fn bench_knn_predict(c: &mut Criterion) {
         scry_knn.fit(&scry_ds).unwrap();
 
         let sm_knn = smartcore::neighbors::knn_classifier::KNNClassifier::fit(
-            &sm_x, &target_i32,
+            &sm_x,
+            &target_i32,
             smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(KNN_K),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Accuracy parity
         {
@@ -801,7 +847,8 @@ fn bench_kmeans_train(c: &mut Criterion) {
         // Convergence parity: compare inertia
         {
             let mut scry_km = scry_learn::prelude::KMeans::new(KM_K)
-                .seed(42).max_iter(KM_MAX_ITER);
+                .seed(42)
+                .max_iter(KM_MAX_ITER);
             scry_km.fit(&scry_ds).unwrap();
             let scry_inertia = scry_km.inertia();
 
@@ -810,12 +857,15 @@ fn bench_kmeans_train(c: &mut Criterion) {
             let rng = rand::rngs::SmallRng::seed_from_u64(42);
             let linfa_km = linfa_clustering::KMeans::params_with_rng(KM_K, rng)
                 .max_n_iterations(KM_MAX_ITER as u64)
-                .fit(&linfa_ds).unwrap();
+                .fit(&linfa_ds)
+                .unwrap();
             // linfa KMeans doesn't expose inertia directly — check label counts as proxy
             let linfa_labels = linfa_km.predict(&linfa_ds);
             let mut counts = vec![0usize; KM_K];
             for &l in linfa_labels.iter() {
-                if l < KM_K { counts[l] += 1; }
+                if l < KM_K {
+                    counts[l] += 1;
+                }
             }
 
             eprintln!("\n┌─ CONVERGENCE: KMeans/{ds_name}");
@@ -827,21 +877,27 @@ fn bench_kmeans_train(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("scry-learn", ds_name), &ds_name, |b, _| {
             b.iter(|| {
                 let mut km = scry_learn::prelude::KMeans::new(KM_K)
-                    .seed(42).max_iter(KM_MAX_ITER);
+                    .seed(42)
+                    .max_iter(KM_MAX_ITER);
                 km.fit(black_box(&scry_ds)).unwrap();
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("linfa-clustering", ds_name), &ds_name, |b, _| {
-            use linfa::prelude::Fit;
-            use rand::SeedableRng;
-            b.iter(|| {
-                let rng = rand::rngs::SmallRng::seed_from_u64(42);
-                let _ = linfa_clustering::KMeans::params_with_rng(KM_K, rng)
-                    .max_n_iterations(KM_MAX_ITER as u64)
-                    .fit(black_box(&linfa_ds)).unwrap();
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("linfa-clustering", ds_name),
+            &ds_name,
+            |b, _| {
+                use linfa::prelude::Fit;
+                use rand::SeedableRng;
+                b.iter(|| {
+                    let rng = rand::rngs::SmallRng::seed_from_u64(42);
+                    let _ = linfa_clustering::KMeans::params_with_rng(KM_K, rng)
+                        .max_n_iterations(KM_MAX_ITER as u64)
+                        .fit(black_box(&linfa_ds))
+                        .unwrap();
+                });
+            },
+        );
     }
 
     group.finish();
@@ -861,7 +917,9 @@ fn bench_lasso_train(c: &mut Criterion) {
     let cols: Vec<Vec<f64>> = {
         let n = rows.len();
         let m = rows[0].len();
-        (0..m).map(|j| (0..n).map(|i| rows[i][j]).collect()).collect()
+        (0..m)
+            .map(|j| (0..n).map(|i| rows[i][j]).collect())
+            .collect()
     };
     let names: Vec<String> = (0..10).map(|i| format!("f{i}")).collect();
 
@@ -883,7 +941,8 @@ fn bench_lasso_train(c: &mut Criterion) {
             let _ = linfa_elasticnet::ElasticNet::<f64>::lasso()
                 .penalty(LASSO_ALPHA)
                 .max_iterations(LASSO_MAX_ITER as u32)
-                .fit(black_box(&linfa_ds)).unwrap();
+                .fit(black_box(&linfa_ds))
+                .unwrap();
         });
     });
 
@@ -911,7 +970,9 @@ fn bench_scaling(c: &mut Criterion) {
         let target_i32: Vec<i32> = target.iter().map(|&t| t as i32).collect();
         let cols: Vec<Vec<f64>> = {
             let m = rows[0].len();
-            (0..m).map(|j| (0..n).map(|i| rows[i][j]).collect()).collect()
+            (0..m)
+                .map(|j| (0..n).map(|i| rows[i][j]).collect())
+                .collect()
         };
         let names: Vec<String> = (0..10).map(|i| format!("f{i}")).collect();
 
@@ -920,8 +981,8 @@ fn bench_scaling(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("scry-learn", n), &n, |b, _| {
             b.iter(|| {
-                let mut dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                    .max_depth(DT_MAX_DEPTH);
+                let mut dt =
+                    scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
                 dt.fit(black_box(&scry_ds)).unwrap();
             });
         });
@@ -963,8 +1024,7 @@ fn bench_cold_start(c: &mut Criterion) {
     // DT cold start
     group.bench_function("scry-learn/dt", |b| {
         b.iter(|| {
-            let mut dt = scry_learn::prelude::DecisionTreeClassifier::new()
-                .max_depth(DT_MAX_DEPTH);
+            let mut dt = scry_learn::prelude::DecisionTreeClassifier::new().max_depth(DT_MAX_DEPTH);
             dt.fit(black_box(&scry_ds)).unwrap();
             dt.predict(black_box(&single_row)).unwrap()
         });
@@ -987,7 +1047,8 @@ fn bench_cold_start(c: &mut Criterion) {
         b.iter(|| {
             let dt = linfa_trees::DecisionTree::params()
                 .max_depth(Some(DT_MAX_DEPTH))
-                .fit(black_box(&linfa_ds)).unwrap();
+                .fit(black_box(&linfa_ds))
+                .unwrap();
             dt.predict(black_box(&linfa_ds))
         });
     });
@@ -1005,9 +1066,12 @@ fn bench_cold_start(c: &mut Criterion) {
     group.bench_function("smartcore/knn", |b| {
         b.iter(|| {
             let knn = smartcore::neighbors::knn_classifier::KNNClassifier::fit(
-                black_box(&sm_x), black_box(&target_i32),
-                smartcore::neighbors::knn_classifier::KNNClassifierParameters::default().with_k(KNN_K),
-            ).unwrap();
+                black_box(&sm_x),
+                black_box(&target_i32),
+                smartcore::neighbors::knn_classifier::KNNClassifierParameters::default()
+                    .with_k(KNN_K),
+            )
+            .unwrap();
             knn.predict(black_box(&sm_x)).unwrap()
         });
     });
@@ -1031,7 +1095,9 @@ fn bench_memory(c: &mut Criterion) {
     let cols: Vec<Vec<f64>> = {
         let n = rows.len();
         let m = rows[0].len();
-        (0..m).map(|j| (0..n).map(|i| rows[i][j]).collect()).collect()
+        (0..m)
+            .map(|j| (0..n).map(|i| rows[i][j]).collect())
+            .collect()
     };
     let names: Vec<String> = (0..10).map(|i| format!("f{i}")).collect();
     let target_i32: Vec<i32> = target.iter().map(|&t| t as i32).collect();
@@ -1054,10 +1120,12 @@ fn bench_memory(c: &mut Criterion) {
     {
         let rss_before = read_rss_kb();
         let dt = smartcore::tree::decision_tree_classifier::DecisionTreeClassifier::fit(
-            &sm_x, &target_i32,
+            &sm_x,
+            &target_i32,
             smartcore::tree::decision_tree_classifier::DecisionTreeClassifierParameters::default()
                 .with_max_depth(DT_MAX_DEPTH as u16),
-        ).unwrap();
+        )
+        .unwrap();
         let rss_after = read_rss_kb();
         let delta_kb = rss_after.saturating_sub(rss_before);
         eprintln!("│  smartcore RSS Δ:  {delta_kb} KB");
@@ -1069,7 +1137,9 @@ fn bench_memory(c: &mut Criterion) {
     {
         let rss_before = read_rss_kb();
         let mut rf = scry_learn::prelude::RandomForestClassifier::new()
-            .n_estimators(RF_N_ESTIMATORS).max_depth(RF_MAX_DEPTH).seed(42);
+            .n_estimators(RF_N_ESTIMATORS)
+            .max_depth(RF_MAX_DEPTH)
+            .seed(42);
         rf.fit(&scry_ds).unwrap();
         let rss_after = read_rss_kb();
         let delta_kb = rss_after.saturating_sub(rss_before);
@@ -1084,8 +1154,11 @@ fn bench_memory(c: &mut Criterion) {
             .with_n_trees(RF_N_ESTIMATORS as u16)
             .with_max_depth(RF_MAX_DEPTH as u16);
         let rf = smartcore::ensemble::random_forest_classifier::RandomForestClassifier::fit(
-            &sm_x, &target_i32, sm_params,
-        ).unwrap();
+            &sm_x,
+            &target_i32,
+            sm_params,
+        )
+        .unwrap();
         let rss_after = read_rss_kb();
         let delta_kb = rss_after.saturating_sub(rss_before);
         eprintln!("│  smartcore RSS Δ:  {delta_kb} KB");
@@ -1146,7 +1219,8 @@ fn bench_concurrent(c: &mut Criterion) {
         &target_i32,
         smartcore::tree::decision_tree_classifier::DecisionTreeClassifierParameters::default()
             .with_max_depth(DT_MAX_DEPTH as u16),
-    ).unwrap();
+    )
+    .unwrap();
 
     group.bench_function("smartcore/dt/4×1000", |b| {
         b.iter(|| {

@@ -49,10 +49,9 @@ impl KernelCache {
             use_fast_math: Some(true),
             ..Default::default()
         };
-        let ptx = compile_ptx_with_opts(KERNEL_SOURCE, opts)
-            .expect("failed to compile CUDA kernels");
-        let module: Arc<CudaModule> = ctx.load_module(ptx)
-            .expect("failed to load CUDA module");
+        let ptx =
+            compile_ptx_with_opts(KERNEL_SOURCE, opts).expect("failed to compile CUDA kernels");
+        let module: Arc<CudaModule> = ctx.load_module(ptx).expect("failed to load CUDA module");
 
         #[cfg(feature = "bf16")]
         let bf16_module = {

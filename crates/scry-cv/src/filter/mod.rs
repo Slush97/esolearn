@@ -3,12 +3,16 @@
 
 pub mod bilateral;
 pub mod box_filter;
+pub mod canny;
 pub mod gaussian;
 pub mod median;
 pub mod sobel;
 
 use crate::error::{Result, ScryVisionError};
 use crate::image::{Gray, ImageBuf};
+
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 /// Apply a generic 2D convolution with a separable kernel.
 ///
@@ -30,30 +34,44 @@ pub fn convolve_separable(
     let vr = (v_kernel.len() / 2) as i32;
 
     // Horizontal pass → tmp
-    let mut tmp = vec![0.0f32; w as usize * h as usize];
+    let data = img.as_slice();
+    let w_us = w as usize;
+
+    let mut tmp = vec![0.0f32; w_us * h as usize];
     for y in 0..h as i32 {
         for x in 0..w as i32 {
             let mut sum = 0.0f32;
             for (ki, &kv) in h_kernel.iter().enumerate() {
-                let sx = (x + ki as i32 - hr).clamp(0, w as i32 - 1) as u32;
-                sum += img.pixel(sx, y as u32)[0] * kv;
+                let sx = (x + ki as i32 - hr).clamp(0, w as i32 - 1) as usize;
+                sum += data[y as usize * w_us + sx] * kv;
             }
-            tmp[y as usize * w as usize + x as usize] = sum;
+            tmp[y as usize * w_us + x as usize] = sum;
         }
     }
 
-    // Vertical pass → out
-    let mut out = vec![0.0f32; w as usize * h as usize];
-    for y in 0..h as i32 {
-        for x in 0..w as usize {
-            let mut sum = 0.0f32;
-            for (ki, &kv) in v_kernel.iter().enumerate() {
-                let sy = (y + ki as i32 - vr).clamp(0, h as i32 - 1) as usize;
-                sum += tmp[sy * w as usize + x] * kv;
-            }
-            out[y as usize * w as usize + x] = sum;
-        }
-    }
+    // Vertical pass → out (parallelized per-row when rayon is enabled)
+    let h_range: Vec<usize> = (0..h as usize).collect();
+    #[cfg(feature = "rayon")]
+    let v_iter = h_range.par_iter();
+    #[cfg(not(feature = "rayon"))]
+    let v_iter = h_range.iter();
+
+    let tmp_ref = &tmp;
+    let out: Vec<f32> = v_iter
+        .flat_map(|&y| {
+            let yi = y as i32;
+            (0..w_us)
+                .map(move |x| {
+                    let mut sum = 0.0f32;
+                    for (ki, &kv) in v_kernel.iter().enumerate() {
+                        let sy = (yi + ki as i32 - vr).clamp(0, h as i32 - 1) as usize;
+                        sum += tmp_ref[sy * w_us + x] * kv;
+                    }
+                    sum
+                })
+                .collect::<Vec<f32>>()
+        })
+        .collect();
 
     ImageBuf::from_vec(out, w, h)
 }

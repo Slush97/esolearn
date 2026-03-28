@@ -48,8 +48,8 @@
 pub(crate) mod accel;
 pub mod anomaly;
 pub mod calibration;
-pub(crate) mod constants;
 pub mod cluster;
+pub(crate) mod constants;
 pub mod dataset;
 pub mod distance;
 pub mod ensemble;
@@ -75,10 +75,10 @@ pub mod tree;
 pub(crate) mod version;
 pub mod weights;
 
-#[cfg(feature = "experimental")]
-pub mod onnx;
 #[cfg(feature = "mmap")]
 pub mod mmap;
+#[cfg(feature = "experimental")]
+pub mod onnx;
 #[cfg(feature = "polars")]
 pub mod polars_interop;
 
@@ -114,12 +114,12 @@ pub mod prelude {
     pub use crate::neighbors::{
         Algorithm, DistanceMetric, KdTree, KnnClassifier, KnnRegressor, WeightFunction,
     };
-    #[cfg(feature = "experimental")]
-    pub use crate::neural::{Conv2D, Flatten, MaxPool2D};
     pub use crate::neural::{
         Activation, BackwardOutput, CallbackAction, Layer, MLPClassifier, MLPRegressor,
         OptimizerKind, TrainingCallback,
     };
+    #[cfg(feature = "experimental")]
+    pub use crate::neural::{Conv2D, Flatten, MaxPool2D};
     pub use crate::partial_fit::PartialFit;
     pub use crate::pipeline::Pipeline;
     pub use crate::preprocess::{

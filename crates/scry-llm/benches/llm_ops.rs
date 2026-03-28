@@ -63,7 +63,11 @@ fn ops_matmul(c: &mut Criterion) {
                 black_box(CpuBackend::matmul(
                     black_box(&a),
                     black_box(&b),
-                    64, 64, 64, false, false,
+                    64,
+                    64,
+                    64,
+                    false,
+                    false,
                 ))
             });
         });
@@ -81,7 +85,11 @@ fn ops_matmul(c: &mut Criterion) {
                 black_box(CpuBackend::matmul(
                     black_box(&a),
                     black_box(&b),
-                    768, 768, 768, false, false,
+                    768,
+                    768,
+                    768,
+                    false,
+                    false,
                 ))
             });
         });
@@ -155,9 +163,7 @@ fn ops_micro(c: &mut Criterion) {
             let _ = black_box(CpuBackend::swiglu(&gate, &up));
         }
         group.bench_function("swiglu_1024", |bench| {
-            bench.iter(|| {
-                black_box(CpuBackend::swiglu(black_box(&gate), black_box(&up)))
-            });
+            bench.iter(|| black_box(CpuBackend::swiglu(black_box(&gate), black_box(&up))));
         });
     }
 
@@ -181,7 +187,13 @@ fn gemv_bench(c: &mut Criterion) {
         group.bench_function("qkv_384x1152", |bench| {
             bench.iter(|| {
                 black_box(CpuBackend::matmul(
-                    black_box(&a), black_box(&b), 1, 384, 1152, false, false,
+                    black_box(&a),
+                    black_box(&b),
+                    1,
+                    384,
+                    1152,
+                    false,
+                    false,
                 ))
             });
         });
@@ -197,7 +209,13 @@ fn gemv_bench(c: &mut Criterion) {
         group.bench_function("cross_qkt_trans_64x1500", |bench| {
             bench.iter(|| {
                 black_box(CpuBackend::matmul(
-                    black_box(&q), black_box(&k), 1, 64, 1500, false, true,
+                    black_box(&q),
+                    black_box(&k),
+                    1,
+                    64,
+                    1500,
+                    false,
+                    true,
                 ))
             });
         });
@@ -213,7 +231,13 @@ fn gemv_bench(c: &mut Criterion) {
         group.bench_function("cross_qkt_notrans_64x1500", |bench| {
             bench.iter(|| {
                 black_box(CpuBackend::matmul(
-                    black_box(&q), black_box(&kt), 1, 64, 1500, false, false,
+                    black_box(&q),
+                    black_box(&kt),
+                    1,
+                    64,
+                    1500,
+                    false,
+                    false,
                 ))
             });
         });
@@ -229,7 +253,13 @@ fn gemv_bench(c: &mut Criterion) {
         group.bench_function("logit_384x51865", |bench| {
             bench.iter(|| {
                 black_box(CpuBackend::matmul(
-                    black_box(&a), black_box(&b), 1, 384, 51865, false, false,
+                    black_box(&a),
+                    black_box(&b),
+                    1,
+                    384,
+                    51865,
+                    false,
+                    false,
                 ))
             });
         });
@@ -269,7 +299,11 @@ fn gpu_ops(c: &mut Criterion) {
                 let r = black_box(Gpu::matmul(
                     black_box(&a),
                     black_box(&b),
-                    768, 768, 768, false, false,
+                    768,
+                    768,
+                    768,
+                    false,
+                    false,
                 ));
                 CudaBackend::synchronize();
                 r
@@ -309,7 +343,14 @@ fn gpu_ops(c: &mut Criterion) {
 }
 
 #[cfg(feature = "cuda")]
-criterion_group!(benches, forward_pass, ops_matmul, ops_micro, gemv_bench, gpu_ops);
+criterion_group!(
+    benches,
+    forward_pass,
+    ops_matmul,
+    ops_micro,
+    gemv_bench,
+    gpu_ops
+);
 #[cfg(not(feature = "cuda"))]
 criterion_group!(benches, forward_pass, ops_matmul, ops_micro, gemv_bench);
 criterion_main!(benches);

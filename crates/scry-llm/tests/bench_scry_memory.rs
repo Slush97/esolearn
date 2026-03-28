@@ -3,7 +3,12 @@
 
 #[test]
 #[ignore = "requires downloaded Llama 3.2 1B weights + CUDA GPU"]
-#[cfg(all(feature = "safetensors", feature = "tokenizer", feature = "cuda", feature = "bf16"))]
+#[cfg(all(
+    feature = "safetensors",
+    feature = "tokenizer",
+    feature = "cuda",
+    feature = "bf16"
+))]
 fn scry_llm_memory_footprint() {
     use scry_llm::backend::cuda::{init_gpu_bf16, CudaBackend};
     use scry_llm::generate::{generate, SamplingConfig};
@@ -26,7 +31,11 @@ fn scry_llm_memory_footprint() {
     // nvidia-smi VRAM helper
     fn gpu_vram_mb() -> f64 {
         let output = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=memory.used", "--format=csv,noheader,nounits", "--id=0"])
+            .args([
+                "--query-gpu=memory.used",
+                "--format=csv,noheader,nounits",
+                "--id=0",
+            ])
             .output()
             .ok();
         output
@@ -99,7 +108,12 @@ fn scry_llm_memory_footprint() {
     for i in 0..n_decode {
         let logits = model.forward_with_llama_cache(last_token, prompt_len + i, &mut cache);
         let v = std::hint::black_box(logits.to_vec());
-        last_token = v.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0;
+        last_token = v
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap()
+            .0;
     }
     CudaBackend::synchronize();
     let decode_time = t_dec.elapsed();
@@ -108,11 +122,20 @@ fn scry_llm_memory_footprint() {
     let rss_peak = rss_mb();
 
     // --- Full generate ---
-    let gen_config = SamplingConfig { temperature: 0.0, top_k: 0, top_p: 1.0, max_tokens: 30 };
+    let gen_config = SamplingConfig {
+        temperature: 0.0,
+        top_k: 0,
+        top_p: 1.0,
+        max_tokens: 30,
+    };
     let mut rng = fastrand::Rng::with_seed(42);
     let generated = generate(&model, &prompt_tokens, &gen_config, &mut rng);
     CudaBackend::synchronize();
-    let all_tokens: Vec<usize> = prompt_tokens.iter().copied().chain(generated.iter().copied()).collect();
+    let all_tokens: Vec<usize> = prompt_tokens
+        .iter()
+        .copied()
+        .chain(generated.iter().copied())
+        .collect();
     let output = tokenizer.decode(&all_tokens);
 
     // --- Print results ---
@@ -129,7 +152,10 @@ fn scry_llm_memory_footprint() {
     println!("  VRAM peak inference: {:.0} MB", vram_peak);
     println!("  Time to 1st token:   {:.3}s", ttft.as_secs_f64());
     println!("  Decode throughput:   {:.1} tok/s", tok_s);
-    println!("  Decode latency:      {:.2} ms/tok", decode_time.as_millis() as f64 / n_decode as f64);
+    println!(
+        "  Decode latency:      {:.2} ms/tok",
+        decode_time.as_millis() as f64 / n_decode as f64
+    );
     println!("  Params:              {:?}", model.n_params());
     println!("  Output:              {output:?}");
     println!("======================================================================");

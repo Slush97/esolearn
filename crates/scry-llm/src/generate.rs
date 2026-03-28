@@ -10,12 +10,8 @@ pub trait CausalLM<B: MathBackend> {
     fn forward(&self, token_ids: &[usize]) -> Tensor<B>;
 
     /// Single-token forward with KV cache. Returns logits `[1, vocab]`.
-    fn forward_with_cache(
-        &self,
-        token_id: usize,
-        pos: usize,
-        cache: &mut Self::Cache,
-    ) -> Tensor<B>;
+    fn forward_with_cache(&self, token_id: usize, pos: usize, cache: &mut Self::Cache)
+        -> Tensor<B>;
 
     /// Create a new KV cache sized for this model.
     fn new_kv_cache(&self, max_seq: usize) -> Self::Cache;

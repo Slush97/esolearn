@@ -67,7 +67,10 @@ fn greedy_with_low_temperature() {
     let mut rng2 = fastrand::Rng::with_seed(200);
     let tokens2 = generate(&model, &[0, 1], &config, &mut rng2);
 
-    assert_eq!(tokens1, tokens2, "greedy generation should be deterministic");
+    assert_eq!(
+        tokens1, tokens2,
+        "greedy generation should be deterministic"
+    );
 }
 
 #[test]
@@ -76,10 +79,30 @@ fn no_panics_tiny_model() {
 
     // Test various sampling configs
     let configs = [
-        SamplingConfig { temperature: 0.0, top_k: 0, top_p: 1.0, max_tokens: 3 },
-        SamplingConfig { temperature: 0.5, top_k: 3, top_p: 1.0, max_tokens: 3 },
-        SamplingConfig { temperature: 1.0, top_k: 0, top_p: 0.9, max_tokens: 3 },
-        SamplingConfig { temperature: 2.0, top_k: 5, top_p: 0.5, max_tokens: 3 },
+        SamplingConfig {
+            temperature: 0.0,
+            top_k: 0,
+            top_p: 1.0,
+            max_tokens: 3,
+        },
+        SamplingConfig {
+            temperature: 0.5,
+            top_k: 3,
+            top_p: 1.0,
+            max_tokens: 3,
+        },
+        SamplingConfig {
+            temperature: 1.0,
+            top_k: 0,
+            top_p: 0.9,
+            max_tokens: 3,
+        },
+        SamplingConfig {
+            temperature: 2.0,
+            top_k: 5,
+            top_p: 0.5,
+            max_tokens: 3,
+        },
     ];
 
     for (i, config) in configs.iter().enumerate() {
@@ -87,7 +110,10 @@ fn no_panics_tiny_model() {
         let tokens = generate(&model, &[0], config, &mut rng);
         assert!(!tokens.is_empty(), "config {i} should produce tokens");
         for &t in &tokens {
-            assert!(t < model.config.vocab_size, "config {i}: token {t} >= vocab_size");
+            assert!(
+                t < model.config.vocab_size,
+                "config {i}: token {t} >= vocab_size"
+            );
         }
     }
 }

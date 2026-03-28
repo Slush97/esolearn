@@ -36,7 +36,10 @@ fn llama_throughput() {
         .filter(|p| p.extension().is_some_and(|ext| ext == "safetensors"))
         .collect();
     shard_paths.sort();
-    let shard_refs: Vec<&std::path::Path> = shard_paths.iter().map(std::path::PathBuf::as_path).collect();
+    let shard_refs: Vec<&std::path::Path> = shard_paths
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect();
     let model = LlamaModel::<Cpu>::from_safetensors(config.clone(), &shard_refs).unwrap();
     let load_time = t0.elapsed();
     println!("Model load: {:.2}s", load_time.as_secs_f64());
@@ -56,9 +59,11 @@ fn llama_throughput() {
     let logits = model.forward(&prompt_tokens);
     let prefill_time = t1.elapsed();
     let _ = logits.to_vec(); // force materialization
-    println!("Prefill ({prompt_len} tokens): {:.2}s ({:.1} tok/s)",
+    println!(
+        "Prefill ({prompt_len} tokens): {:.2}s ({:.1} tok/s)",
         prefill_time.as_secs_f64(),
-        prompt_len as f64 / prefill_time.as_secs_f64());
+        prompt_len as f64 / prefill_time.as_secs_f64()
+    );
 
     // --- Measure single-token decode (pre-allocated KV cache path) ---
     let max_seq = prompt_len + 50;
@@ -76,16 +81,24 @@ fn llama_throughput() {
         let logits = model.forward_with_llama_cache(last_token, prompt_len + i, &mut cache);
         let v = logits.to_vec();
         // Greedy
-        last_token = v.iter()
+        last_token = v
+            .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .unwrap().0;
+            .unwrap()
+            .0;
     }
     let decode_time = t2.elapsed();
     let tok_per_sec = n_decode as f64 / decode_time.as_secs_f64();
-    println!("Decode ({n_decode} tokens): {:.2}s ({:.2} tok/s)",
-        decode_time.as_secs_f64(), tok_per_sec);
-    println!("Per-token latency: {:.0}ms", decode_time.as_millis() as f64 / n_decode as f64);
+    println!(
+        "Decode ({n_decode} tokens): {:.2}s ({:.2} tok/s)",
+        decode_time.as_secs_f64(),
+        tok_per_sec
+    );
+    println!(
+        "Per-token latency: {:.0}ms",
+        decode_time.as_millis() as f64 / n_decode as f64
+    );
 
     // --- Full generate() measurement ---
     let gen_config = SamplingConfig {
@@ -99,14 +112,25 @@ fn llama_throughput() {
     let generated = generate(&model, &prompt_tokens, &gen_config, &mut rng);
     let gen_time = t3.elapsed();
     let total_tokens = prompt_len + generated.len();
-    println!("\ngenerate() ({prompt_len} prompt + {} gen = {total_tokens} total): {:.2}s",
-        generated.len(), gen_time.as_secs_f64());
-    println!("  Overall: {:.2} tok/s (prompt+gen)",
-        total_tokens as f64 / gen_time.as_secs_f64());
-    println!("  Effective decode: {:.2} tok/s",
-        generated.len() as f64 / gen_time.as_secs_f64());
+    println!(
+        "\ngenerate() ({prompt_len} prompt + {} gen = {total_tokens} total): {:.2}s",
+        generated.len(),
+        gen_time.as_secs_f64()
+    );
+    println!(
+        "  Overall: {:.2} tok/s (prompt+gen)",
+        total_tokens as f64 / gen_time.as_secs_f64()
+    );
+    println!(
+        "  Effective decode: {:.2} tok/s",
+        generated.len() as f64 / gen_time.as_secs_f64()
+    );
 
-    let all_tokens: Vec<usize> = prompt_tokens.iter().copied().chain(generated.iter().copied()).collect();
+    let all_tokens: Vec<usize> = prompt_tokens
+        .iter()
+        .copied()
+        .chain(generated.iter().copied())
+        .collect();
     let output = tokenizer.decode(&all_tokens);
     println!("  Output: {output:?}");
 }

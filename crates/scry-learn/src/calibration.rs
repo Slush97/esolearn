@@ -124,8 +124,14 @@ impl PlattScaling {
 
         // Bail early if all decision values are identical — the sigmoid
         // cannot separate anything and Newton will produce a singular Hessian.
-        let dv_min = decision_values.iter().copied().fold(f64::INFINITY, f64::min);
-        let dv_max = decision_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let dv_min = decision_values
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let dv_max = decision_values
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
         if (dv_max - dv_min).abs() < f64::EPSILON {
             return Err(ScryLearnError::InvalidData(
                 "all decision values are identical — Platt scaling cannot calibrate".into(),
@@ -204,7 +210,9 @@ impl PlattScaling {
             }
 
             // Check convergence.
-            if (da * step).abs() < crate::constants::PLATT_CONVERGENCE && (db * step).abs() < crate::constants::PLATT_CONVERGENCE {
+            if (da * step).abs() < crate::constants::PLATT_CONVERGENCE
+                && (db * step).abs() < crate::constants::PLATT_CONVERGENCE
+            {
                 break;
             }
         }
@@ -245,7 +253,10 @@ fn neg_log_likelihood(f: &[f64], t: &[f64], a: f64, b: f64) -> f64 {
     let mut nll = 0.0;
     for i in 0..f.len() {
         let p = sigmoid(a * f[i] + b);
-        let p_clamped = p.clamp(crate::constants::NEAR_ZERO, 1.0 - crate::constants::NEAR_ZERO);
+        let p_clamped = p.clamp(
+            crate::constants::NEAR_ZERO,
+            1.0 - crate::constants::NEAR_ZERO,
+        );
         nll -= t[i] * p_clamped.ln() + (1.0 - t[i]) * (1.0 - p_clamped).ln();
     }
     nll
@@ -353,8 +364,7 @@ impl IsotonicRegression {
             let block_start = idx;
             let block_end = idx + count;
             // Use the mid-x of the block as representative.
-            let mean_x: f64 =
-                sorted_x[block_start..block_end].iter().sum::<f64>() / count as f64;
+            let mean_x: f64 = sorted_x[block_start..block_end].iter().sum::<f64>() / count as f64;
             fit_x.push(mean_x);
             fit_y.push(mean_y);
             idx = block_end;
@@ -629,10 +639,8 @@ impl CalibratedClassifierCV {
             clf.fit(&train_data)?;
 
             // Predict probabilities on validation fold.
-            let val_features: Vec<Vec<f64>> = val_indices
-                .iter()
-                .map(|&i| features[i].clone())
-                .collect();
+            let val_features: Vec<Vec<f64>> =
+                val_indices.iter().map(|&i| features[i].clone()).collect();
 
             let proba = clf.predict_proba(&val_features)?;
 
@@ -755,15 +763,26 @@ mod tests {
         platt.fit(&dv, &labels).unwrap();
 
         let probs = platt.predict(&[2.0, -2.0]);
-        assert!(probs[0] > 0.7, "positive should have high prob: {}", probs[0]);
-        assert!(probs[1] < 0.3, "negative should have low prob: {}", probs[1]);
+        assert!(
+            probs[0] > 0.7,
+            "positive should have high prob: {}",
+            probs[0]
+        );
+        assert!(
+            probs[1] < 0.3,
+            "negative should have low prob: {}",
+            probs[1]
+        );
     }
 
     #[test]
     fn test_platt_monotone() {
         let mut platt = PlattScaling::new();
         let dv: Vec<f64> = (-10..=10).map(|x| x as f64).collect();
-        let labels: Vec<f64> = dv.iter().map(|&x| if x >= 0.0 { 1.0 } else { 0.0 }).collect();
+        let labels: Vec<f64> = dv
+            .iter()
+            .map(|&x| if x >= 0.0 { 1.0 } else { 0.0 })
+            .collect();
         platt.fit(&dv, &labels).unwrap();
 
         let test_vals = vec![-5.0, -2.0, 0.0, 2.0, 5.0];
@@ -832,11 +851,9 @@ mod tests {
         let target = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
         let data = Dataset::new(features, target, vec!["x".into(), "y".into()], "class");
 
-        let mut cal = CalibratedClassifierCV::new(
-            DecisionTreeClassifier::new(),
-            CalibrationMethod::Isotonic,
-        )
-        .n_folds(2);
+        let mut cal =
+            CalibratedClassifierCV::new(DecisionTreeClassifier::new(), CalibrationMethod::Isotonic)
+                .n_folds(2);
 
         cal.fit(&data).unwrap();
         let proba = cal.predict_proba(&data.feature_matrix()).unwrap();
@@ -867,11 +884,9 @@ mod tests {
         let target = vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0];
         let data = Dataset::new(features, target, vec!["x".into(), "y".into()], "class");
 
-        let mut cal = CalibratedClassifierCV::new(
-            DecisionTreeClassifier::new(),
-            CalibrationMethod::Sigmoid,
-        )
-        .n_folds(2);
+        let mut cal =
+            CalibratedClassifierCV::new(DecisionTreeClassifier::new(), CalibrationMethod::Sigmoid)
+                .n_folds(2);
 
         cal.fit(&data).unwrap();
         let proba = cal.predict_proba(&data.feature_matrix()).unwrap();

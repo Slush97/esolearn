@@ -490,7 +490,12 @@ mod tests {
             f1.push(100.0);
             f2.push(100.0);
         }
-        let data = Dataset::new(vec![f1, f2], vec![0.0; 100], vec!["x".into(), "y".into()], "l");
+        let data = Dataset::new(
+            vec![f1, f2],
+            vec![0.0; 100],
+            vec!["x".into(), "y".into()],
+            "l",
+        );
 
         let mut km = KMeans::new(3).seed(42).n_init(1);
         km.fit(&data).unwrap();

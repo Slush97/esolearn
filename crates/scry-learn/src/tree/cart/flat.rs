@@ -429,20 +429,20 @@ mod tests {
     /// ```
     fn balanced_tree() -> FlatTree {
         let nodes = vec![
-            FlatNode::new(4, 0, 0.5),  // node 0: split on f0 <= 0.5
-            FlatNode::new(3, 1, 0.3),  // node 1: split on f1 <= 0.3
+            FlatNode::new(4, 0, 0.5),             // node 0: split on f0 <= 0.5
+            FlatNode::new(3, 1, 0.3),             // node 1: split on f1 <= 0.3
             FlatNode::new(LEAF_SENTINEL, 0, 0.0), // node 2: leaf 0
             FlatNode::new(LEAF_SENTINEL, 1, 0.0), // node 3: leaf 1
-            FlatNode::new(6, 1, 0.7),  // node 4: split on f1 <= 0.7
+            FlatNode::new(6, 1, 0.7),             // node 4: split on f1 <= 0.7
             FlatNode::new(LEAF_SENTINEL, 2, 0.0), // node 5: leaf 2
             FlatNode::new(LEAF_SENTINEL, 3, 0.0), // node 6: leaf 3
         ];
         let predictions = vec![1.0, 2.0, 3.0, 4.0];
         let leaf_probas = vec![
-            1.0, 0.0,  // leaf 0
-            0.0, 1.0,  // leaf 1
-            0.6, 0.4,  // leaf 2
-            0.2, 0.8,  // leaf 3
+            1.0, 0.0, // leaf 0
+            0.0, 1.0, // leaf 1
+            0.6, 0.4, // leaf 2
+            0.2, 0.8, // leaf 3
         ];
         FlatTree::new(nodes, predictions, leaf_probas, 2)
     }
@@ -470,7 +470,7 @@ mod tests {
             }
             let my_idx = nodes.len();
             nodes.push(FlatNode::new(0, 0, 0.5)); // split on f0 <= 0.5
-            // left child
+                                                  // left child
             build(nodes, predictions, leaf_count, depth + 1, max_depth);
             // patch right
             nodes[my_idx].right = nodes.len() as u32;
@@ -507,7 +507,7 @@ mod tests {
             }
             let my_idx = nodes.len();
             nodes.push(FlatNode::new(0, 0, 0.5)); // split on f0 <= 0.5
-            // left child is always a leaf
+                                                  // left child is always a leaf
             let li = *leaf_count;
             *leaf_count += 1;
             nodes.push(FlatNode::new(LEAF_SENTINEL, li, 0.0));

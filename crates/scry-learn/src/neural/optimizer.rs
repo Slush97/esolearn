@@ -74,8 +74,6 @@ pub enum LearningRateSchedule {
     },
 }
 
-
-
 impl LearningRateSchedule {
     /// Adaptive schedule with sklearn-like defaults (factor=0.2, patience=10).
     pub fn adaptive() -> Self {

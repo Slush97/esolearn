@@ -1,7 +1,4 @@
-#![allow(
-    clippy::float_cmp,
-    clippy::needless_range_loop
-)]
+#![allow(clippy::float_cmp, clippy::needless_range_loop)]
 //! Correctness verification tests: scry-learn vs sklearn reference results.
 //!
 //! The Iris dataset is embedded directly (150 samples × 4 features × 3 classes)

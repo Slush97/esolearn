@@ -370,9 +370,13 @@ impl KnnClassifier {
         } else {
             // Per-sample path (KD-tree or non-Euclidean metric).
             let n_train = self.train_features.len();
-            let n_features = if n_train > 0 { self.train_features[0].len() } else { 0 };
-            let use_par = self.kdtree.is_none()
-                && features.len() * n_train * n_features >= KNN_PAR_THRESHOLD;
+            let n_features = if n_train > 0 {
+                self.train_features[0].len()
+            } else {
+                0
+            };
+            let use_par =
+                self.kdtree.is_none() && features.len() * n_train * n_features >= KNN_PAR_THRESHOLD;
 
             let vote_fn = |query: &Vec<f64>| {
                 let neighbors: Vec<(f64, usize)> = if let Some(ref tree) = self.kdtree {
@@ -639,9 +643,13 @@ impl KnnRegressor {
                 .collect())
         } else {
             let n_train = self.train_features.len();
-            let n_features = if n_train > 0 { self.train_features[0].len() } else { 0 };
-            let use_par = self.kdtree.is_none()
-                && features.len() * n_train * n_features >= KNN_PAR_THRESHOLD;
+            let n_features = if n_train > 0 {
+                self.train_features[0].len()
+            } else {
+                0
+            };
+            let use_par =
+                self.kdtree.is_none() && features.len() * n_train * n_features >= KNN_PAR_THRESHOLD;
 
             let predict_fn = |query: &Vec<f64>| {
                 let neighbors = get_neighbors(query);

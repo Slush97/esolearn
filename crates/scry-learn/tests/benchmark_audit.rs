@@ -720,9 +720,7 @@ fn audit_ensemble_regression_fairness() {
     println!("    scry-learn GBT:      {scry_pred_us:.2} us");
     println!("    smartcore RF 0.4:    {smart_pred_us:.2} us");
 
-    println!(
-        "\n  scry-learn GBT train MSE (self-only, no comparison): {scry_mse:.4}"
-    );
+    println!("\n  scry-learn GBT train MSE (self-only, no comparison): {scry_mse:.4}");
     println!();
 }
 

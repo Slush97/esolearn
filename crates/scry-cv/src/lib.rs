@@ -19,9 +19,11 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod components;
 pub mod error;
 pub mod features;
 pub mod filter;
+pub mod hough;
 pub mod image;
 pub mod integral;
 pub mod matching;
@@ -30,5 +32,14 @@ pub mod morphology;
 pub mod prelude;
 pub mod pyramid;
 pub mod registration;
+
+#[cfg(feature = "flow")]
+pub mod flow;
+
+#[cfg(feature = "background")]
+pub mod background;
+
+#[cfg(feature = "stereo")]
+pub mod stereo;
 
 pub(crate) mod rng;

@@ -61,7 +61,10 @@ fn main() -> scry_learn::error::Result<()> {
         .map(|(i, _)| i)
         .collect();
 
-    let kept_names: Vec<String> = keep.iter().map(|&i| data.feature_names[i].clone()).collect();
+    let kept_names: Vec<String> = keep
+        .iter()
+        .map(|&i| data.feature_names[i].clone())
+        .collect();
     let kept_features: Vec<Vec<f64>> = keep.iter().map(|&i| data.features[i].clone()).collect();
 
     data = Dataset::new(
@@ -172,10 +175,18 @@ fn main() -> scry_learn::error::Result<()> {
     let scorer: ScoringFn = accuracy;
 
     let models: Vec<(&str, f64, f64, f64)> = vec![
-        cv_run("Decision Tree", &DecisionTreeClassifier::new().max_depth(8), &data, scorer),
+        cv_run(
+            "Decision Tree",
+            &DecisionTreeClassifier::new().max_depth(8),
+            &data,
+            scorer,
+        ),
         cv_run(
             "Random Forest",
-            &RandomForestClassifier::new().n_estimators(50).max_depth(10).seed(42),
+            &RandomForestClassifier::new()
+                .n_estimators(50)
+                .max_depth(10)
+                .seed(42),
             &data,
             scorer,
         ),

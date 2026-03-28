@@ -937,7 +937,10 @@ impl GradientBoostingClassifier {
         // Class prior: p = count(y=1) / n
         let pos_count = data.target.iter().filter(|&&y| y > 0.5).count();
         let p = (pos_count as f64) / (n as f64);
-        let p_clamped = p.clamp(crate::constants::GBT_PROB_CLAMP, 1.0 - crate::constants::GBT_PROB_CLAMP);
+        let p_clamped = p.clamp(
+            crate::constants::GBT_PROB_CLAMP,
+            1.0 - crate::constants::GBT_PROB_CLAMP,
+        );
         let f0 = (p_clamped / (1.0 - p_clamped)).ln(); // log-odds
         self.init_predictions = vec![f0];
 
@@ -1004,7 +1007,10 @@ impl GradientBoostingClassifier {
                 .iter()
                 .zip(probs_after.iter())
                 .map(|(&y, &p)| {
-                    let p_c = p.clamp(crate::constants::NEAR_ZERO, 1.0 - crate::constants::NEAR_ZERO);
+                    let p_c = p.clamp(
+                        crate::constants::NEAR_ZERO,
+                        1.0 - crate::constants::NEAR_ZERO,
+                    );
                     -(y * p_c.ln() + (1.0 - y) * (1.0 - p_c).ln())
                 })
                 .sum::<f64>()
@@ -1085,7 +1091,10 @@ impl GradientBoostingClassifier {
         let init_preds: Vec<f64> = class_counts
             .iter()
             .map(|&c| {
-                let p = (c as f64 / n as f64).clamp(crate::constants::GBT_PROB_CLAMP, 1.0 - crate::constants::GBT_PROB_CLAMP);
+                let p = (c as f64 / n as f64).clamp(
+                    crate::constants::GBT_PROB_CLAMP,
+                    1.0 - crate::constants::GBT_PROB_CLAMP,
+                );
                 p.ln()
             })
             .collect();
@@ -1158,7 +1167,10 @@ impl GradientBoostingClassifier {
             let train_loss: f64 = (0..n)
                 .map(|i| {
                     let cls_i = data.target[i] as usize;
-                    let p = probs_after[cls_i][i].clamp(crate::constants::NEAR_ZERO, 1.0 - crate::constants::NEAR_ZERO);
+                    let p = probs_after[cls_i][i].clamp(
+                        crate::constants::NEAR_ZERO,
+                        1.0 - crate::constants::NEAR_ZERO,
+                    );
                     -p.ln()
                 })
                 .sum::<f64>()
