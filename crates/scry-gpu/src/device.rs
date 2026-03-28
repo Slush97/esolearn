@@ -347,6 +347,16 @@ impl Device {
         }
     }
 
+    /// Which backend this device is using.
+    pub fn backend_kind(&self) -> BackendKind {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(_) => BackendKind::Vulkan,
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(_) => BackendKind::Cuda,
+        }
+    }
+
     // ── private helpers ──
 
     fn upload_raw(&self, data: &[u8]) -> Result<BackendBuffer> {

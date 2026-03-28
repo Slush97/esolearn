@@ -34,10 +34,10 @@ scry-stt has a missing binary (`mel_filters_80.bin`) that causes workspace-wide 
 
 ## Key Feature Flags
 
-- `scry-gpu`: `vulkan` (default), `bench-wgpu`
-- `scry-learn`: `csv`, `serde`, `scry-gpu`, `polars`, `mmap`, `experimental`
-- `scry-llm`: `cuda` (default), `blas`, `mkl`, `scry-gpu`, `safetensors`, `bf16`, `quantize`
-- `scry-vision`: `cuda`, `blas`, `mkl`, `scry-gpu`, `safetensors`, `onnx`, `gpu-preprocess`
+- `scry-gpu`: `vulkan` (default), `cuda`, `bench-wgpu`
+- `scry-learn`: `csv`, `serde`, `scry-gpu`, `cuda` (scry-gpu + cuBLAS), `polars`, `mmap`, `experimental`
+- `scry-llm`: `cuda` (default), `blas`, `mkl`, `scry-gpu`, `scry-gpu-cuda` (scry-gpu + cuBLAS), `safetensors`, `bf16`, `quantize`
+- `scry-vision`: `cuda`, `blas`, `mkl`, `scry-gpu`, `scry-gpu-cuda`, `safetensors`, `onnx`, `gpu-preprocess`
 
 GPU features are optional — standard tests run without Vulkan/CUDA.
 

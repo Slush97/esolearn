@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! GPU compute backend via scry-gpu (Vulkan compute shaders).
+//! GPU compute backend via scry-gpu.
 //!
-//! Drop-in replacement for the wgpu backend with significantly lower
+//! Drop-in replacement for the CPU backend with significantly lower
 //! per-dispatch overhead. All data is converted f64 -> f32 for GPU
 //! compute, same as the wgpu path.
+//!
+//! With the `cuda` feature, matmul uses cuBLAS SGEMM (~2x faster than
+//! the best Vulkan compute shader) and distance uses an NVRTC-compiled
+//! CUDA C kernel. Without `cuda`, dispatches go through Vulkan WGSL
+//! shaders as before.
 
 use std::mem::ManuallyDrop;
 use std::sync::{Mutex, OnceLock};
@@ -17,15 +22,22 @@ const MAX_GPU_BUFFER_BYTES: u64 = 128 * 1024 * 1024;
 // GPU context — cached device and compiled kernels
 // ---------------------------------------------------------------------------
 
+/// Matmul dispatch strategy: cuBLAS on CUDA, WGSL kernel on Vulkan.
+enum MatmulStrategy {
+    Wgsl(::scry_gpu::Kernel),
+    #[cfg(feature = "cuda")]
+    CuBlas,
+}
+
 struct ScryCtx {
-    /// Mutex serializes Vulkan dispatches (the Device reuses a single
-    /// fence/command buffer internally, so concurrent access is unsafe).
+    /// Mutex serializes GPU dispatches (the Device reuses internal
+    /// synchronization objects, so concurrent access must be serialized).
     inner: Mutex<ScryCtxInner>,
 }
 
 struct ScryCtxInner {
     dev: ::scry_gpu::Device,
-    matmul: ::scry_gpu::Kernel,
+    matmul: MatmulStrategy,
     distance: ::scry_gpu::Kernel,
 }
 
@@ -48,6 +60,39 @@ fn get_ctx() -> Option<&'static ScryCtx> {
 
 fn init_ctx() -> Result<ScryCtx, String> {
     let dev = ::scry_gpu::Device::auto().map_err(|e| format!("scry-gpu: {e}"))?;
+
+    // Try CUDA path: cuBLAS for matmul, NVRTC-compiled CUDA C for distance.
+    #[cfg(feature = "cuda")]
+    if dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
+        match dev.compile_cuda(
+            ::scry_gpu::shaders::distance::PAIRWISE_EUCLIDEAN_CUDA,
+            "pairwise_euclidean",
+            3,
+            [256, 1, 1],
+        ) {
+            Ok(distance) => {
+                return Ok(ScryCtx {
+                    inner: Mutex::new(ScryCtxInner {
+                        dev,
+                        matmul: MatmulStrategy::CuBlas,
+                        distance,
+                    }),
+                });
+            }
+            Err(e) => {
+                eprintln!("[scry-learn] CUDA kernel compile failed ({e}), trying Vulkan");
+            }
+        }
+        // CUDA selected but kernel compilation failed — try Vulkan explicitly.
+        let dev = ::scry_gpu::Device::with_backend(::scry_gpu::BackendKind::Vulkan)
+            .map_err(|e| format!("scry-gpu vulkan fallback: {e}"))?;
+        return init_vulkan(dev);
+    }
+
+    init_vulkan(dev)
+}
+
+fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
     let matmul = dev
         .compile(::scry_gpu::shaders::matmul::COARSE_64X64)
         .map_err(|e| format!("scry-gpu: matmul shader: {e}"))?;
@@ -57,7 +102,7 @@ fn init_ctx() -> Result<ScryCtx, String> {
     Ok(ScryCtx {
         inner: Mutex::new(ScryCtxInner {
             dev,
-            matmul,
+            matmul: MatmulStrategy::Wgsl(matmul),
             distance,
         }),
     })
@@ -82,7 +127,9 @@ impl ScryGpuBackend {
     ///
     /// Returns an error string if no compatible Vulkan device is found.
     pub fn new() -> Result<Self, String> {
-        get_ctx().map(|_| Self).ok_or_else(|| "scry-gpu: initialization failed".into())
+        get_ctx()
+            .map(|_| Self)
+            .ok_or_else(|| "scry-gpu: initialization failed".into())
     }
 }
 
@@ -122,19 +169,31 @@ impl ComputeBackend for ScryGpuBackend {
             let gpu = ctx.inner.lock().ok()?;
             let sa = gpu.dev.upload(&a_f32).ok()?;
             let sb = gpu.dev.upload(&b_f32).ok()?;
-            let sc = gpu.dev.alloc::<f32>(m * n).ok()?;
 
-            let dims: [u32; 3] = [m as u32, n as u32, k as u32];
-            gpu.dev
-                .run_configured(
-                    &gpu.matmul,
-                    &[&sa, &sb, &sc],
-                    [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
-                    Some(bytemuck::bytes_of(&dims)),
-                )
-                .ok()?;
+            let c_f32: Vec<f32> = match &gpu.matmul {
+                MatmulStrategy::Wgsl(kernel) => {
+                    let sc = gpu.dev.alloc::<f32>(m * n).ok()?;
+                    let dims: [u32; 3] = [m as u32, n as u32, k as u32];
+                    gpu.dev
+                        .run_configured(
+                            kernel,
+                            &[&sa, &sb, &sc],
+                            [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+                            Some(bytemuck::bytes_of(&dims)),
+                        )
+                        .ok()?;
+                    sc.download().ok()?
+                }
+                #[cfg(feature = "cuda")]
+                MatmulStrategy::CuBlas => {
+                    let mut sc = gpu.dev.alloc::<f32>(m * n).ok()?;
+                    gpu.dev
+                        .cublas_matmul(&sa, &sb, &mut sc, m as u32, n as u32, k as u32)
+                        .ok()?;
+                    sc.download().ok()?
+                }
+            };
 
-            let c_f32: Vec<f32> = sc.download().ok()?;
             Some(c_f32.iter().map(|&v| f64::from(v)).collect::<Vec<f64>>())
         })();
 
@@ -251,6 +310,13 @@ impl ComputeBackend for ScryGpuBackend {
     }
 
     fn name(&self) -> &'static str {
+        if let Some(ctx) = get_ctx() {
+            if let Ok(gpu) = ctx.inner.lock() {
+                if gpu.dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
+                    return "gpu (scry-gpu/cuda)";
+                }
+            }
+        }
         "gpu (scry-gpu)"
     }
 
@@ -362,6 +428,10 @@ mod tests {
     #[test]
     fn scry_gpu_backend_name() {
         let Some(gpu) = try_gpu() else { return };
-        assert_eq!(gpu.name(), "gpu (scry-gpu)");
+        assert!(
+            gpu.name().starts_with("gpu (scry-gpu"),
+            "unexpected backend name: {}",
+            gpu.name()
+        );
     }
 }

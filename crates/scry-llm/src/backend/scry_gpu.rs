@@ -3,6 +3,10 @@
 //! Only `matmul` runs on GPU; all other `MathBackend` methods delegate to
 //! `CpuBackend` for simplicity.
 //!
+//! With the `scry-gpu-cuda` feature, matmul uses cuBLAS SGEMM (~2x faster
+//! than the best Vulkan compute shader). Without it, dispatches go through
+//! Vulkan WGSL shaders.
+//!
 //! Because `MathBackend` trait methods are static (no `&self`), we store
 //! the GPU context in a `OnceLock` initialized on first use.
 
@@ -23,9 +27,16 @@ const MAX_GPU_BUFFER_BYTES: u64 = 128 * 1024 * 1024;
 // GPU context — cached device and compiled kernel
 // ---------------------------------------------------------------------------
 
+/// Matmul dispatch strategy: cuBLAS on CUDA, WGSL kernel on Vulkan.
+enum MatmulStrategy {
+    Wgsl(::scry_gpu::Kernel),
+    #[cfg(feature = "scry-gpu-cuda")]
+    CuBlas,
+}
+
 struct ScryCtx {
     dev: ::scry_gpu::Device,
-    matmul: ::scry_gpu::Kernel,
+    matmul: MatmulStrategy,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -37,13 +48,11 @@ static GPU_CTX: OnceLock<Option<ScryCtx>> = OnceLock::new();
 
 fn get_ctx() -> Option<&'static ScryCtx> {
     GPU_CTX
-        .get_or_init(|| {
-            match init_scry_context() {
-                Ok(ctx) => Some(ctx),
-                Err(e) => {
-                    eprintln!("[scry-llm] scry-gpu init failed, falling back to CPU: {e}");
-                    None
-                }
+        .get_or_init(|| match init_scry_context() {
+            Ok(ctx) => Some(ctx),
+            Err(e) => {
+                eprintln!("[scry-llm] scry-gpu init failed, falling back to CPU: {e}");
+                None
             }
         })
         .as_ref()
@@ -51,10 +60,23 @@ fn get_ctx() -> Option<&'static ScryCtx> {
 
 fn init_scry_context() -> Result<ScryCtx, String> {
     let dev = ::scry_gpu::Device::auto().map_err(|e| format!("scry-gpu: {e}"))?;
+
+    // Try CUDA path: cuBLAS for matmul (no kernel compilation needed).
+    #[cfg(feature = "scry-gpu-cuda")]
+    if dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
+        return Ok(ScryCtx {
+            dev,
+            matmul: MatmulStrategy::CuBlas,
+        });
+    }
+
     let matmul = dev
         .compile(::scry_gpu::shaders::matmul::COARSE_64X64)
         .map_err(|e| format!("scry-gpu: shader compile: {e}"))?;
-    Ok(ScryCtx { dev, matmul })
+    Ok(ScryCtx {
+        dev,
+        matmul: MatmulStrategy::Wgsl(matmul),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -62,30 +84,35 @@ fn init_scry_context() -> Result<ScryCtx, String> {
 // ---------------------------------------------------------------------------
 
 /// Run a single matmul on GPU. Returns None if GPU is unavailable.
-fn gpu_matmul(
-    a: &[f32],
-    b: &[f32],
-    m: usize,
-    k: usize,
-    n: usize,
-) -> Option<Vec<f32>> {
+fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Option<Vec<f32>> {
     let ctx = get_ctx()?;
 
     let sa = ctx.dev.upload(a).ok()?;
     let sb = ctx.dev.upload(b).ok()?;
-    let sc = ctx.dev.alloc::<f32>(m * n).ok()?;
 
-    let dims: [u32; 3] = [m as u32, n as u32, k as u32];
-    ctx.dev
-        .run_configured(
-            &ctx.matmul,
-            &[&sa, &sb, &sc],
-            [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
-            Some(bytemuck::bytes_of(&dims)),
-        )
-        .ok()?;
-
-    sc.download().ok()
+    match &ctx.matmul {
+        MatmulStrategy::Wgsl(kernel) => {
+            let sc = ctx.dev.alloc::<f32>(m * n).ok()?;
+            let dims: [u32; 3] = [m as u32, n as u32, k as u32];
+            ctx.dev
+                .run_configured(
+                    kernel,
+                    &[&sa, &sb, &sc],
+                    [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            sc.download().ok()
+        }
+        #[cfg(feature = "scry-gpu-cuda")]
+        MatmulStrategy::CuBlas => {
+            let mut sc = ctx.dev.alloc::<f32>(m * n).ok()?;
+            ctx.dev
+                .cublas_matmul(&sa, &sb, &mut sc, m as u32, n as u32, k as u32)
+                .ok()?;
+            sc.download().ok()
+        }
+    }
 }
 
 /// Transpose [rows x cols] -> [cols x rows] on CPU.
@@ -164,15 +191,29 @@ impl DeviceBackend for ScryGpuBackend {
     type I8Storage = Vec<i8>;
 
     #[cfg(feature = "quantize")]
-    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> { data }
+    fn i8_from_vec(data: Vec<i8>) -> Vec<i8> {
+        data
+    }
     #[cfg(feature = "quantize")]
-    fn i8_to_vec(storage: &[i8]) -> Vec<i8> { storage.to_vec() }
+    fn i8_to_vec(storage: &[i8]) -> Vec<i8> {
+        storage.to_vec()
+    }
 
-    fn zeros(shape: &Shape) -> Vec<f32> { CpuBackend::zeros(shape) }
-    fn ones(shape: &Shape) -> Vec<f32> { CpuBackend::ones(shape) }
-    fn from_vec(data: Vec<f32>, shape: &Shape) -> Vec<f32> { CpuBackend::from_vec(data, shape) }
-    fn to_vec(storage: &Vec<f32>) -> Vec<f32> { CpuBackend::to_vec(storage) }
-    fn clone_storage(storage: &Vec<f32>) -> Vec<f32> { CpuBackend::clone_storage(storage) }
+    fn zeros(shape: &Shape) -> Vec<f32> {
+        CpuBackend::zeros(shape)
+    }
+    fn ones(shape: &Shape) -> Vec<f32> {
+        CpuBackend::ones(shape)
+    }
+    fn from_vec(data: Vec<f32>, shape: &Shape) -> Vec<f32> {
+        CpuBackend::from_vec(data, shape)
+    }
+    fn to_vec(storage: &Vec<f32>) -> Vec<f32> {
+        CpuBackend::to_vec(storage)
+    }
+    fn clone_storage(storage: &Vec<f32>) -> Vec<f32> {
+        CpuBackend::clone_storage(storage)
+    }
 }
 
 impl MathBackend for ScryGpuBackend {
@@ -188,7 +229,13 @@ impl MathBackend for ScryGpuBackend {
         matmul_gpu_or_cpu(a, b, m, k, n, trans_a, trans_b)
     }
 
-    fn add(a: &Vec<f32>, b: &Vec<f32>, a_shape: &Shape, b_shape: &Shape, out_shape: &Shape) -> Vec<f32> {
+    fn add(
+        a: &Vec<f32>,
+        b: &Vec<f32>,
+        a_shape: &Shape,
+        b_shape: &Shape,
+        out_shape: &Shape,
+    ) -> Vec<f32> {
         CpuBackend::add(a, b, a_shape, b_shape, out_shape)
     }
 
@@ -196,7 +243,13 @@ impl MathBackend for ScryGpuBackend {
         CpuBackend::softmax(input, shape)
     }
 
-    fn layernorm(input: &Vec<f32>, gamma: &Vec<f32>, beta: &Vec<f32>, shape: &Shape, eps: f32) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    fn layernorm(
+        input: &Vec<f32>,
+        gamma: &Vec<f32>,
+        beta: &Vec<f32>,
+        shape: &Shape,
+        eps: f32,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         CpuBackend::layernorm(input, gamma, beta, shape, eps)
     }
 
@@ -220,7 +273,13 @@ impl MathBackend for ScryGpuBackend {
         CpuBackend::scale(a, scalar)
     }
 
-    fn concat_rows(a: &Vec<f32>, b: &Vec<f32>, a_rows: usize, b_rows: usize, cols: usize) -> Vec<f32> {
+    fn concat_rows(
+        a: &Vec<f32>,
+        b: &Vec<f32>,
+        a_rows: usize,
+        b_rows: usize,
+        cols: usize,
+    ) -> Vec<f32> {
         CpuBackend::concat_rows(a, b, a_rows, b_rows, cols)
     }
 
@@ -233,8 +292,12 @@ impl MathBackend for ScryGpuBackend {
     }
 
     fn rope_with_freqs_preloaded(
-        input: &Vec<f32>, seq: usize, n_heads: usize, head_dim: usize,
-        start_pos: usize, freqs: &Vec<f32>,
+        input: &Vec<f32>,
+        seq: usize,
+        n_heads: usize,
+        head_dim: usize,
+        start_pos: usize,
+        freqs: &Vec<f32>,
     ) -> Vec<f32> {
         CpuBackend::rope_with_freqs_preloaded(input, seq, n_heads, head_dim, start_pos, freqs)
     }
@@ -243,7 +306,13 @@ impl MathBackend for ScryGpuBackend {
         CpuBackend::swiglu(gate, up)
     }
 
-    fn repeat_kv(input: &Vec<f32>, n_kv_heads: usize, n_q_heads: usize, seq: usize, d_head: usize) -> Vec<f32> {
+    fn repeat_kv(
+        input: &Vec<f32>,
+        n_kv_heads: usize,
+        n_q_heads: usize,
+        seq: usize,
+        d_head: usize,
+    ) -> Vec<f32> {
         CpuBackend::repeat_kv(input, n_kv_heads, n_q_heads, seq, d_head)
     }
 }

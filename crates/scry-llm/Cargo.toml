@@ -18,6 +18,7 @@ blas = ["dep:cblas-sys"]
 mkl = ["dep:cblas-sys"]
 dnnl = []
 scry-gpu = ["dep:scry-gpu", "dep:bytemuck"]
+scry-gpu-cuda = ["scry-gpu", "scry-gpu/cuda"]
 auto = ["blas", "scry-gpu"]
 quantize = []
 
