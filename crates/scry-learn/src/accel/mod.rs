@@ -75,6 +75,188 @@ impl GpuTensor {
     }
 }
 
+// ── Batch dispatch types ──
+
+/// Activation function tag for batched GPU operations.
+///
+/// Mirrors [`crate::neural::Activation`] without creating a dependency
+/// from the accel module on the neural module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuActivation {
+    /// Identity (pass-through).
+    Identity,
+    /// ReLU: max(0, x).
+    Relu,
+    /// Logistic sigmoid.
+    Sigmoid,
+    /// Hyperbolic tangent.
+    Tanh,
+}
+
+/// Per-layer descriptor for a batched GPU forward pass.
+pub struct GpuForwardLayer<'a> {
+    /// Transposed weight matrix W^T `[in_size, out_size]` on GPU.
+    pub weights_t: &'a GpuTensor,
+    /// Bias vector `[1, out_size]` on GPU.
+    pub bias: &'a GpuTensor,
+    /// Activation function for this layer.
+    pub activation: GpuActivation,
+    /// Input dimension.
+    pub in_size: usize,
+    /// Output dimension.
+    pub out_size: usize,
+}
+
+/// Per-layer cache produced by a batched forward pass, consumed by backward.
+pub struct GpuLayerCache {
+    /// Cached input: `[batch, in_size]`.
+    pub input: GpuTensor,
+    /// Cached pre-activation (after bias add): `[batch, out_size]`.
+    pub z: GpuTensor,
+    /// Cached post-activation: `[batch, out_size]`.
+    pub a: GpuTensor,
+    /// Batch size.
+    pub batch: usize,
+}
+
+/// Per-layer descriptor for a batched GPU backward pass.
+///
+/// Layers are passed in reverse order (last network layer first).
+pub struct GpuBackwardLayer<'a> {
+    /// Pre-activation cache: `[batch, out_size]`.
+    pub z_cache: &'a GpuTensor,
+    /// Post-activation cache: `[batch, out_size]`.
+    pub a_cache: &'a GpuTensor,
+    /// Input cache: `[batch, in_size]`.
+    pub input_cache: &'a GpuTensor,
+    /// Original weight matrix W `[out_size, in_size]` on GPU.
+    pub weights_w: &'a GpuTensor,
+    /// Activation function for this layer.
+    pub activation: GpuActivation,
+    /// Batch size.
+    pub batch: usize,
+    /// Input dimension.
+    pub in_size: usize,
+    /// Output dimension.
+    pub out_size: usize,
+}
+
+/// Default implementation of batched GPU forward pass using individual
+/// `gpu_*` calls. Used as the trait default and as fallback when the
+/// batched device path is unavailable (e.g. cuBLAS matmul).
+pub(crate) fn gpu_forward_batch_default<B: ComputeBackend + ?Sized>(
+    backend: &B,
+    input: &GpuTensor,
+    batch: usize,
+    layers: &[GpuForwardLayer<'_>],
+    training: bool,
+) -> (GpuTensor, Vec<GpuLayerCache>) {
+    let mut caches = Vec::new();
+    let mut current = backend.gpu_copy(input);
+
+    for layer in layers {
+        let layer_input = current;
+
+        let z = backend.gpu_matmul(
+            &layer_input,
+            layer.weights_t,
+            batch,
+            layer.in_size,
+            layer.out_size,
+        );
+        let z = backend.gpu_bias_add(&z, layer.bias, batch, layer.out_size);
+
+        let a = match layer.activation {
+            GpuActivation::Identity => {
+                if training {
+                    let z_cache = backend.gpu_copy(&z);
+                    let a_cache = backend.gpu_copy(&z);
+                    caches.push(GpuLayerCache {
+                        input: layer_input,
+                        z: z_cache,
+                        a: a_cache,
+                        batch,
+                    });
+                }
+                z
+            }
+            act => {
+                let a = match act {
+                    GpuActivation::Relu => backend.gpu_relu(&z),
+                    GpuActivation::Sigmoid => backend.gpu_sigmoid(&z),
+                    GpuActivation::Tanh => backend.gpu_tanh(&z),
+                    GpuActivation::Identity => unreachable!(),
+                };
+                if training {
+                    caches.push(GpuLayerCache {
+                        input: layer_input,
+                        z,
+                        a: backend.gpu_copy(&a),
+                        batch,
+                    });
+                }
+                a
+            }
+        };
+
+        current = a;
+    }
+
+    (current, caches)
+}
+
+/// Default implementation of batched GPU backward pass using individual
+/// `gpu_*` calls.
+pub(crate) fn gpu_backward_batch_default<B: ComputeBackend + ?Sized>(
+    backend: &B,
+    grad_output: &GpuTensor,
+    layers: &[GpuBackwardLayer<'_>],
+) -> Vec<(Vec<f64>, Vec<f64>)> {
+    let mut grads = Vec::with_capacity(layers.len());
+    let mut current_grad = backend.gpu_copy(grad_output);
+
+    for layer in layers {
+        let batch = layer.batch;
+
+        // 1. Activation backward
+        let delta = match layer.activation {
+            GpuActivation::Identity => current_grad,
+            GpuActivation::Relu => backend.gpu_relu_backward(&current_grad, layer.z_cache),
+            GpuActivation::Sigmoid => backend.gpu_sigmoid_backward(&current_grad, layer.a_cache),
+            GpuActivation::Tanh => backend.gpu_tanh_backward(&current_grad, layer.a_cache),
+        };
+
+        // 2. Bias gradient: db = reduce_cols(delta) / batch
+        let db_gpu = backend.gpu_reduce_cols(&delta, batch, layer.out_size, 1.0 / batch as f64);
+        let db = backend.gpu_download(&db_gpu);
+
+        // 3. Weight gradient: dW = delta^T · input / batch
+        let delta_t = backend.gpu_transpose(&delta, batch, layer.out_size);
+        let dw_gpu = backend.gpu_matmul(
+            &delta_t,
+            layer.input_cache,
+            layer.out_size,
+            batch,
+            layer.in_size,
+        );
+        let dw_gpu = backend.gpu_scale(&dw_gpu, 1.0 / batch as f64);
+        let dw = backend.gpu_download(&dw_gpu);
+
+        // 4. Input gradient for previous layer
+        current_grad = backend.gpu_matmul(
+            &delta,
+            layer.weights_w,
+            batch,
+            layer.out_size,
+            layer.in_size,
+        );
+
+        grads.push((dw, db));
+    }
+
+    grads
+}
+
 /// Linear algebra compute backend.
 ///
 /// Implementations provide accelerated matrix operations used by
@@ -232,7 +414,9 @@ pub trait ComputeBackend {
         let (rows, cols) = grad.shape();
         let g = grad.to_cpu();
         let zv = z.to_cpu();
-        let out: Vec<f64> = g.iter().zip(zv.iter())
+        let out: Vec<f64> = g
+            .iter()
+            .zip(zv.iter())
             .map(|(&gi, &zi)| if zi > 0.0 { gi } else { 0.0 })
             .collect();
         GpuTensor::Cpu(out, rows, cols)
@@ -245,7 +429,9 @@ pub trait ComputeBackend {
         let (rows, cols) = grad.shape();
         let g = grad.to_cpu();
         let a = activated.to_cpu();
-        let out: Vec<f64> = g.iter().zip(a.iter())
+        let out: Vec<f64> = g
+            .iter()
+            .zip(a.iter())
             .map(|(&gi, &ai)| gi * ai * (1.0 - ai))
             .collect();
         GpuTensor::Cpu(out, rows, cols)
@@ -258,7 +444,9 @@ pub trait ComputeBackend {
         let (rows, cols) = grad.shape();
         let g = grad.to_cpu();
         let a = activated.to_cpu();
-        let out: Vec<f64> = g.iter().zip(a.iter())
+        let out: Vec<f64> = g
+            .iter()
+            .zip(a.iter())
             .map(|(&gi, &ai)| gi * (1.0 - ai * ai))
             .collect();
         GpuTensor::Cpu(out, rows, cols)
@@ -298,6 +486,37 @@ pub trait ComputeBackend {
             *v *= scale;
         }
         GpuTensor::Cpu(out, 1, cols)
+    }
+
+    // ── Batched GPU operations ──
+
+    /// Batched forward pass: chains matmul → bias_add → activation across
+    /// all layers in a single GPU submission (one fence wait).
+    ///
+    /// Returns the final output tensor and per-layer training caches.
+    /// Default implementation calls individual `gpu_*` methods.
+    fn gpu_forward_batch(
+        &self,
+        input: &GpuTensor,
+        batch: usize,
+        layers: &[GpuForwardLayer<'_>],
+        training: bool,
+    ) -> (GpuTensor, Vec<GpuLayerCache>) {
+        gpu_forward_batch_default(self, input, batch, layers, training)
+    }
+
+    /// Batched backward pass: chains activation_backward → reduce_cols →
+    /// transpose → matmul (dW) → scale → matmul (grad_input) across all
+    /// layers in a single GPU submission.
+    ///
+    /// Layers are in reverse order (last network layer first).
+    /// Returns `(dw, db)` per layer in the same order as `layers`.
+    fn gpu_backward_batch(
+        &self,
+        grad_output: &GpuTensor,
+        layers: &[GpuBackwardLayer<'_>],
+    ) -> Vec<(Vec<f64>, Vec<f64>)> {
+        gpu_backward_batch_default(self, grad_output, layers)
     }
 
     /// Build gradient/hessian histograms for histogram-based GBT.

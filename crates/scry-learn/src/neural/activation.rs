@@ -87,10 +87,22 @@ impl Activation {
         matches!(self, Self::Relu)
     }
 
+    /// Convert to [`GpuActivation`](crate::accel::GpuActivation) tag for
+    /// batched GPU dispatch.
+    pub(crate) fn to_gpu(self) -> crate::accel::GpuActivation {
+        match self {
+            Self::Relu => crate::accel::GpuActivation::Relu,
+            Self::Sigmoid => crate::accel::GpuActivation::Sigmoid,
+            Self::Tanh => crate::accel::GpuActivation::Tanh,
+            Self::Identity => crate::accel::GpuActivation::Identity,
+        }
+    }
+
     /// Apply the activation on a GPU-resident tensor via the compute backend.
     ///
     /// For `Identity`, returns the input tensor unchanged (no dispatch).
     /// For ReLU/Tanh/Sigmoid, dispatches the corresponding GPU kernel.
+    #[allow(dead_code)]
     pub(crate) fn forward_gpu(
         self,
         z: crate::accel::GpuTensor,
@@ -111,6 +123,7 @@ impl Activation {
     ///
     /// - ReLU uses pre-activation `z` to compute the mask.
     /// - Sigmoid/Tanh use the post-activation `activated` value.
+    #[allow(dead_code)]
     pub(crate) fn backward_gpu(
         self,
         grad: crate::accel::GpuTensor,

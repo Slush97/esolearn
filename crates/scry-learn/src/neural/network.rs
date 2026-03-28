@@ -5,7 +5,7 @@
 //! [`Layer`](super::traits::Layer) trait and provides a unified
 //! forward/backward interface used by both `MLPClassifier` and `MLPRegressor`.
 
-use crate::accel::{self, ComputeBackend};
+use crate::accel::{self, ComputeBackend, GpuBackwardLayer, GpuForwardLayer};
 use crate::neural::activation::Activation;
 use crate::neural::layer::{DenseLayer, FastRng};
 use crate::neural::optimizer::OptimizerState;
@@ -158,22 +158,48 @@ impl Network {
         }
     }
 
-    /// GPU-resident MLP forward pass: 1 upload → N GPU layers → 1 download.
+    /// GPU-resident MLP forward pass using batched dispatch.
     ///
-    /// When training, caches are kept on GPU for the GPU backward pass
-    /// (no PCIe downloads until the optimizer step).
+    /// Chains matmul → bias_add → activation across all layers in a single
+    /// GPU command buffer submission (one fence wait). When training, caches
+    /// are kept on GPU for the batched backward pass.
     fn forward_mlp_gpu(&mut self, input: &[f64], batch: usize, training: bool) -> Vec<f64> {
         let backend = &*self.backend;
-        let in_size = self.dense_layers[0].in_size;
-        let mut current = backend.gpu_upload(input, batch, in_size);
 
-        // When training, keep caches on GPU for backward_mlp_gpu.
-        let gpu_backward = training;
+        // Ensure weights are uploaded for all layers.
         for layer in &mut self.dense_layers {
-            current = layer.forward_gpu(&current, batch, training, gpu_backward, backend);
+            layer.ensure_gpu_weights(backend);
         }
 
-        backend.gpu_download(&current)
+        // Build per-layer descriptors.
+        let descs: Vec<GpuForwardLayer<'_>> = self
+            .dense_layers
+            .iter()
+            .map(|l| GpuForwardLayer {
+                weights_t: l.weights_gpu.as_ref().unwrap(),
+                bias: l.biases_gpu.as_ref().unwrap(),
+                activation: l.activation.to_gpu(),
+                in_size: l.in_size,
+                out_size: l.out_size,
+            })
+            .collect();
+
+        let in_size = self.dense_layers[0].in_size;
+        let input_tensor = backend.gpu_upload(input, batch, in_size);
+
+        let (output, caches) = backend.gpu_forward_batch(&input_tensor, batch, &descs, training);
+
+        // Store per-layer caches for the backward pass.
+        if training {
+            for (layer, cache) in self.dense_layers.iter_mut().zip(caches) {
+                layer.cache_input_gpu = Some(cache.input);
+                layer.cache_z_gpu = Some(cache.z);
+                layer.cache_a_gpu = Some(cache.a);
+                layer.cache_batch = cache.batch;
+            }
+        }
+
+        backend.gpu_download(&output)
     }
 
     /// Generic forward pass through trait-based layers.
@@ -210,40 +236,58 @@ impl Network {
             .is_some_and(|l| l.cache_z_gpu.is_some())
     }
 
-    /// GPU-resident MLP backward pass.
+    /// GPU-resident MLP backward pass using batched dispatch.
     ///
-    /// Gradient flows backward through layers on device. Only the final
-    /// dw/db per layer are downloaded for the CPU optimizer step.
-    fn backward_mlp_gpu(
-        &mut self,
-        grad_output: &[f64],
-        alpha: f64,
-    ) -> Vec<(Vec<f64>, Vec<f64>)> {
+    /// Chains activation_backward → reduce_cols → transpose → matmul(dW) →
+    /// scale → matmul(grad_input) across all layers in a single GPU
+    /// submission. Only dw/db are downloaded for the CPU optimizer step.
+    fn backward_mlp_gpu(&mut self, grad_output: &[f64], alpha: f64) -> Vec<(Vec<f64>, Vec<f64>)> {
         let backend = &*self.backend;
         let n = self.dense_layers.len();
         let batch = self.dense_layers.last().map_or(0, |l| l.cache_batch);
         let last_out = self.dense_layers.last().map_or(0, |l| l.out_size);
 
-        // Upload grad_output to GPU — only PCIe transfer in the backward pass.
-        let mut current_grad = backend.gpu_upload(grad_output, batch, last_out);
-        let mut grads = Vec::with_capacity(n);
+        // Build backward layer descriptors in reverse order (last layer first).
+        let descs: Vec<GpuBackwardLayer<'_>> = (0..n)
+            .rev()
+            .map(|i| {
+                let l = &self.dense_layers[i];
+                GpuBackwardLayer {
+                    z_cache: l.cache_z_gpu.as_ref().unwrap(),
+                    a_cache: l.cache_a_gpu.as_ref().unwrap(),
+                    input_cache: l.cache_input_gpu.as_ref().unwrap(),
+                    weights_w: l.weights_w_gpu.as_ref().unwrap(),
+                    activation: l.activation.to_gpu(),
+                    batch,
+                    in_size: l.in_size,
+                    out_size: l.out_size,
+                }
+            })
+            .collect();
 
-        for i in (0..n).rev() {
-            let (grad_input, mut dw, db) =
-                self.dense_layers[i].backward_gpu(current_grad, backend);
+        let grad_tensor = backend.gpu_upload(grad_output, batch, last_out);
+        let mut grads = backend.gpu_backward_batch(&grad_tensor, &descs);
 
-            // L2 regularization on weights
-            if alpha > 0.0 {
+        // Apply L2 regularization. Grads are in reverse layer order.
+        if alpha > 0.0 {
+            for (j, (ref mut dw, _)) in grads.iter_mut().enumerate() {
+                let layer_idx = n - 1 - j;
                 for (w_idx, dw_val) in dw.iter_mut().enumerate() {
-                    *dw_val += alpha * self.dense_layers[i].weights[w_idx];
+                    *dw_val += alpha * self.dense_layers[layer_idx].weights[w_idx];
                 }
             }
-
-            current_grad = grad_input;
-            grads.push((dw, db));
         }
 
+        // Reverse to match layer order [0..n].
         grads.reverse();
+
+        // Clear GPU caches (consumed).
+        for layer in &mut self.dense_layers {
+            layer.cache_z_gpu = None;
+            layer.cache_a_gpu = None;
+            layer.cache_input_gpu = None;
+        }
+
         grads
     }
 

@@ -113,10 +113,15 @@ fn init_ctx() -> Result<ScryCtx, String> {
 fn init_cuda_kernels(
     dev: &::scry_gpu::Device,
 ) -> Result<(::scry_gpu::Kernel, ElementwiseKernels, BackwardKernels), String> {
-    use ::scry_gpu::shaders::{backward, distance, elementwise};
+    use scry_gpu::shaders::{backward, distance, elementwise};
 
     let distance = dev
-        .compile_cuda(distance::PAIRWISE_EUCLIDEAN_CUDA, "pairwise_euclidean", 3, [256, 1, 1])
+        .compile_cuda(
+            distance::PAIRWISE_EUCLIDEAN_CUDA,
+            "pairwise_euclidean",
+            3,
+            [256, 1, 1],
+        )
         .map_err(|e| format!("distance: {e}"))?;
     let bias_add = dev
         .compile_cuda(elementwise::BIAS_ADD_CUDA, "bias_add", 3, [256, 1, 1])
@@ -132,13 +137,28 @@ fn init_cuda_kernels(
         .map_err(|e| format!("sigmoid: {e}"))?;
 
     let relu_backward = dev
-        .compile_cuda(backward::RELU_BACKWARD_CUDA, "relu_backward", 3, [256, 1, 1])
+        .compile_cuda(
+            backward::RELU_BACKWARD_CUDA,
+            "relu_backward",
+            3,
+            [256, 1, 1],
+        )
         .map_err(|e| format!("relu_backward: {e}"))?;
     let sigmoid_backward = dev
-        .compile_cuda(backward::SIGMOID_BACKWARD_CUDA, "sigmoid_backward", 3, [256, 1, 1])
+        .compile_cuda(
+            backward::SIGMOID_BACKWARD_CUDA,
+            "sigmoid_backward",
+            3,
+            [256, 1, 1],
+        )
         .map_err(|e| format!("sigmoid_backward: {e}"))?;
     let tanh_backward = dev
-        .compile_cuda(backward::TANH_BACKWARD_CUDA, "tanh_backward", 3, [256, 1, 1])
+        .compile_cuda(
+            backward::TANH_BACKWARD_CUDA,
+            "tanh_backward",
+            3,
+            [256, 1, 1],
+        )
         .map_err(|e| format!("tanh_backward: {e}"))?;
     let transpose = dev
         .compile_cuda(backward::TRANSPOSE_CUDA, "transpose_2d", 2, [256, 1, 1])
@@ -152,15 +172,26 @@ fn init_cuda_kernels(
 
     Ok((
         distance,
-        ElementwiseKernels { bias_add, relu, tanh, sigmoid },
-        BackwardKernels { relu_backward, sigmoid_backward, tanh_backward, transpose, scale, reduce_cols },
+        ElementwiseKernels {
+            bias_add,
+            relu,
+            tanh,
+            sigmoid,
+        },
+        BackwardKernels {
+            relu_backward,
+            sigmoid_backward,
+            tanh_backward,
+            transpose,
+            scale,
+            reduce_cols,
+        },
     ))
 }
 
 fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
-    use ::scry_gpu::shaders::{
-        backward as bwd_shaders, distance as dist_shaders, elementwise,
-        matmul as matmul_shaders,
+    use scry_gpu::shaders::{
+        backward as bwd_shaders, distance as dist_shaders, elementwise, matmul as matmul_shaders,
     };
 
     let matmul = dev
@@ -206,7 +237,12 @@ fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
             dev,
             matmul: MatmulStrategy::Wgsl(matmul),
             distance,
-            elementwise: ElementwiseKernels { bias_add, relu, tanh, sigmoid },
+            elementwise: ElementwiseKernels {
+                bias_add,
+                relu,
+                tanh,
+                sigmoid,
+            },
             backward: BackwardKernels {
                 relu_backward,
                 sigmoid_backward,
@@ -535,8 +571,7 @@ impl ComputeBackend for ScryGpuBackend {
         rows: usize,
         cols: usize,
     ) -> super::GpuTensor {
-        let (super::GpuTensor::Gpu(z_buf, ..), super::GpuTensor::Gpu(b_buf, ..)) = (z, bias)
-        else {
+        let (super::GpuTensor::Gpu(z_buf, ..), super::GpuTensor::Gpu(b_buf, ..)) = (z, bias) else {
             let mut data = z.to_cpu();
             let b = bias.to_cpu();
             for i in 0..rows {
@@ -730,9 +765,7 @@ impl ComputeBackend for ScryGpuBackend {
             Some(super::GpuTensor::Gpu(out, cols, rows))
         })();
 
-        result.unwrap_or_else(|| {
-            super::CpuBackend.gpu_transpose(m, rows, cols)
-        })
+        result.unwrap_or_else(|| super::CpuBackend.gpu_transpose(m, rows, cols))
     }
 
     fn gpu_scale(&self, x: &super::GpuTensor, alpha: f64) -> super::GpuTensor {
@@ -756,9 +789,7 @@ impl ComputeBackend for ScryGpuBackend {
             Some(super::GpuTensor::Gpu(out, *rows, *cols))
         })();
 
-        result.unwrap_or_else(|| {
-            super::CpuBackend.gpu_scale(x, alpha)
-        })
+        result.unwrap_or_else(|| super::CpuBackend.gpu_scale(x, alpha))
     }
 
     fn gpu_reduce_cols(
@@ -787,10 +818,521 @@ impl ComputeBackend for ScryGpuBackend {
             Some(super::GpuTensor::Gpu(out, 1, cols))
         })();
 
-        result.unwrap_or_else(|| {
-            super::CpuBackend.gpu_reduce_cols(x, rows, cols, scale)
-        })
+        result.unwrap_or_else(|| super::CpuBackend.gpu_reduce_cols(x, rows, cols, scale))
     }
+
+    fn gpu_forward_batch(
+        &self,
+        input: &super::GpuTensor,
+        batch: usize,
+        layers: &[super::GpuForwardLayer<'_>],
+        training: bool,
+    ) -> (super::GpuTensor, Vec<super::GpuLayerCache>) {
+        if let Some(result) = batched_forward_impl(input, batch, layers, training) {
+            return result;
+        }
+        super::gpu_forward_batch_default(self, input, batch, layers, training)
+    }
+
+    fn gpu_backward_batch(
+        &self,
+        grad_output: &super::GpuTensor,
+        layers: &[super::GpuBackwardLayer<'_>],
+    ) -> Vec<(Vec<f64>, Vec<f64>)> {
+        if let Some(result) = batched_backward_impl(grad_output, layers) {
+            return result;
+        }
+        super::gpu_backward_batch_default(self, grad_output, layers)
+    }
+}
+
+// ── Batched forward/backward implementations ──
+
+/// Extract a `&Buffer<f32>` from a `GpuTensor`, returning `None` if CPU.
+fn extract_buf(t: &super::GpuTensor) -> Option<&::scry_gpu::Buffer<f32>> {
+    match t {
+        super::GpuTensor::Gpu(buf, ..) => Some(buf),
+        super::GpuTensor::Cpu(..) => None,
+    }
+}
+
+/// Batched forward pass: records matmul → bias_add → activation for all
+/// layers into a single command buffer with one fence wait.
+///
+/// Returns `None` if batching is unavailable (cuBLAS, CPU tensor, alloc
+/// failure), in which case the caller falls back to individual dispatches.
+fn batched_forward_impl(
+    input: &super::GpuTensor,
+    batch: usize,
+    layers: &[super::GpuForwardLayer<'_>],
+    training: bool,
+) -> Option<(super::GpuTensor, Vec<super::GpuLayerCache>)> {
+    let input_buf = extract_buf(input)?;
+    let ctx = get_ctx()?;
+    let gpu = ctx.inner.lock().ok()?;
+
+    // Only batch for WGSL matmul — cuBLAS can't be recorded into a batch.
+    #[allow(clippy::infallible_destructuring_match)]
+    let matmul_kernel = match &gpu.matmul {
+        MatmulStrategy::Wgsl(k) => k,
+        #[cfg(feature = "cuda")]
+        MatmulStrategy::CuBlas => return None,
+    };
+
+    // Extract per-layer GPU buffer references.
+    let mut layer_bufs = Vec::with_capacity(layers.len());
+    for layer in layers {
+        layer_bufs.push((extract_buf(layer.weights_t)?, extract_buf(layer.bias)?));
+    }
+
+    // Pre-allocate all intermediate buffers.
+    struct LayerAlloc {
+        z_matmul: ::scry_gpu::Buffer<f32>,
+        z_biased: ::scry_gpu::Buffer<f32>,
+        a: ::scry_gpu::Buffer<f32>,
+    }
+
+    let mut allocs: Vec<LayerAlloc> = Vec::with_capacity(layers.len());
+    for layer in layers {
+        let n = batch * layer.out_size;
+        allocs.push(LayerAlloc {
+            z_matmul: gpu.dev.alloc::<f32>(n).ok()?,
+            z_biased: gpu.dev.alloc::<f32>(n).ok()?,
+            a: gpu.dev.alloc::<f32>(n).ok()?,
+        });
+    }
+
+    // For training, copy the first layer's input (the original input tensor).
+    // Subsequent layers use the previous layer's `a` buffer directly.
+    let input_cache_buf = if training {
+        Some(gpu.dev.copy_buffer(input_buf).ok()?)
+    } else {
+        None
+    };
+
+    // Record the batch.
+    let mut b = gpu.dev.batch().ok()?;
+
+    for (i, layer) in layers.iter().enumerate() {
+        let (wt_buf, bias_buf) = &layer_bufs[i];
+        let alloc = &allocs[i];
+
+        // Layer input: original input for layer 0, a_{i-1} for subsequent.
+        let layer_in: &::scry_gpu::Buffer<f32> = if i == 0 { input_buf } else { &allocs[i - 1].a };
+
+        // 1. Matmul: layer_in × W^T → z_matmul
+        let mm_dims: [u32; 3] = [batch as u32, layer.out_size as u32, layer.in_size as u32];
+        b.run_configured(
+            matmul_kernel,
+            &[layer_in, *wt_buf, &alloc.z_matmul],
+            [
+                (layer.out_size as u32).div_ceil(64),
+                (batch as u32).div_ceil(64),
+                1,
+            ],
+            Some(bytemuck::bytes_of(&mm_dims)),
+        )
+        .ok()?;
+        b.barrier();
+
+        // 2. Bias add: z_matmul + bias → z_biased
+        let n = (batch * layer.out_size) as u32;
+        let bias_dims: [u32; 2] = [n, layer.out_size as u32];
+        b.run_configured(
+            &gpu.elementwise.bias_add,
+            &[&alloc.z_matmul, *bias_buf, &alloc.z_biased],
+            [n.div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&bias_dims)),
+        )
+        .ok()?;
+        b.barrier();
+
+        // 3. Activation: z_biased → a
+        let act_n: [u32; 1] = [n];
+        let wg = [n.div_ceil(256), 1, 1];
+        match layer.activation {
+            super::GpuActivation::Identity => {
+                // Copy via scale(alpha=1.0) so a is a separate buffer.
+                let scale_dims: [u32; 2] = [n, 1.0_f32.to_bits()];
+                b.run_configured(
+                    &gpu.backward.scale,
+                    &[&alloc.z_biased, &alloc.a],
+                    wg,
+                    Some(bytemuck::bytes_of(&scale_dims)),
+                )
+                .ok()?;
+            }
+            super::GpuActivation::Relu => {
+                b.run_configured(
+                    &gpu.elementwise.relu,
+                    &[&alloc.z_biased, &alloc.a],
+                    wg,
+                    Some(bytemuck::bytes_of(&act_n)),
+                )
+                .ok()?;
+            }
+            super::GpuActivation::Sigmoid => {
+                b.run_configured(
+                    &gpu.elementwise.sigmoid,
+                    &[&alloc.z_biased, &alloc.a],
+                    wg,
+                    Some(bytemuck::bytes_of(&act_n)),
+                )
+                .ok()?;
+            }
+            super::GpuActivation::Tanh => {
+                b.run_configured(
+                    &gpu.elementwise.tanh,
+                    &[&alloc.z_biased, &alloc.a],
+                    wg,
+                    Some(bytemuck::bytes_of(&act_n)),
+                )
+                .ok()?;
+            }
+        }
+
+        // Barrier before next layer reads `a`.
+        if i < layers.len() - 1 {
+            b.barrier();
+        }
+    }
+
+    b.submit().ok()?;
+
+    // Drop the lock before building results (downloads would deadlock).
+    drop(gpu);
+
+    // Build result tensors from pre-allocated buffers.
+    //
+    // Ownership challenge: allocs[i].a serves as both cache[i].a AND
+    // cache[i+1].input, plus the last layer's `a` is the function output.
+    // We resolve this by running a second mini-batch that copies each `a`
+    // into the (now-unused) `z_matmul` buffer. The z_matmul copies become
+    // cache[i].a, the original `a` buffers become cache[i+1].input / output.
+    let n_layers = layers.len();
+    let mut caches = Vec::new();
+
+    if training {
+        // We need to split `a` buffers: one copy for cache.a, one for
+        // cache[i+1].input or the output.
+        //
+        // But copying requires the GPU lock again. Let's use a simpler
+        // approach: cache.input for layer i>0 references the SAME physical
+        // data as cache[i-1].a. We achieve this by downloading and
+        // re-uploading, but that defeats the purpose.
+        //
+        // Actually, the simplest correct approach: the cache only needs
+        // cache.a for the backward pass's activation backward, and
+        // cache.input for the weight gradient. These are both reads.
+        // The ownership issue is just a Rust problem, not a GPU problem.
+        //
+        // We'll use the z_matmul buffers as "a cache" copies via a second
+        // batch that does scale(a, z_matmul_of_same_layer, alpha=1.0).
+        // This is cheap (within a batch, no fence).
+
+        let gpu2 = ctx.inner.lock().ok()?;
+        let mut b2 = gpu2.dev.batch().ok()?;
+
+        // For each layer except the last, copy a → z_matmul (reusing the
+        // z_matmul buffer which is no longer needed as its data was consumed
+        // by bias_add). This gives us a separate "a_cache" buffer.
+        //
+        // For the last layer, we also need an a_cache copy, and the original
+        // `a` becomes the output.
+        for (i, layer) in layers.iter().enumerate() {
+            let n = (batch * layer.out_size) as u32;
+            let scale_dims: [u32; 2] = [n, 1.0_f32.to_bits()];
+            b2.run_configured(
+                &gpu2.backward.scale,
+                &[&allocs[i].a, &allocs[i].z_matmul],
+                [n.div_ceil(256), 1, 1],
+                Some(bytemuck::bytes_of(&scale_dims)),
+            )
+            .ok()?;
+        }
+        b2.submit().ok()?;
+        drop(gpu2);
+
+        // Now z_matmul[i] contains a copy of a[i].
+        // Build caches:
+        //   cache[i].a = z_matmul[i] (the copy)
+        //   cache[0].input = input_cache_buf
+        //   cache[i>0].input = a[i-1] (the original)
+        //   output = a[last] (the original)
+
+        // We need to consume allocs. But we need a[i-1] for cache[i].input
+        // AND a[last] for the output. So we iterate with indexing and collect.
+
+        let n = n_layers;
+        // Convert allocs into separate vecs for easier indexed access.
+        let mut a_bufs: Vec<::scry_gpu::Buffer<f32>> = Vec::with_capacity(n);
+        let mut z_biased_bufs: Vec<::scry_gpu::Buffer<f32>> = Vec::with_capacity(n);
+        let mut z_matmul_bufs: Vec<::scry_gpu::Buffer<f32>> = Vec::with_capacity(n);
+
+        for la in allocs {
+            a_bufs.push(la.a);
+            z_biased_bufs.push(la.z_biased);
+            z_matmul_bufs.push(la.z_matmul);
+        }
+
+        // Build caches in order.
+        // We'll drain a_bufs[0..n-1] for cache[1..n].input and z_matmul_bufs for cache.a.
+        // a_bufs[n-1] is the output.
+        let mut a_drain = a_bufs.into_iter();
+        let mut zb_drain = z_biased_bufs.into_iter();
+        let mut zm_drain = z_matmul_bufs.into_iter();
+
+        // Layer 0: input = input_cache_buf, z = z_biased[0], a = z_matmul[0] (copy of a[0])
+        let first_a = a_drain.next()?;
+        caches.push(super::GpuLayerCache {
+            input: super::GpuTensor::Gpu(input_cache_buf?, batch, layers[0].in_size),
+            z: super::GpuTensor::Gpu(zb_drain.next()?, batch, layers[0].out_size),
+            a: super::GpuTensor::Gpu(zm_drain.next()?, batch, layers[0].out_size),
+            batch,
+        });
+
+        // Layer 1..n: input = a[i-1], z = z_biased[i], a = z_matmul[i]
+        let mut prev_a = first_a;
+        for i in 1..n {
+            let this_a = a_drain.next()?;
+            caches.push(super::GpuLayerCache {
+                input: super::GpuTensor::Gpu(prev_a, batch, layers[i].in_size),
+                z: super::GpuTensor::Gpu(zb_drain.next()?, batch, layers[i].out_size),
+                a: super::GpuTensor::Gpu(zm_drain.next()?, batch, layers[i].out_size),
+                batch,
+            });
+            prev_a = this_a;
+        }
+
+        // Output is the last layer's original `a` buffer.
+        let output = super::GpuTensor::Gpu(prev_a, batch, layers[n - 1].out_size);
+
+        Some((output, caches))
+    } else {
+        // Not training — just return the last layer's activation.
+        let mut last_a = None;
+        for (i, la) in allocs.into_iter().enumerate() {
+            if i == n_layers - 1 {
+                last_a = Some(la.a);
+            }
+            // Other buffers dropped.
+        }
+        let output = super::GpuTensor::Gpu(last_a?, batch, layers[n_layers - 1].out_size);
+        Some((output, Vec::new()))
+    }
+}
+
+/// Batched backward pass: records activation_backward, reduce_cols,
+/// transpose, matmul(dW), scale, matmul(grad_input) for all layers
+/// into a single command buffer with one fence wait.
+///
+/// Returns `None` if batching is unavailable, falling back to individual
+/// dispatches.
+fn batched_backward_impl(
+    grad_output: &super::GpuTensor,
+    layers: &[super::GpuBackwardLayer<'_>],
+) -> Option<Vec<(Vec<f64>, Vec<f64>)>> {
+    let grad_buf = extract_buf(grad_output)?;
+    let ctx = get_ctx()?;
+    let gpu = ctx.inner.lock().ok()?;
+
+    #[allow(clippy::infallible_destructuring_match)]
+    let matmul_kernel = match &gpu.matmul {
+        MatmulStrategy::Wgsl(k) => k,
+        #[cfg(feature = "cuda")]
+        MatmulStrategy::CuBlas => return None,
+    };
+
+    // Extract all buffer references from layer descriptors.
+    struct LayerBufs<'a> {
+        z_cache: &'a ::scry_gpu::Buffer<f32>,
+        a_cache: &'a ::scry_gpu::Buffer<f32>,
+        input_cache: &'a ::scry_gpu::Buffer<f32>,
+        weights_w: &'a ::scry_gpu::Buffer<f32>,
+    }
+
+    let mut layer_bufs = Vec::with_capacity(layers.len());
+    for layer in layers {
+        layer_bufs.push(LayerBufs {
+            z_cache: extract_buf(layer.z_cache)?,
+            a_cache: extract_buf(layer.a_cache)?,
+            input_cache: extract_buf(layer.input_cache)?,
+            weights_w: extract_buf(layer.weights_w)?,
+        });
+    }
+
+    // Pre-allocate output buffers for each layer.
+    struct BackwardAlloc {
+        delta: Option<::scry_gpu::Buffer<f32>>,
+        db: ::scry_gpu::Buffer<f32>,
+        delta_t: ::scry_gpu::Buffer<f32>,
+        dw: ::scry_gpu::Buffer<f32>,
+        dw_scaled: ::scry_gpu::Buffer<f32>,
+        grad_input: Option<::scry_gpu::Buffer<f32>>,
+    }
+
+    let n = layers.len();
+    let mut allocs: Vec<BackwardAlloc> = Vec::with_capacity(n);
+    for (j, layer) in layers.iter().enumerate() {
+        let batch = layer.batch;
+        let needs_delta = layer.activation != super::GpuActivation::Identity;
+        let needs_grad_input = j < n - 1;
+        allocs.push(BackwardAlloc {
+            delta: if needs_delta {
+                Some(gpu.dev.alloc::<f32>(batch * layer.out_size).ok()?)
+            } else {
+                None
+            },
+            db: gpu.dev.alloc::<f32>(layer.out_size).ok()?,
+            delta_t: gpu.dev.alloc::<f32>(layer.out_size * batch).ok()?,
+            dw: gpu.dev.alloc::<f32>(layer.out_size * layer.in_size).ok()?,
+            dw_scaled: gpu.dev.alloc::<f32>(layer.out_size * layer.in_size).ok()?,
+            grad_input: if needs_grad_input {
+                Some(gpu.dev.alloc::<f32>(batch * layer.in_size).ok()?)
+            } else {
+                None
+            },
+        });
+    }
+
+    // Record backward batch.
+    let mut b = gpu.dev.batch().ok()?;
+
+    for (j, layer) in layers.iter().enumerate() {
+        let bufs = &layer_bufs[j];
+        let alloc = &allocs[j];
+        let batch = layer.batch;
+        let out_n = (batch * layer.out_size) as u32;
+
+        // Current gradient: grad_output for j=0, grad_input from j-1 otherwise.
+        let grad_ptr: &::scry_gpu::Buffer<f32> = if j == 0 {
+            grad_buf
+        } else {
+            allocs[j - 1]
+                .grad_input
+                .as_ref()
+                .expect("grad_input allocated for non-last layer")
+        };
+
+        // 1. Activation backward → delta
+        let delta_ptr: &::scry_gpu::Buffer<f32> = match layer.activation {
+            super::GpuActivation::Identity => {
+                // delta = grad (no dispatch, use grad directly)
+                grad_ptr
+            }
+            act => {
+                let delta_buf = alloc.delta.as_ref()?;
+                let act_dims: [u32; 1] = [out_n];
+                let wg = [out_n.div_ceil(256), 1, 1];
+                let (kernel, second_buf): (&::scry_gpu::Kernel, &::scry_gpu::Buffer<f32>) =
+                    match act {
+                        super::GpuActivation::Relu => (&gpu.backward.relu_backward, bufs.z_cache),
+                        super::GpuActivation::Sigmoid => {
+                            (&gpu.backward.sigmoid_backward, bufs.a_cache)
+                        }
+                        super::GpuActivation::Tanh => (&gpu.backward.tanh_backward, bufs.a_cache),
+                        super::GpuActivation::Identity => unreachable!(),
+                    };
+                b.run_configured(
+                    kernel,
+                    &[grad_ptr, second_buf, delta_buf],
+                    wg,
+                    Some(bytemuck::bytes_of(&act_dims)),
+                )
+                .ok()?;
+                b.barrier();
+                delta_buf
+            }
+        };
+
+        // 2. reduce_cols(delta) → db   AND   transpose(delta) → delta_t
+        //    These read the same input but write to different outputs —
+        //    can execute in parallel.
+        let inv_batch = 1.0 / batch as f64;
+        let rc_dims: [u32; 3] = [
+            batch as u32,
+            layer.out_size as u32,
+            (inv_batch as f32).to_bits(),
+        ];
+        b.run_configured(
+            &gpu.backward.reduce_cols,
+            &[delta_ptr, &alloc.db],
+            [(layer.out_size as u32).div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&rc_dims)),
+        )
+        .ok()?;
+
+        let tr_dims: [u32; 2] = [batch as u32, layer.out_size as u32];
+        b.run_configured(
+            &gpu.backward.transpose,
+            &[delta_ptr, &alloc.delta_t],
+            [out_n.div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&tr_dims)),
+        )
+        .ok()?;
+        b.barrier();
+
+        // 3. matmul(delta_t, input_cache) → dw  AND
+        //    matmul(delta, weights_w) → grad_input  (parallel)
+        let dw_dims: [u32; 3] = [layer.out_size as u32, layer.in_size as u32, batch as u32];
+        b.run_configured(
+            matmul_kernel,
+            &[&alloc.delta_t, bufs.input_cache, &alloc.dw],
+            [
+                (layer.in_size as u32).div_ceil(64),
+                (layer.out_size as u32).div_ceil(64),
+                1,
+            ],
+            Some(bytemuck::bytes_of(&dw_dims)),
+        )
+        .ok()?;
+
+        if let Some(ref gi_buf) = alloc.grad_input {
+            let gi_dims: [u32; 3] = [batch as u32, layer.in_size as u32, layer.out_size as u32];
+            b.run_configured(
+                matmul_kernel,
+                &[delta_ptr, bufs.weights_w, gi_buf],
+                [
+                    (layer.in_size as u32).div_ceil(64),
+                    (batch as u32).div_ceil(64),
+                    1,
+                ],
+                Some(bytemuck::bytes_of(&gi_dims)),
+            )
+            .ok()?;
+        }
+        b.barrier();
+
+        // 4. scale(dw, 1/batch) → dw_scaled
+        let dw_n = (layer.out_size * layer.in_size) as u32;
+        let scale_dims: [u32; 2] = [dw_n, (inv_batch as f32).to_bits()];
+        b.run_configured(
+            &gpu.backward.scale,
+            &[&alloc.dw, &alloc.dw_scaled],
+            [dw_n.div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&scale_dims)),
+        )
+        .ok()?;
+
+        if j < n - 1 {
+            b.barrier();
+        }
+    }
+
+    b.submit().ok()?;
+    drop(gpu);
+
+    // Download dw_scaled and db per layer.
+    let mut grads = Vec::with_capacity(n);
+    for alloc in &allocs {
+        let dw_f32 = alloc.dw_scaled.download().ok()?;
+        let db_f32 = alloc.db.download().ok()?;
+        let dw: Vec<f64> = dw_f32.iter().map(|&v| f64::from(v)).collect();
+        let db: Vec<f64> = db_f32.iter().map(|&v| f64::from(v)).collect();
+        grads.push((dw, db));
+    }
+
+    Some(grads)
 }
 
 // ── Helpers for GPU-resident dispatch ──
