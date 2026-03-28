@@ -22,9 +22,58 @@ mod cpu;
 #[cfg(feature = "scry-gpu")]
 mod scry_gpu;
 
-pub use cpu::CpuBackend;
 #[cfg(feature = "scry-gpu")]
 pub use self::scry_gpu::ScryGpuBackend;
+pub use cpu::CpuBackend;
+
+/// A tensor that may live on GPU or CPU.
+///
+/// Used by the `gpu_*` methods on [`ComputeBackend`] to keep data on-device
+/// across multiple operations (matmul, bias add, activation) without
+/// round-tripping through CPU after every op.
+///
+/// The `Cpu` variant is the fallback when no GPU is available. The `Gpu`
+/// variant holds a `scry_gpu::Buffer<f32>` that stays device-resident.
+pub enum GpuTensor {
+    /// CPU fallback: data as f64, with shape (rows, cols).
+    Cpu(Vec<f64>, usize, usize),
+    /// GPU-resident f32 buffer with shape (rows, cols).
+    #[cfg(feature = "scry-gpu")]
+    Gpu(::scry_gpu::Buffer<f32>, usize, usize),
+}
+
+impl GpuTensor {
+    /// Shape as (rows, cols).
+    pub fn shape(&self) -> (usize, usize) {
+        match self {
+            Self::Cpu(_, r, c) => (*r, *c),
+            #[cfg(feature = "scry-gpu")]
+            Self::Gpu(_, r, c) => (*r, *c),
+        }
+    }
+
+    /// Convert to a `Cpu` variant tensor (download if GPU-resident).
+    #[allow(dead_code)]
+    pub fn to_cpu_tensor(&self) -> Self {
+        let (rows, cols) = self.shape();
+        Self::Cpu(self.to_cpu(), rows, cols)
+    }
+
+    /// Download to CPU f64 vec. For `Cpu` variant, clones the data.
+    /// For `Gpu` variant, downloads from device and converts f32 → f64.
+    pub fn to_cpu(&self) -> Vec<f64> {
+        match self {
+            Self::Cpu(data, _, _) => data.clone(),
+            #[cfg(feature = "scry-gpu")]
+            Self::Gpu(buf, _, _) => buf
+                .download()
+                .unwrap_or_default()
+                .iter()
+                .map(|&v| f64::from(v))
+                .collect(),
+        }
+    }
+}
 
 /// Linear algebra compute backend.
 ///
@@ -86,6 +135,85 @@ pub trait ComputeBackend {
 
     /// Returns the backend name for diagnostics.
     fn name(&self) -> &'static str;
+
+    // ── GPU-resident tensor operations ──
+    //
+    // These methods keep data on-device across multiple operations.
+    // Default implementations fall back to CPU (GpuTensor::Cpu variant).
+    // GPU backends override to use real device buffers.
+
+    /// Upload f64 data to a persistent GPU buffer (f32 on device).
+    ///
+    /// Returns a [`GpuTensor`] that stays on the GPU until explicitly
+    /// downloaded. Default: wraps in `GpuTensor::Cpu`.
+    fn gpu_upload(&self, data: &[f64], rows: usize, cols: usize) -> GpuTensor {
+        GpuTensor::Cpu(data.to_vec(), rows, cols)
+    }
+
+    /// GPU-to-GPU matrix multiply. Result stays on device.
+    ///
+    /// `a` is `m × k`, `b` is `k × n`, result is `m × n`.
+    fn gpu_matmul(&self, a: &GpuTensor, b: &GpuTensor, m: usize, k: usize, n: usize) -> GpuTensor {
+        let a_data = a.to_cpu();
+        let b_data = b.to_cpu();
+        GpuTensor::Cpu(self.matmul(&a_data, &b_data, m, k, n), m, n)
+    }
+
+    /// GPU-resident bias add: `z[i,j] += bias[j]`.
+    ///
+    /// `z` is `rows × cols`, `bias` is `1 × cols`.
+    fn gpu_bias_add(&self, z: &GpuTensor, bias: &GpuTensor, rows: usize, cols: usize) -> GpuTensor {
+        let mut data = z.to_cpu();
+        let b = bias.to_cpu();
+        for i in 0..rows {
+            for j in 0..cols {
+                data[i * cols + j] += b[j];
+            }
+        }
+        GpuTensor::Cpu(data, rows, cols)
+    }
+
+    /// GPU-resident ReLU activation.
+    fn gpu_relu(&self, x: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = x.shape();
+        let mut data = x.to_cpu();
+        for v in &mut data {
+            if *v < 0.0 {
+                *v = 0.0;
+            }
+        }
+        GpuTensor::Cpu(data, rows, cols)
+    }
+
+    /// GPU-resident tanh activation.
+    fn gpu_tanh(&self, x: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = x.shape();
+        let mut data = x.to_cpu();
+        for v in &mut data {
+            *v = v.tanh();
+        }
+        GpuTensor::Cpu(data, rows, cols)
+    }
+
+    /// GPU-resident sigmoid activation.
+    fn gpu_sigmoid(&self, x: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = x.shape();
+        let mut data = x.to_cpu();
+        for v in &mut data {
+            *v = if *v >= 0.0 {
+                1.0 / (1.0 + (-*v).exp())
+            } else {
+                let ex = v.exp();
+                ex / (1.0 + ex)
+            };
+        }
+        GpuTensor::Cpu(data, rows, cols)
+    }
+
+    /// Download GPU tensor to CPU f64 vec.
+    fn gpu_download(&self, t: &GpuTensor) -> Vec<f64> {
+        t.to_cpu()
+    }
 
     /// Build gradient/hessian histograms for histogram-based GBT.
     ///

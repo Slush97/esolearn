@@ -29,6 +29,14 @@ enum MatmulStrategy {
     CuBlas,
 }
 
+/// Pre-compiled element-wise kernels for GPU-resident tensor ops.
+struct ElementwiseKernels {
+    bias_add: ::scry_gpu::Kernel,
+    relu: ::scry_gpu::Kernel,
+    tanh: ::scry_gpu::Kernel,
+    sigmoid: ::scry_gpu::Kernel,
+}
+
 struct ScryCtx {
     /// Mutex serializes GPU dispatches (the Device reuses internal
     /// synchronization objects, so concurrent access must be serialized).
@@ -39,6 +47,7 @@ struct ScryCtxInner {
     dev: ::scry_gpu::Device,
     matmul: MatmulStrategy,
     distance: ::scry_gpu::Kernel,
+    elementwise: ElementwiseKernels,
 }
 
 /// Leaked on purpose: Vulkan teardown during static destructor ordering
@@ -61,21 +70,17 @@ fn get_ctx() -> Option<&'static ScryCtx> {
 fn init_ctx() -> Result<ScryCtx, String> {
     let dev = ::scry_gpu::Device::auto().map_err(|e| format!("scry-gpu: {e}"))?;
 
-    // Try CUDA path: cuBLAS for matmul, NVRTC-compiled CUDA C for distance.
+    // Try CUDA path: cuBLAS for matmul, NVRTC-compiled CUDA C for distance + elementwise.
     #[cfg(feature = "cuda")]
     if dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
-        match dev.compile_cuda(
-            ::scry_gpu::shaders::distance::PAIRWISE_EUCLIDEAN_CUDA,
-            "pairwise_euclidean",
-            3,
-            [256, 1, 1],
-        ) {
-            Ok(distance) => {
+        match init_cuda_kernels(&dev) {
+            Ok((distance, elementwise)) => {
                 return Ok(ScryCtx {
                     inner: Mutex::new(ScryCtxInner {
                         dev,
                         matmul: MatmulStrategy::CuBlas,
                         distance,
+                        elementwise,
                     }),
                 });
             }
@@ -92,18 +97,57 @@ fn init_ctx() -> Result<ScryCtx, String> {
     init_vulkan(dev)
 }
 
+#[cfg(feature = "cuda")]
+fn init_cuda_kernels(
+    dev: &::scry_gpu::Device,
+) -> Result<(::scry_gpu::Kernel, ElementwiseKernels), String> {
+    use ::scry_gpu::shaders::{distance, elementwise};
+
+    let distance = dev
+        .compile_cuda(distance::PAIRWISE_EUCLIDEAN_CUDA, "pairwise_euclidean", 3, [256, 1, 1])
+        .map_err(|e| format!("distance: {e}"))?;
+    let bias_add = dev
+        .compile_cuda(elementwise::BIAS_ADD_CUDA, "bias_add", 3, [256, 1, 1])
+        .map_err(|e| format!("bias_add: {e}"))?;
+    let relu = dev
+        .compile_cuda(elementwise::RELU_CUDA, "relu", 2, [256, 1, 1])
+        .map_err(|e| format!("relu: {e}"))?;
+    let tanh = dev
+        .compile_cuda(elementwise::TANH_CUDA, "tanh_fwd", 2, [256, 1, 1])
+        .map_err(|e| format!("tanh: {e}"))?;
+    let sigmoid = dev
+        .compile_cuda(elementwise::SIGMOID_CUDA, "sigmoid", 2, [256, 1, 1])
+        .map_err(|e| format!("sigmoid: {e}"))?;
+    Ok((distance, ElementwiseKernels { bias_add, relu, tanh, sigmoid }))
+}
+
 fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
+    use ::scry_gpu::shaders::{elementwise, matmul as matmul_shaders, distance as dist_shaders};
+
     let matmul = dev
-        .compile(::scry_gpu::shaders::matmul::COARSE_64X64)
+        .compile(matmul_shaders::COARSE_64X64)
         .map_err(|e| format!("scry-gpu: matmul shader: {e}"))?;
     let distance = dev
-        .compile(::scry_gpu::shaders::distance::PAIRWISE_EUCLIDEAN)
+        .compile(dist_shaders::PAIRWISE_EUCLIDEAN)
         .map_err(|e| format!("scry-gpu: distance shader: {e}"))?;
+    let bias_add = dev
+        .compile(elementwise::BIAS_ADD)
+        .map_err(|e| format!("scry-gpu: bias_add shader: {e}"))?;
+    let relu = dev
+        .compile(elementwise::RELU)
+        .map_err(|e| format!("scry-gpu: relu shader: {e}"))?;
+    let tanh = dev
+        .compile(elementwise::TANH)
+        .map_err(|e| format!("scry-gpu: tanh shader: {e}"))?;
+    let sigmoid = dev
+        .compile(elementwise::SIGMOID)
+        .map_err(|e| format!("scry-gpu: sigmoid shader: {e}"))?;
     Ok(ScryCtx {
         inner: Mutex::new(ScryCtxInner {
             dev,
             matmul: MatmulStrategy::Wgsl(matmul),
             distance,
+            elementwise: ElementwiseKernels { bias_add, relu, tanh, sigmoid },
         }),
     })
 }
@@ -344,6 +388,215 @@ impl ComputeBackend for ScryGpuBackend {
             }
         }
         histograms
+    }
+
+    // ── GPU-resident tensor operations ──
+
+    fn gpu_upload(&self, data: &[f64], rows: usize, cols: usize) -> super::GpuTensor {
+        let Some(ctx) = get_ctx() else {
+            return super::GpuTensor::Cpu(data.to_vec(), rows, cols);
+        };
+        let f32_data: Vec<f32> = data.iter().map(|&v| v as f32).collect();
+        let Ok(gpu) = ctx.inner.lock() else {
+            return super::GpuTensor::Cpu(data.to_vec(), rows, cols);
+        };
+        match gpu.dev.upload(&f32_data) {
+            Ok(buf) => super::GpuTensor::Gpu(buf, rows, cols),
+            Err(_) => super::GpuTensor::Cpu(data.to_vec(), rows, cols),
+        }
+    }
+
+    fn gpu_matmul(
+        &self,
+        a: &super::GpuTensor,
+        b: &super::GpuTensor,
+        m: usize,
+        k: usize,
+        n: usize,
+    ) -> super::GpuTensor {
+        // Both must be GPU tensors, otherwise fall back to CPU default.
+        let (super::GpuTensor::Gpu(a_buf, ..), super::GpuTensor::Gpu(b_buf, ..)) = (a, b) else {
+            let a_data = a.to_cpu();
+            let b_data = b.to_cpu();
+            return super::GpuTensor::Cpu(self.matmul(&a_data, &b_data, m, k, n), m, n);
+        };
+
+        let Some(ctx) = get_ctx() else {
+            let a_data = a.to_cpu();
+            let b_data = b.to_cpu();
+            return super::GpuTensor::Cpu(self.matmul(&a_data, &b_data, m, k, n), m, n);
+        };
+
+        let result = (|| {
+            let gpu = ctx.inner.lock().ok()?;
+            match &gpu.matmul {
+                MatmulStrategy::Wgsl(kernel) => {
+                    let c = gpu.dev.alloc::<f32>(m * n).ok()?;
+                    let dims: [u32; 3] = [m as u32, n as u32, k as u32];
+                    gpu.dev
+                        .run_configured(
+                            kernel,
+                            &[a_buf, b_buf, &c],
+                            [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+                            Some(bytemuck::bytes_of(&dims)),
+                        )
+                        .ok()?;
+                    Some(super::GpuTensor::Gpu(c, m, n))
+                }
+                #[cfg(feature = "cuda")]
+                MatmulStrategy::CuBlas => {
+                    let mut c = gpu.dev.alloc::<f32>(m * n).ok()?;
+                    gpu.dev
+                        .cublas_matmul(a_buf, b_buf, &mut c, m as u32, n as u32, k as u32)
+                        .ok()?;
+                    Some(super::GpuTensor::Gpu(c, m, n))
+                }
+            }
+        })();
+
+        result.unwrap_or_else(|| {
+            let a_data = a.to_cpu();
+            let b_data = b.to_cpu();
+            super::GpuTensor::Cpu(self.matmul(&a_data, &b_data, m, k, n), m, n)
+        })
+    }
+
+    fn gpu_bias_add(
+        &self,
+        z: &super::GpuTensor,
+        bias: &super::GpuTensor,
+        rows: usize,
+        cols: usize,
+    ) -> super::GpuTensor {
+        let (super::GpuTensor::Gpu(z_buf, ..), super::GpuTensor::Gpu(b_buf, ..)) = (z, bias)
+        else {
+            let mut data = z.to_cpu();
+            let b = bias.to_cpu();
+            for i in 0..rows {
+                for j in 0..cols {
+                    data[i * cols + j] += b[j];
+                }
+            }
+            return super::GpuTensor::Cpu(data, rows, cols);
+        };
+
+        let n = rows * cols;
+        let result = (|| {
+            let gpu = ctx_lock()?;
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 2] = [n as u32, cols as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.elementwise.bias_add,
+                    &[z_buf, b_buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(super::GpuTensor::Gpu(out, rows, cols))
+        })();
+
+        result.unwrap_or_else(|| {
+            let mut data = z.to_cpu();
+            let b = bias.to_cpu();
+            for i in 0..rows {
+                for j in 0..cols {
+                    data[i * cols + j] += b[j];
+                }
+            }
+            super::GpuTensor::Cpu(data, rows, cols)
+        })
+    }
+
+    fn gpu_relu(&self, x: &super::GpuTensor) -> super::GpuTensor {
+        dispatch_unary(x, |gpu, buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.elementwise.relu,
+                    &[buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_tanh(&self, x: &super::GpuTensor) -> super::GpuTensor {
+        dispatch_unary(x, |gpu, buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.elementwise.tanh,
+                    &[buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_sigmoid(&self, x: &super::GpuTensor) -> super::GpuTensor {
+        dispatch_unary(x, |gpu, buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.elementwise.sigmoid,
+                    &[buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_download(&self, t: &super::GpuTensor) -> Vec<f64> {
+        match t {
+            super::GpuTensor::Gpu(buf, _, _) => buf
+                .download()
+                .unwrap_or_default()
+                .iter()
+                .map(|&v| f64::from(v))
+                .collect(),
+            super::GpuTensor::Cpu(data, _, _) => data.clone(),
+        }
+    }
+}
+
+// ── Helpers for GPU-resident dispatch ──
+
+fn ctx_lock() -> Option<std::sync::MutexGuard<'static, ScryCtxInner>> {
+    get_ctx()?.inner.lock().ok()
+}
+
+/// Dispatch a unary element-wise kernel on a GPU tensor. Falls back to CPU
+/// via `GpuTensor::to_cpu()` + trait default if the tensor isn't GPU-resident
+/// or if the dispatch fails.
+fn dispatch_unary(
+    x: &super::GpuTensor,
+    f: impl FnOnce(&ScryCtxInner, &::scry_gpu::Buffer<f32>, usize) -> Option<::scry_gpu::Buffer<f32>>,
+) -> super::GpuTensor {
+    let super::GpuTensor::Gpu(buf, rows, cols) = x else {
+        // CPU fallback — should not happen in the normal GPU forward path,
+        // but safe to handle.
+        return x.to_cpu_tensor();
+    };
+
+    let n = rows * cols;
+    let result = (|| {
+        let gpu = ctx_lock()?;
+        f(&gpu, buf, n)
+    })();
+
+    match result {
+        Some(out) => super::GpuTensor::Gpu(out, *rows, *cols),
+        None => x.to_cpu_tensor(),
     }
 }
 

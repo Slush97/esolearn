@@ -86,6 +86,23 @@ impl Activation {
     pub(crate) fn uses_he_init(self) -> bool {
         matches!(self, Self::Relu)
     }
+
+    /// Apply the activation on a GPU-resident tensor via the compute backend.
+    ///
+    /// For `Identity`, returns the input tensor unchanged (no dispatch).
+    /// For ReLU/Tanh/Sigmoid, dispatches the corresponding GPU kernel.
+    pub(crate) fn forward_gpu(
+        self,
+        z: crate::accel::GpuTensor,
+        backend: &dyn crate::accel::ComputeBackend,
+    ) -> crate::accel::GpuTensor {
+        match self {
+            Self::Relu => backend.gpu_relu(&z),
+            Self::Sigmoid => backend.gpu_sigmoid(&z),
+            Self::Tanh => backend.gpu_tanh(&z),
+            Self::Identity => z,
+        }
+    }
 }
 
 /// Numerically stable sigmoid.

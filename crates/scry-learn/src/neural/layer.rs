@@ -32,6 +32,12 @@ pub(crate) struct DenseLayer {
     pub cache_a: Vec<f64>,
     /// Cached batch size from the last forward pass.
     pub cache_batch: usize,
+
+    // ── GPU-resident weight caches (uploaded once, reused across batches) ──
+    /// Transposed weight matrix W^T `[in_size, out_size]` on GPU.
+    pub weights_gpu: Option<crate::accel::GpuTensor>,
+    /// Bias vector `[1, out_size]` on GPU.
+    pub biases_gpu: Option<crate::accel::GpuTensor>,
 }
 
 impl DenseLayer {
@@ -64,6 +70,8 @@ impl DenseLayer {
             cache_z: Vec::new(),
             cache_a: Vec::new(),
             cache_batch: 0,
+            weights_gpu: None,
+            biases_gpu: None,
         }
     }
 
@@ -107,42 +115,61 @@ impl DenseLayer {
         a
     }
 
-    /// Forward pass using a `ComputeBackend` for the matrix multiply.
+    /// GPU-resident forward pass: input and output stay on GPU.
     ///
-    /// `input` is row-major `[batch, in_size]`.
-    pub fn forward_with_backend(
+    /// Weights and biases are uploaded to GPU on first call and reused
+    /// on subsequent calls. The matmul, bias add, and activation all
+    /// execute on-device — no CPU round-trip per layer.
+    ///
+    /// Training caches are still populated (via CPU download) for the
+    /// backward pass which remains CPU-based.
+    pub fn forward_gpu(
         &mut self,
-        input: &[f64],
+        input: &crate::accel::GpuTensor,
         batch: usize,
         training: bool,
         backend: &dyn crate::accel::ComputeBackend,
-    ) -> Vec<f64> {
-        debug_assert_eq!(input.len(), batch * self.in_size);
-
-        // z = input · W^T
-        // input: [batch, in_size], W^T: [in_size, out_size]
-        // We need to transpose W ([out, in]) to get [in, out].
-        let wt = transpose(&self.weights, self.out_size, self.in_size);
-        let mut z = backend.matmul(input, &wt, batch, self.in_size, self.out_size);
-
-        // Add bias
-        for i in 0..batch {
-            for j in 0..self.out_size {
-                z[i * self.out_size + j] += self.biases[j];
-            }
+    ) -> crate::accel::GpuTensor {
+        // Lazy upload of transposed weights W^T and biases to GPU.
+        if self.weights_gpu.is_none() {
+            let wt = transpose(&self.weights, self.out_size, self.in_size);
+            self.weights_gpu = Some(backend.gpu_upload(&wt, self.in_size, self.out_size));
+            self.biases_gpu = Some(backend.gpu_upload(&self.biases, 1, self.out_size));
         }
 
-        let mut a = z.clone();
-        self.activation.forward(&mut a);
+        // z = input · W^T (GPU matmul, result stays on device)
+        let z = backend.gpu_matmul(
+            input,
+            self.weights_gpu.as_ref().unwrap(),
+            batch,
+            self.in_size,
+            self.out_size,
+        );
+
+        // z += bias (GPU element-wise)
+        let z = backend.gpu_bias_add(&z, self.biases_gpu.as_ref().unwrap(), batch, self.out_size);
+
+        // Cache for backward pass (downloads to CPU — backward is still CPU-based)
+        if training {
+            self.cache_input = backend.gpu_download(input);
+            self.cache_z = backend.gpu_download(&z);
+        }
+
+        // activation(z) on GPU
+        let a = self.activation.forward_gpu(z, backend);
 
         if training {
-            self.cache_input = input.to_vec();
-            self.cache_z = z;
-            self.cache_a.clone_from(&a);
+            self.cache_a = backend.gpu_download(&a);
             self.cache_batch = batch;
         }
 
         a
+    }
+
+    /// Invalidate GPU weight caches (call after optimizer updates weights).
+    pub fn invalidate_gpu_weights(&mut self) {
+        self.weights_gpu = None;
+        self.biases_gpu = None;
     }
 
     /// Backward pass: compute gradients for weights, biases, and input.
@@ -239,6 +266,7 @@ impl crate::neural::traits::Layer for DenseLayer {
         if let Some((w, b)) = saved.first() {
             self.weights.clone_from(w);
             self.biases.clone_from(b);
+            self.invalidate_gpu_weights();
         }
     }
 
