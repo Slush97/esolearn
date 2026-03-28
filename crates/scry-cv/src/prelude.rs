@@ -8,13 +8,38 @@ pub use crate::image::pixel::{ChannelLayout, Gray, Pixel, Rgb, Rgba};
 pub use crate::image::view::{ImageView, ImageViewMut};
 pub use crate::integral::IntegralImage;
 
+// Filtering & edge detection
+pub use crate::filter::canny::{canny, canny_with_sigma};
+
+// Connected components & contours
+pub use crate::components::{
+    connected_components, find_contours, ComponentStats, Connectivity, ConnectedComponents,
+    Contour,
+};
+
+// Hough transforms
+pub use crate::hough::{hough_circles, hough_lines, HoughCircle, HoughLine};
+
 // Feature detection & matching
 pub use crate::features::{BinaryDescriptor, FloatDescriptor, KeyPoint, Orb};
-pub use crate::matching::{match_binary, match_float, ratio_test, DMatch};
+pub use crate::matching::{
+    find_best_match, knn_match_binary, match_binary, match_float, match_template, ratio_test,
+    DMatch, TemplateMatchMethod,
+};
 pub use crate::registration::{
     find_fundamental, find_homography, EpipolarPair, FundamentalMatrix, Homography, PointPair,
     RansacConfig,
 };
+
+// Feature-gated re-exports
+#[cfg(feature = "stereo")]
+pub use crate::stereo::SgbmStereo;
+
+#[cfg(feature = "flow")]
+pub use crate::flow::{DenseOpticalFlow, Farneback, FlowField, LucasKanade, SparseFlowResult, SparseOpticalFlow};
+
+#[cfg(feature = "background")]
+pub use crate::background::{BackgroundSubtractor, KnnBackground, Mog2};
 
 // Type aliases for the most common image types.
 
