@@ -1,0 +1,118 @@
+[package]
+name = "scry-cv"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83.0"
+authors = ["esoc"]
+description = "Classical computer vision: feature detection, matching, registration, optical flow, stereo, segmentation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Slush97/esolearn"
+documentation = "https://docs.rs/scry-cv"
+keywords = ["computer-vision", "feature-detection", "orb", "optical-flow", "image-processing"]
+categories = ["computer-vision", "science::robotics", "algorithms", "multimedia::images"]
+readme = "README.md"
+
+[features]
+default = []
+
+# Interop
+image-interop = ["dep:image"]
+skia-interop = ["dep:tiny-skia"]
+ndarray-interop = ["dep:ndarray"]
+
+# Serialization
+serde = ["dep:serde"]
+
+# Parallelism
+rayon = ["dep:rayon"]
+
+# Algorithm groups (heavy impls behind gates)
+stereo = []
+flow = []
+background = []
+segmentation = []
+denoise = []
+texture = []
+
+# Everything
+full = [
+    "image-interop", "skia-interop", "ndarray-interop",
+    "serde", "rayon",
+    "stereo", "flow", "background", "segmentation", "denoise", "texture",
+]
+
+[dependencies]
+thiserror = "2"
+
+# Optional interop
+tiny-skia = { version = "0.11", optional = true }
+image = { version = "0.25", optional = true, default-features = false }
+ndarray = { version = "0.16", optional = true }
+
+# Optional serialization
+serde = { version = "1", features = ["derive"], optional = true }
+
+# Optional parallelism
+rayon = { version = "1", optional = true }
+
+[dev-dependencies]
+fastrand = "2"
+insta = { version = "1", features = ["glob"] }
+pretty_assertions = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"
+image = { version = "0.25" }
+tiny-skia = "0.11"
+ndarray = "0.16"
+
+[[bench]]
+name = "feature_detection"
+harness = false
+
+[[bench]]
+name = "matching"
+harness = false
+
+[[bench]]
+name = "convolution"
+harness = false
+
+[lints.rust]
+missing_docs = "warn"
+unreachable_pub = "warn"
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Pedantic overrides
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Cast lints — vision math inherently converts between f32, u32, usize, i32
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_possible_wrap = "allow"
+
+# Math style
+suboptimal_flops = "allow"
+missing_const_for_fn = "allow"
+
+# Style — intentional patterns
+similar_names = "allow"
+option_if_let_else = "allow"
+many_single_char_names = "allow"
+needless_pass_by_value = "allow"
+while_float = "allow"
+unreadable_literal = "allow"
+field_reassign_with_default = "allow"
+items_after_statements = "allow"
+branches_sharing_code = "allow"
+match_same_arms = "allow"
