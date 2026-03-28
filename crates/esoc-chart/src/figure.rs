@@ -74,8 +74,8 @@ impl Figure {
     /// Render to PNG bytes (requires `png` feature).
     #[cfg(feature = "png")]
     pub fn to_png(&self) -> Result<Vec<u8>> {
-        let canvas = render_figure(self)?;
         use esoc_gfx::backend::RenderBackend;
+        let canvas = render_figure(self)?;
         let bytes = esoc_gfx::backend::png::PngBackend
             .render(&canvas)
             .map_err(crate::error::ChartError::Gfx)?;

@@ -78,7 +78,7 @@ fn generate_charts(out: &Path) -> Vec<(String, std::path::PathBuf)> {
             .map(|i| {
                 let t = i as f64 / 200.0;
                 // pseudo-normal via simple transform
-                (t * 6.28).sin() * 10.0 + 50.0 + (i % 7) as f64
+                (t * std::f64::consts::TAU).sin() * 10.0 + 50.0 + (i % 7) as f64
             })
             .collect();
         let chart = histogram(&data)
