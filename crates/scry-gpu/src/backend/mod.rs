@@ -6,6 +6,9 @@
 #[cfg(feature = "vulkan")]
 pub mod vulkan;
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 use crate::error::Result;
 
 /// Trait implemented by each GPU backend.
@@ -81,12 +84,16 @@ pub trait BackendBufferOps {
 pub enum BackendBuffer {
     #[cfg(feature = "vulkan")]
     Vulkan(vulkan::VulkanBuffer),
+    #[cfg(feature = "cuda")]
+    Cuda(cuda::CudaBuffer),
 }
 
 /// Type-erased pipeline handle used by [`Kernel`](crate::Kernel).
 pub enum BackendKernel {
     #[cfg(feature = "vulkan")]
     Vulkan(vulkan::VulkanKernel),
+    #[cfg(feature = "cuda")]
+    Cuda(cuda::CudaKernel),
 }
 
 impl BackendBufferOps for BackendBuffer {
@@ -94,6 +101,8 @@ impl BackendBufferOps for BackendBuffer {
         match self {
             #[cfg(feature = "vulkan")]
             Self::Vulkan(b) => b.read_back(),
+            #[cfg(feature = "cuda")]
+            Self::Cuda(b) => b.read_back(),
         }
     }
 
@@ -101,6 +110,8 @@ impl BackendBufferOps for BackendBuffer {
         match self {
             #[cfg(feature = "vulkan")]
             Self::Vulkan(b) => b.byte_size(),
+            #[cfg(feature = "cuda")]
+            Self::Cuda(b) => b.byte_size(),
         }
     }
 }

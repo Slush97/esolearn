@@ -13,6 +13,7 @@ categories = ["graphics", "science", "concurrency"]
 [features]
 default = ["vulkan"]
 vulkan = ["dep:ash", "dep:gpu-allocator"]
+cuda = ["dep:cudarc"]
 bench-wgpu = ["dep:wgpu"]
 # metal = []  # future
 
@@ -20,6 +21,9 @@ bench-wgpu = ["dep:wgpu"]
 # Vulkan backend
 ash = { version = "0.38", optional = true, default-features = false, features = ["linked", "debug"] }
 gpu-allocator = { version = "0.27", optional = true, default-features = false, features = ["vulkan"] }
+
+# CUDA backend
+cudarc = { version = "0.19", optional = true, features = ["cublas", "nvrtc", "cuda-version-from-build-system"] }
 
 # Shader compilation (WGSL → SPIR-V)
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }

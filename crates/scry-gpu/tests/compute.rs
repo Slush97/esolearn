@@ -2,11 +2,16 @@
 //!
 //! These tests require a Vulkan-capable GPU. They will fail (not hang)
 //! on systems without one — the `Device::auto()` call returns `NoDevice`.
+//!
+//! All tests in this file dispatch WGSL shaders and therefore require the
+//! Vulkan backend. When both `vulkan` and `cuda` features are enabled,
+//! `Device::auto()` prefers CUDA (which cannot execute SPIR-V), so we
+//! explicitly request the Vulkan backend.
 
-use scry_gpu::{Device, DispatchConfig};
+use scry_gpu::{BackendKind, Device, DispatchConfig};
 
 fn gpu() -> Device {
-    Device::auto().expect("no Vulkan-capable GPU found — skipping test")
+    Device::with_backend(BackendKind::Vulkan).expect("no Vulkan-capable GPU found — skipping test")
 }
 
 #[test]
@@ -113,7 +118,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }";
 
     let config = DispatchConfig::new(shader, 2).workgroups([1, 1, 1]);
-    gpu.dispatch_configured(&config, &[&input, &output]).unwrap();
+    gpu.dispatch_configured(&config, &[&input, &output])
+        .unwrap();
 
     let result: Vec<f32> = output.download().unwrap();
     assert_eq!(result, vec![101.0, 102.0]);
@@ -140,7 +146,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let err = gpu.dispatch(shader, &[&buf], 4).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("mismatch"), "expected binding mismatch error, got: {msg}");
+    assert!(
+        msg.contains("mismatch"),
+        "expected binding mismatch error, got: {msg}"
+    );
 }
 
 // ── Kernel (compile-once, dispatch-many) tests ──
@@ -217,7 +226,10 @@ fn kernel_binding_mismatch() {
     let buf = gpu.alloc::<f32>(4).expect("alloc failed");
     let err = gpu.run(&kernel, &[&buf], 4).unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("mismatch"), "expected binding mismatch, got: {msg}");
+    assert!(
+        msg.contains("mismatch"),
+        "expected binding mismatch, got: {msg}"
+    );
 }
 
 #[test]
@@ -226,8 +238,14 @@ fn kernel_debug_format() {
     let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
 
     let debug = format!("{kernel:?}");
-    assert!(debug.contains("main"), "Debug output should contain entry point: {debug}");
-    assert!(debug.contains("Kernel"), "Debug output should contain type name: {debug}");
+    assert!(
+        debug.contains("main"),
+        "Debug output should contain entry point: {debug}"
+    );
+    assert!(
+        debug.contains("Kernel"),
+        "Debug output should contain type name: {debug}"
+    );
 }
 
 #[test]
@@ -518,7 +536,11 @@ fn main(
     batch.submit().unwrap();
 
     let result = pass2.download().unwrap();
-    assert!((result[0] - 1024.0).abs() < 0.01, "expected 1024.0, got {}", result[0]);
+    assert!(
+        (result[0] - 1024.0).abs() < 0.01,
+        "expected 1024.0, got {}",
+        result[0]
+    );
 }
 
 #[test]
@@ -579,7 +601,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let output = gpu.alloc::<f32>(2).unwrap();
 
     let mut batch = gpu.batch().unwrap();
-    batch.run_configured(&kernel, &[&input, &output], [1, 1, 1], None).unwrap();
+    batch
+        .run_configured(&kernel, &[&input, &output], [1, 1, 1], None)
+        .unwrap();
     batch.submit().unwrap();
 
     assert_eq!(output.download().unwrap(), vec![101.0, 102.0]);
@@ -598,7 +622,10 @@ fn batch_binding_mismatch() {
     match result {
         Err(e) => {
             let msg = format!("{e}");
-            assert!(msg.contains("mismatch"), "expected binding mismatch error, got: {msg}");
+            assert!(
+                msg.contains("mismatch"),
+                "expected binding mismatch error, got: {msg}"
+            );
         }
         Ok(_) => panic!("expected binding mismatch error, but got Ok"),
     }
@@ -637,9 +664,11 @@ fn batch_fluent_api() {
 
     let mut batch = gpu.batch().unwrap();
     batch
-        .run(&kernel, &[&input, &mid], 1).unwrap()
+        .run(&kernel, &[&input, &mid], 1)
+        .unwrap()
         .barrier()
-        .run(&kernel, &[&mid, &output], 1).unwrap();
+        .run(&kernel, &[&mid, &output], 1)
+        .unwrap();
     batch.submit().unwrap();
 
     assert_eq!(output.download().unwrap(), vec![20.0]); // 5 * 2 * 2
@@ -652,7 +681,10 @@ fn subgroup_size_is_nonzero() {
     let gpu = gpu();
     let sg = gpu.subgroup_size();
     assert!(sg > 0, "subgroup_size should be > 0, got {sg}");
-    assert!(sg.is_power_of_two(), "subgroup_size should be power of 2, got {sg}");
+    assert!(
+        sg.is_power_of_two(),
+        "subgroup_size should be power of 2, got {sg}"
+    );
 }
 
 #[test]
@@ -759,26 +791,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Run with scale = 10.0
     let output = gpu.alloc::<f32>(4).expect("alloc failed");
-    gpu.run_with_push_constants(
-        &kernel,
-        &[&input, &output],
-        4,
-        &10.0f32.to_ne_bytes(),
-    )
-    .expect("run failed");
+    gpu.run_with_push_constants(&kernel, &[&input, &output], 4, &10.0f32.to_ne_bytes())
+        .expect("run failed");
 
     let result: Vec<f32> = output.download().expect("download failed");
     assert_eq!(result, vec![10.0, 20.0, 30.0, 40.0]);
 
     // Same kernel, different scale = 0.5
     let output2 = gpu.alloc::<f32>(4).expect("alloc failed");
-    gpu.run_with_push_constants(
-        &kernel,
-        &[&input, &output2],
-        4,
-        &0.5f32.to_ne_bytes(),
-    )
-    .expect("run failed");
+    gpu.run_with_push_constants(&kernel, &[&input, &output2], 4, &0.5f32.to_ne_bytes())
+        .expect("run failed");
 
     let result2: Vec<f32> = output2.download().expect("download failed");
     assert_eq!(result2, vec![0.5, 1.0, 1.5, 2.0]);
@@ -862,7 +884,9 @@ fn matmul_tiled_16x16_non_square() {
     let k: u32 = 48;
 
     let a: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.01).collect();
-    let b: Vec<f32> = (0..k * n).map(|i| (i as f32).mul_add(-0.005, 1.0)).collect();
+    let b: Vec<f32> = (0..k * n)
+        .map(|i| (i as f32).mul_add(-0.005, 1.0))
+        .collect();
     let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
 
     let buf_a = gpu.upload(&a).unwrap();
@@ -925,8 +949,12 @@ fn matmul_coarse_64x64_non_square() {
     let n: u32 = 70;
     let k: u32 = 100;
 
-    let a: Vec<f32> = (0..m * k).map(|i| (i as f32).mul_add(0.01, -25.0)).collect();
-    let b: Vec<f32> = (0..k * n).map(|i| (i as f32).mul_add(0.01, -35.0)).collect();
+    let a: Vec<f32> = (0..m * k)
+        .map(|i| (i as f32).mul_add(0.01, -25.0))
+        .collect();
+    let b: Vec<f32> = (0..k * n)
+        .map(|i| (i as f32).mul_add(0.01, -35.0))
+        .collect();
     let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
 
     let buf_a = gpu.upload(&a).unwrap();
@@ -1082,10 +1110,7 @@ fn pairwise_euclidean_basic() {
     let expected = [0.0, 2.0, 2.0, 2.0, 0.0, 2.0];
 
     for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
-        assert!(
-            (g - e).abs() < 0.001,
-            "dist[{i}] = {g}, expected {e}",
-        );
+        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}",);
     }
 }
 
@@ -1129,10 +1154,7 @@ fn pairwise_euclidean_scaled() {
     ];
 
     for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
-        assert!(
-            (g - e).abs() < 0.001,
-            "dist[{i}] = {g}, expected {e}",
-        );
+        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}",);
     }
 }
 
@@ -1236,7 +1258,11 @@ fn batch_large_descriptor_pool_overflow() {
     // After 100 doublings: 1.0 * 2^100 — but f32 can only hold 2^128.
     // Check a few milestones.
     let r0 = bufs[0].download().unwrap();
-    assert!((r0[0] - 2.0).abs() < 0.001, "buf[0] = {}, expected 2.0", r0[0]);
+    assert!(
+        (r0[0] - 2.0).abs() < 0.001,
+        "buf[0] = {}, expected 2.0",
+        r0[0]
+    );
 
     let r9 = bufs[9].download().unwrap();
     assert!(

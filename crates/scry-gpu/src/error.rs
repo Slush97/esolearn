@@ -35,6 +35,14 @@ pub enum BackendOp {
     CreateDevice,
     EnumerateDevices,
     CreateAllocator,
+    // CUDA-specific operations
+    CompileKernel,
+    LoadModule,
+    LoadFunction,
+    LaunchKernel,
+    StreamSync,
+    DeviceQuery,
+    CuBlas,
 }
 
 /// Helper to build a [`GpuError::Backend`] concisely.

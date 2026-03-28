@@ -5,6 +5,13 @@
 //! and workgroup sizes are documented per shader.
 
 /// Matrix multiplication shaders.
+///
+/// Each shader is available as a WGSL constant (for Vulkan dispatch) and,
+/// when the `cuda` feature is enabled, as a CUDA C constant (for NVRTC
+/// compilation via [`Device::compile_cuda`](crate::Device::compile_cuda)).
+///
+/// For CUDA matmul, prefer [`Device::cublas_matmul`](crate::Device::cublas_matmul)
+/// over custom kernels — cuBLAS reaches 80%+ peak throughput immediately.
 pub mod matmul {
     /// Tiled matmul: 16x16 shared-memory tiles, 1 element per thread.
     ///
@@ -61,6 +68,48 @@ fn main(
 
     if row < dims.M && col < dims.N {
         C[row * dims.N + col] = sum;
+    }
+}";
+
+    /// CUDA C equivalent of [`TILED_16X16`].
+    ///
+    /// **Kernel signature:** `matmul_tiled_16x16(const float* A, const float* B, float* C, unsigned int M, unsigned int N, unsigned int K)`
+    /// **Block size:** `(16, 16)` — dispatch `[N.div_ceil(16), M.div_ceil(16), 1]`
+    #[cfg(feature = "cuda")]
+    pub const TILED_16X16_CUDA: &str = "\
+extern \"C\" __global__ void matmul_tiled_16x16(
+    const float* A, const float* B, float* C,
+    unsigned int M, unsigned int N, unsigned int K
+) {
+    __shared__ float tile_a[256];
+    __shared__ float tile_b[256];
+
+    unsigned int row = blockIdx.y * 16 + threadIdx.y;
+    unsigned int col = blockIdx.x * 16 + threadIdx.x;
+    unsigned int lr = threadIdx.y;
+    unsigned int lc = threadIdx.x;
+
+    float sum = 0.0f;
+    unsigned int num_tiles = (K + 15) / 16;
+
+    for (unsigned int t = 0; t < num_tiles; t++) {
+        unsigned int a_col = t * 16 + lc;
+        tile_a[lr * 16 + lc] = (row < M && a_col < K) ? A[row * K + a_col] : 0.0f;
+
+        unsigned int b_row = t * 16 + lr;
+        tile_b[lr * 16 + lc] = (b_row < K && col < N) ? B[b_row * N + col] : 0.0f;
+
+        __syncthreads();
+
+        for (unsigned int k = 0; k < 16; k++) {
+            sum += tile_a[lr * 16 + k] * tile_b[k * 16 + lc];
+        }
+
+        __syncthreads();
+    }
+
+    if (row < M && col < N) {
+        C[row * N + col] = sum;
     }
 }";
 
@@ -314,6 +363,35 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var d: u32 = 0u; d < dims.dim; d = d + 1u) {
         let diff = queries[q_base + d] - train[t_base + d];
         sum = sum + diff * diff;
+    }
+
+    dists[idx] = sum;
+}";
+
+    /// CUDA C equivalent of [`PAIRWISE_EUCLIDEAN`].
+    ///
+    /// **Kernel signature:** `pairwise_euclidean(const float* queries, const float* train, float* dists, unsigned int n_q, unsigned int n_t, unsigned int dim)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `n_q * n_t` invocations
+    #[cfg(feature = "cuda")]
+    pub const PAIRWISE_EUCLIDEAN_CUDA: &str = "\
+extern \"C\" __global__ void pairwise_euclidean(
+    const float* queries, const float* train, float* dists,
+    unsigned int n_q, unsigned int n_t, unsigned int dim
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = n_q * n_t;
+    if (idx >= total) return;
+
+    unsigned int i = idx / n_t;
+    unsigned int j = idx % n_t;
+
+    float sum = 0.0f;
+    unsigned int q_base = i * dim;
+    unsigned int t_base = j * dim;
+
+    for (unsigned int d = 0; d < dim; d++) {
+        float diff = queries[q_base + d] - train[t_base + d];
+        sum += diff * diff;
     }
 
     dists[idx] = sum;

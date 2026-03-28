@@ -33,6 +33,8 @@ pub struct Batch {
 enum BatchInner {
     #[cfg(feature = "vulkan")]
     Vulkan(crate::backend::vulkan::VulkanBatch),
+    #[cfg(feature = "cuda")]
+    Cuda(crate::backend::cuda::CudaBatch),
 }
 
 impl Batch {
@@ -40,6 +42,13 @@ impl Batch {
     pub(crate) const fn new_vulkan(vk_batch: crate::backend::vulkan::VulkanBatch) -> Self {
         Self {
             inner: BatchInner::Vulkan(vk_batch),
+        }
+    }
+
+    #[cfg(feature = "cuda")]
+    pub(crate) const fn new_cuda(cuda_batch: crate::backend::cuda::CudaBatch) -> Self {
+        Self {
+            inner: BatchInner::Cuda(cuda_batch),
         }
     }
 
@@ -85,14 +94,37 @@ impl Batch {
         match &mut self.inner {
             #[cfg(feature = "vulkan")]
             BatchInner::Vulkan(vk_batch) => {
-                let crate::backend::BackendKernel::Vulkan(vk_kernel) = &kernel.inner;
+                let crate::backend::BackendKernel::Vulkan(vk_kernel) = &kernel.inner else {
+                    return Err(GpuError::BackendUnavailable(
+                        "kernel was not compiled for Vulkan".into(),
+                    ));
+                };
                 let vk_bufs: Vec<&crate::backend::vulkan::VulkanBuffer> = backend_bufs
                     .iter()
                     .map(|buf| match buf {
                         BackendBuffer::Vulkan(vb) => vb,
+                        #[cfg(feature = "cuda")]
+                        _ => unreachable!("Vulkan batch received non-Vulkan buffer"),
                     })
                     .collect();
                 vk_batch.record_dispatch(vk_kernel, &vk_bufs, workgroups, push_constants)?;
+            }
+            #[cfg(feature = "cuda")]
+            BatchInner::Cuda(cuda_batch) => {
+                let crate::backend::BackendKernel::Cuda(cuda_kernel) = &kernel.inner else {
+                    return Err(GpuError::BackendUnavailable(
+                        "kernel was not compiled for CUDA".into(),
+                    ));
+                };
+                let cuda_bufs: Vec<&crate::backend::cuda::CudaBuffer> = backend_bufs
+                    .iter()
+                    .map(|buf| match buf {
+                        BackendBuffer::Cuda(cb) => cb,
+                        #[cfg(feature = "vulkan")]
+                        _ => unreachable!("CUDA batch received non-CUDA buffer"),
+                    })
+                    .collect();
+                cuda_batch.record_dispatch(cuda_kernel, &cuda_bufs, workgroups, push_constants)?;
             }
         }
 
@@ -108,6 +140,8 @@ impl Batch {
         match &mut self.inner {
             #[cfg(feature = "vulkan")]
             BatchInner::Vulkan(vk_batch) => vk_batch.record_barrier(),
+            #[cfg(feature = "cuda")]
+            BatchInner::Cuda(cuda_batch) => cuda_batch.record_barrier(),
         }
         self
     }
@@ -120,6 +154,8 @@ impl Batch {
         match self.inner {
             #[cfg(feature = "vulkan")]
             BatchInner::Vulkan(vk_batch) => vk_batch.submit(),
+            #[cfg(feature = "cuda")]
+            BatchInner::Cuda(cuda_batch) => cuda_batch.submit(),
         }
     }
 }
