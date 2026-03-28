@@ -31,7 +31,7 @@ const MAX_COMPONENTS: usize = 5;
 pub struct Mog2 {
     width: u32,
     height: u32,
-    /// Per-pixel mixture components: [pixel_idx * MAX_COMPONENTS + k]
+    /// Per-pixel mixture components: \[`pixel_idx` * `MAX_COMPONENTS` + k\]
     weights: Vec<f32>,
     means: Vec<f32>,
     variances: Vec<f32>,
@@ -272,7 +272,7 @@ impl BackgroundSubtractor for Mog2 {
         let n = self.width as usize * self.height as usize;
         let mut bg = vec![0.0f32; n];
 
-        for i in 0..n {
+        for (i, bg_val) in bg.iter_mut().enumerate() {
             let base = i * MAX_COMPONENTS;
             let nk = self.n_components[i] as usize;
 
@@ -285,7 +285,7 @@ impl BackgroundSubtractor for Mog2 {
                     best_mean = self.means[base + k];
                 }
             }
-            bg[i] = best_mean;
+            *bg_val = best_mean;
         }
 
         ImageBuf::from_vec(bg, self.width, self.height)
@@ -293,6 +293,7 @@ impl BackgroundSubtractor for Mog2 {
 }
 
 #[cfg(test)]
+#[allow(clippy::naive_bytecount)]
 mod tests {
     use super::*;
 

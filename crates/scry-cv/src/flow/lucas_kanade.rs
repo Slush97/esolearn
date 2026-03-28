@@ -150,6 +150,7 @@ impl SparseOpticalFlow for LucasKanade {
 
                 // Check min eigenvalue of G
                 let trace = g_xx + g_yy;
+                #[allow(clippy::suspicious_operation_groupings)]
                 let det = g_xx * g_yy - g_xy * g_xy;
                 let disc = (trace * trace - 4.0 * det).max(0.0);
                 let min_eig = (trace - disc.sqrt()) * 0.5;
@@ -163,53 +164,12 @@ impl SparseOpticalFlow for LucasKanade {
                 let inv_det = 1.0 / det;
 
                 // Iterative refinement
-                let mut vx = gx / scale;
-                let mut vy = gy / scale;
-
-                for _ in 0..self.max_iters {
-                    let mut bx = 0.0f32;
-                    let mut by = 0.0f32;
-
-                    for wy in -ws..=ws {
-                        for wx in -ws..=ws {
-                            let sx = cx + wx as f32;
-                            let sy = cy + wy as f32;
-                            let tx = sx + vx;
-                            let ty = sy + vy;
-
-                            if sx < 0.0
-                                || sy < 0.0
-                                || sx >= (pw - 1) as f32
-                                || sy >= (ph - 1) as f32
-                                || tx < 0.0
-                                || ty < 0.0
-                                || tx >= (pw - 1) as f32
-                                || ty >= (ph - 1) as f32
-                            {
-                                continue;
-                            }
-
-                            let ix = gradient_x(prev_data, pw, ph, sx, sy);
-                            let iy = gradient_y(prev_data, pw, ph, sx, sy);
-                            let it = bilinear_at(next_data, pw, ph, tx, ty)
-                                - bilinear_at(prev_data, pw, ph, sx, sy);
-
-                            bx += ix * it;
-                            by += iy * it;
-                        }
-                    }
-
-                    // Solve G * delta = -b
-                    let dvx = -inv_det * (g_yy * bx - g_xy * by);
-                    let dvy = -inv_det * (-g_xy * bx + g_xx * by);
-
-                    vx += dvx;
-                    vy += dvy;
-
-                    if dvx * dvx + dvy * dvy < self.epsilon * self.epsilon {
-                        break;
-                    }
-                }
+                let (vx, vy) = refine_flow(
+                    prev_data, next_data, pw, ph,
+                    cx, cy, gx / scale, gy / scale,
+                    ws, self.max_iters, self.epsilon,
+                    g_xx, g_xy, g_yy, inv_det,
+                );
 
                 // Propagate to next (finer) level
                 gx = vx * scale;
@@ -218,45 +178,15 @@ impl SparseOpticalFlow for LucasKanade {
 
             if status[i] {
                 next_pts[i] = (px + gx, py + gy);
-
-                // Compute tracking error (SSD in the window at finest level)
-                let prev_data = prev_pyr[0].as_slice();
-                let next_data = next_pyr[0].as_slice();
-                let pw = prev_pyr[0].width();
-                let ph = prev_pyr[0].height();
-                let ws = self.win_size as i32;
-                let mut err = 0.0f32;
-                let mut count = 0u32;
-
-                for wy in -ws..=ws {
-                    for wx in -ws..=ws {
-                        let sx = px + wx as f32;
-                        let sy = py + wy as f32;
-                        let tx = next_pts[i].0 + wx as f32;
-                        let ty = next_pts[i].1 + wy as f32;
-
-                        if sx >= 0.0
-                            && sy >= 0.0
-                            && sx < (pw - 1) as f32
-                            && sy < (ph - 1) as f32
-                            && tx >= 0.0
-                            && ty >= 0.0
-                            && tx < (pw - 1) as f32
-                            && ty < (ph - 1) as f32
-                        {
-                            let d = bilinear_at(prev_data, pw, ph, sx, sy)
-                                - bilinear_at(next_data, pw, ph, tx, ty);
-                            err += d * d;
-                            count += 1;
-                        }
-                    }
-                }
-
-                errors[i] = if count > 0 {
-                    (err / count as f32).sqrt()
-                } else {
-                    f32::MAX
-                };
+                errors[i] = tracking_error(
+                    prev_pyr[0].as_slice(),
+                    next_pyr[0].as_slice(),
+                    prev_pyr[0].width(),
+                    prev_pyr[0].height(),
+                    (px, py),
+                    next_pts[i],
+                    self.win_size as i32,
+                );
             }
         }
 
@@ -265,6 +195,120 @@ impl SparseOpticalFlow for LucasKanade {
             status,
             errors,
         })
+    }
+}
+
+/// Iterative Lucas-Kanade refinement at a single pyramid level.
+#[allow(clippy::too_many_arguments)]
+fn refine_flow(
+    prev_data: &[f32],
+    next_data: &[f32],
+    pw: u32,
+    ph: u32,
+    cx: f32,
+    cy: f32,
+    init_vx: f32,
+    init_vy: f32,
+    ws: i32,
+    max_iters: u32,
+    epsilon: f32,
+    g_xx: f32,
+    g_xy: f32,
+    g_yy: f32,
+    inv_det: f32,
+) -> (f32, f32) {
+    let mut vx = init_vx;
+    let mut vy = init_vy;
+
+    for _ in 0..max_iters {
+        let mut bx = 0.0f32;
+        let mut by = 0.0f32;
+
+        for wy in -ws..=ws {
+            for wx in -ws..=ws {
+                let sx = cx + wx as f32;
+                let sy = cy + wy as f32;
+                let tx = sx + vx;
+                let ty = sy + vy;
+
+                if sx < 0.0
+                    || sy < 0.0
+                    || sx >= (pw - 1) as f32
+                    || sy >= (ph - 1) as f32
+                    || tx < 0.0
+                    || ty < 0.0
+                    || tx >= (pw - 1) as f32
+                    || ty >= (ph - 1) as f32
+                {
+                    continue;
+                }
+
+                let ix = gradient_x(prev_data, pw, ph, sx, sy);
+                let iy = gradient_y(prev_data, pw, ph, sx, sy);
+                let it = bilinear_at(next_data, pw, ph, tx, ty)
+                    - bilinear_at(prev_data, pw, ph, sx, sy);
+
+                bx += ix * it;
+                by += iy * it;
+            }
+        }
+
+        // Solve G * delta = -b
+        let dvx = -inv_det * (g_yy * bx - g_xy * by);
+        let dvy = -inv_det * (-g_xy * bx + g_xx * by);
+
+        vx += dvx;
+        vy += dvy;
+
+        if dvx * dvx + dvy * dvy < epsilon * epsilon {
+            break;
+        }
+    }
+
+    (vx, vy)
+}
+
+/// Compute tracking error (SSD in the window at finest level).
+fn tracking_error(
+    prev_data: &[f32],
+    next_data: &[f32],
+    pw: u32,
+    ph: u32,
+    src: (f32, f32),
+    dst: (f32, f32),
+    ws: i32,
+) -> f32 {
+    let mut err = 0.0f32;
+    let mut count = 0u32;
+
+    for wy in -ws..=ws {
+        for wx in -ws..=ws {
+            let sx = src.0 + wx as f32;
+            let sy = src.1 + wy as f32;
+            let tx = dst.0 + wx as f32;
+            let ty = dst.1 + wy as f32;
+
+            if sx >= 0.0
+                && sy >= 0.0
+                && sx < (pw - 1) as f32
+                && sy < (ph - 1) as f32
+                && tx >= 0.0
+                && ty >= 0.0
+                && tx < (pw - 1) as f32
+                && ty < (ph - 1) as f32
+            {
+                let d = bilinear_at(prev_data, pw, ph, sx, sy)
+                    - bilinear_at(next_data, pw, ph, tx, ty);
+                err += d * d;
+                count += 1;
+            }
+        }
+    }
+
+    if count > 0 {
+        (err / count as f32).sqrt()
+    } else {
+        f32::MAX
     }
 }
 

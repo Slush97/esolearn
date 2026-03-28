@@ -48,13 +48,14 @@ pub fn harris_response(
 
     // Harris response
     let mut response = vec![0.0f32; n];
-    for i in 0..n {
+    for (i, resp) in response.iter_mut().enumerate() {
         let xx = sxx.as_slice()[i];
         let yy = syy.as_slice()[i];
         let xy = sxy.as_slice()[i];
+        #[allow(clippy::suspicious_operation_groupings)]
         let det = xx * yy - xy * xy;
         let trace = xx + yy;
-        response[i] = det - k * trace * trace;
+        *resp = det - k * trace * trace;
     }
 
     ImageBuf::from_vec(response, w, h)

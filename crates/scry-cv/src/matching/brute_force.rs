@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(matches.len(), 3);
         for m in &matches {
             assert_eq!(m.query_idx, m.train_idx);
-            assert_eq!(m.distance, 0.0);
+            assert!(m.distance.abs() < f32::EPSILON);
         }
     }
 
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(knn.len(), 3);
         for matches in &knn {
             assert_eq!(matches.len(), 2);
-            assert_eq!(matches[0].distance, 0.0);
+            assert!(matches[0].distance.abs() < f32::EPSILON);
         }
     }
 }

@@ -124,12 +124,10 @@ mod tests {
         // Identity kernel
         let kernel = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
         let out = convolve_2d(&img, &kernel, 3, 3).unwrap();
-        for i in 0..9 {
+        for (i, (out_val, data_val)) in out.as_slice().iter().zip(&data).enumerate() {
             assert!(
-                (out.as_slice()[i] - data[i]).abs() < 1e-5,
-                "index {i}: expected {}, got {}",
-                data[i],
-                out.as_slice()[i]
+                (out_val - data_val).abs() < 1e-5,
+                "index {i}: expected {data_val}, got {out_val}",
             );
         }
     }

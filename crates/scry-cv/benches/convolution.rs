@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
+#![allow(missing_docs)]
 //! Benchmarks for convolution and filtering.
 
 use criterion::{criterion_group, criterion_main, Criterion};

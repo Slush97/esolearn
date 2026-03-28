@@ -68,6 +68,7 @@ pub fn match_template(
     let t_sq_sum: f64 = t_data.iter().map(|&v| (v as f64) * (v as f64)).sum();
     let t_n = (tw * th) as f64;
     let t_mean = t_sum / t_n;
+    #[allow(clippy::suspicious_operation_groupings)]
     let t_var = t_sq_sum / t_n - t_mean * t_mean;
     let t_std = t_var.max(0.0).sqrt();
 
@@ -91,6 +92,7 @@ pub fn match_template(
             let patch_sum = sat.rect_sum(x0, y0, x1, y1);
             let patch_sq_sum = sat_sq.rect_sum(x0, y0, x1, y1);
             let patch_mean = patch_sum / t_n;
+            #[allow(clippy::suspicious_operation_groupings)]
             let patch_var = patch_sq_sum / t_n - patch_mean * patch_mean;
             let patch_std = patch_var.max(0.0).sqrt();
 

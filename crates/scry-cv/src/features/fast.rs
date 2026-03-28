@@ -188,8 +188,8 @@ mod tests {
     #[test]
     fn has_contiguous_works() {
         let mut arr = [false; 16];
-        for i in 0..9 {
-            arr[i] = true;
+        for val in &mut arr[..9] {
+            *val = true;
         }
         assert!(has_contiguous(&arr, 9));
         assert!(!has_contiguous(&arr, 10));
@@ -198,11 +198,11 @@ mod tests {
     #[test]
     fn has_contiguous_wraps() {
         let mut arr = [false; 16];
-        for i in 12..16 {
-            arr[i] = true;
+        for val in &mut arr[12..16] {
+            *val = true;
         }
-        for i in 0..5 {
-            arr[i] = true;
+        for val in &mut arr[..5] {
+            *val = true;
         }
         assert!(has_contiguous(&arr, 9));
     }

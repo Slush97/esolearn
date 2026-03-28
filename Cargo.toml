@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "examples/chart_audit"]
+exclude = ["crates/scry-app", "crates/scry-stt"]
 
 [workspace.package]
 edition = "2021"

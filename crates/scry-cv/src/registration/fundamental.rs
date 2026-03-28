@@ -848,7 +848,7 @@ mod tests {
             let (a, b, c) = f_true.epipolar_line(pair.p1);
             // p2 should lie on this line: a*x2 + b*y2 + c ≈ 0
             let residual = a * pair.p2.0 + b * pair.p2.1 + c;
-            let line_norm = (a * a + b * b).sqrt();
+            let line_norm = a.hypot(b);
             let dist = if line_norm > 1e-15 {
                 residual.abs() / line_norm
             } else {
@@ -879,7 +879,7 @@ mod tests {
         // (x - 1)(x - 2)(x - 3) = x³ - 6x² + 11x - 6
         let roots = solve_cubic(1.0, -6.0, 11.0, -6.0);
         assert_eq!(roots.len(), 3);
-        let mut sorted = roots.clone();
+        let mut sorted = roots;
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert!((sorted[0] - 1.0).abs() < 1e-8, "root 0 = {}", sorted[0]);
         assert!((sorted[1] - 2.0).abs() < 1e-8, "root 1 = {}", sorted[1]);

@@ -58,7 +58,7 @@ impl RansacModel for Homography {
         let (tx, ty) = self.transform_point(point.src.0, point.src.1);
         let dx = tx - point.dst.0;
         let dy = ty - point.dst.1;
-        (dx * dx + dy * dy).sqrt()
+        dx.hypot(dy)
     }
 }
 
@@ -132,12 +132,12 @@ pub fn find_homography(
         ));
     }
 
-    let result: RansacResult<Homography> = ransac(pairs, config).ok_or_else(|| {
+    let result: RansacResult<Homography> = ransac(pairs, config).ok_or(
         ScryVisionError::ConvergenceFailure {
             iterations: config.max_iterations as usize,
             tolerance: config.threshold,
-        }
-    })?;
+        },
+    )?;
 
     Ok(HomographyResult {
         h: result.model,
@@ -160,7 +160,7 @@ fn normalize_points(
 
     let avg_dist: f64 = pts
         .iter()
-        .map(|p| ((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt())
+        .map(|p| (p.0 - cx).hypot(p.1 - cy))
         .sum::<f64>()
         / n;
 
@@ -181,7 +181,7 @@ fn normalize_points(
     (normalized, t)
 }
 
-/// Denormalize: H = T_dst_inv * H_norm * T_src
+/// Denormalize: H = `T_dst_inv` * `H_norm` * `T_src`
 fn denormalize_homography(h: &[f64; 9], t_src: &[f64; 9], t_dst: &[f64; 9]) -> [f64; 9] {
     // T_dst_inv
     let s = t_dst[0];

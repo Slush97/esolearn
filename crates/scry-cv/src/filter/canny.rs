@@ -125,8 +125,8 @@ fn non_maximum_suppression(
             //   45°  → compare NE/SW       (dx=1, dy=-1)
             //   90°  → compare up/down     (dx=0, dy=1)
             //   135° → compare NW/SE       (dx=-1, dy=-1)
-            let (n1, n2) = if angle < std::f32::consts::FRAC_PI_8
-                || angle >= 7.0 * std::f32::consts::FRAC_PI_8
+            let (n1, n2) = if !(std::f32::consts::FRAC_PI_8..7.0 * std::f32::consts::FRAC_PI_8)
+                .contains(&angle)
             {
                 // ~0° horizontal
                 (mag[y * w + x + 1], mag[y * w + x - 1])
@@ -250,7 +250,7 @@ mod tests {
         let img = ImageBuf::<f32, Gray>::from_vec(data, 64, 64).unwrap();
         let edges = canny(&img, 0.05, 0.15).unwrap();
         assert!(
-            edges.as_slice().iter().all(|&v| v == 0.0 || v == 1.0),
+            edges.as_slice().iter().all(|&v| v < f32::EPSILON || (v - 1.0).abs() < f32::EPSILON),
             "output must be binary (0.0 or 1.0)"
         );
     }

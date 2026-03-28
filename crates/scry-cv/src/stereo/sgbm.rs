@@ -228,6 +228,7 @@ impl SgbmStereo {
 ///
 /// `Lr(p,d) = C(p,d) + min(Lr(prev,d), Lr(prev,d-1)+P1, Lr(prev,d+1)+P1,
 ///                         min_k(Lr(prev,k))+P2) - min_k(Lr(prev,k))`
+#[allow(clippy::too_many_arguments)]
 fn aggregate_direction(
     cost: &[u16],
     w: usize,
@@ -243,19 +244,15 @@ fn aggregate_direction(
 
     // Determine iteration order so we process pixels after their predecessors
     let (y_range, x_range): (Vec<usize>, Vec<usize>) = (
-        if dy > 0 {
-            (0..h).collect()
-        } else if dy < 0 {
-            (0..h).rev().collect()
-        } else {
-            (0..h).collect()
+        match dy.cmp(&0) {
+            std::cmp::Ordering::Greater => (0..h).collect(),
+            std::cmp::Ordering::Less => (0..h).rev().collect(),
+            std::cmp::Ordering::Equal => (0..h).collect(),
         },
-        if dx > 0 {
-            (0..w).collect()
-        } else if dx < 0 {
-            (0..w).rev().collect()
-        } else {
-            (0..w).collect()
+        match dx.cmp(&0) {
+            std::cmp::Ordering::Greater => (0..w).collect(),
+            std::cmp::Ordering::Less => (0..w).rev().collect(),
+            std::cmp::Ordering::Equal => (0..w).collect(),
         },
     );
 
@@ -267,9 +264,7 @@ fn aggregate_direction(
 
             if px < 0 || px >= w as i32 || py < 0 || py >= h as i32 {
                 // First pixel along this path: Lr = C
-                for d in 0..nd {
-                    lr[base + d] = cost[base + d];
-                }
+                lr[base..base + nd].copy_from_slice(&cost[base..base + nd]);
                 continue;
             }
 
@@ -386,7 +381,7 @@ mod tests {
         let zero_count = disp
             .as_slice()
             .iter()
-            .filter(|&&v| v >= 0.0 && v < 1.0)
+            .filter(|&&v| (0.0..1.0).contains(&v))
             .count();
         if valid_count > 0 {
             let ratio = zero_count as f32 / valid_count as f32;

@@ -73,10 +73,9 @@ where
     let mut best: Option<RansacResult<M>> = None;
     let mut adaptive_max = config.max_iterations;
 
-    for iter in 0..adaptive_max {
-        if iter >= adaptive_max {
-            break;
-        }
+    let mut iter = 0u32;
+    while iter < adaptive_max {
+        iter += 1;
 
         // Random sample of unique indices
         let mut indices = Vec::with_capacity(M::MIN_SAMPLES);
@@ -88,9 +87,8 @@ where
         }
 
         let model = estimate_from_indices::<M>(data, &indices);
-        let model = match model {
-            Some(m) => m,
-            None => continue,
+        let Some(model) = model else {
+            continue;
         };
 
         // Count inliers

@@ -65,7 +65,7 @@ mod tests {
         // At disparity 0, cost should be 0 everywhere
         for y in 0..16usize {
             for x in 0..16usize {
-                let cost = vol[(y * 16 + x) * 16 + 0]; // d=0
+                let cost = vol[(y * 16 + x) * 16]; // d=0
                 assert_eq!(cost, 0, "identical images at d=0 should have zero cost");
             }
         }

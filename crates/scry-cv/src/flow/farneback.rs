@@ -263,6 +263,7 @@ fn update_flow(
             }
 
             // Solve G * d = -h/2 (Farneback displacement equation)
+            #[allow(clippy::suspicious_operation_groupings)]
             let det = sum_a11 * sum_a22 - sum_a12 * sum_a12;
             if det.abs() > 1e-10 {
                 let inv = -0.5 / det;

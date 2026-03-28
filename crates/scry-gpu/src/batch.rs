@@ -94,6 +94,7 @@ impl Batch {
         match &mut self.inner {
             #[cfg(feature = "vulkan")]
             BatchInner::Vulkan(vk_batch) => {
+                #[allow(irrefutable_let_patterns)]
                 let crate::backend::BackendKernel::Vulkan(vk_kernel) = &kernel.inner else {
                     return Err(GpuError::BackendUnavailable(
                         "kernel was not compiled for Vulkan".into(),

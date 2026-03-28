@@ -167,12 +167,12 @@ impl BackgroundSubtractor for KnnBackground {
         let n = self.width as usize * self.height as usize;
         let mut bg = vec![0.0f32; n];
 
-        for i in 0..n {
+        for (i, bg_val) in bg.iter_mut().enumerate() {
             let base = i * HISTORY_SIZE;
             let ns = self.n_samples[i] as usize;
             if ns > 0 {
                 let sum: f32 = self.history[base..base + ns].iter().sum();
-                bg[i] = sum / ns as f32;
+                *bg_val = sum / ns as f32;
             }
         }
 
@@ -181,6 +181,7 @@ impl BackgroundSubtractor for KnnBackground {
 }
 
 #[cfg(test)]
+#[allow(clippy::naive_bytecount)]
 mod tests {
     use super::*;
 

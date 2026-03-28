@@ -86,7 +86,7 @@ fn is_border(fg: &[bool], x: usize, y: usize, w: usize, h: usize) -> bool {
     false
 }
 
-/// Moore neighborhood tracing starting from (start_x, start_y).
+/// Moore neighborhood tracing starting from (`start_x`, `start_y`).
 ///
 /// Uses the standard Moore-neighbor boundary tracing algorithm: at each
 /// boundary pixel, search clockwise from the backtrack pixel (the last

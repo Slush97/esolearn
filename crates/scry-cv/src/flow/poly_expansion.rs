@@ -137,46 +137,18 @@ pub fn poly_expand(
                 s_yy += wt * yy;
             }
 
-            // Solve for b (gradient) using 2×2 system: [g_dxdx, g_dxdy; g_dxdy, g_dydy] * [b1, b2] = [g_dx_f, g_dy_f]
-            let det_b = g_dxdx * g_dydy - g_dxdy * g_dxdy;
-            if det_b.abs() > 1e-10 {
-                let inv = 1.0 / det_b;
-                b1[idx] = inv * (g_dydy * g_dx_f - g_dxdy * g_dy_f);
-                b2[idx] = inv * (-g_dxdy * g_dx_f + g_dxdx * g_dy_f);
-            }
-
-            // Solve for A (Hessian/2) using 3×3 system for [a11, a12, a22]
-            // [g_xx_xx, g_xx_xy, g_xx_yy] [a11]   [g_xx_f - s_xx * c]
-            // [g_xx_xy, g_xy_xy, g_xy_yy] [a12] = [g_xy_f - s_xy * c]
-            // [g_xx_yy, g_xy_yy, g_yy_yy] [a22]   [g_yy_f - s_yy * c]
-            //
-            // Approximate c ≈ f_center for simplicity
-            let rhs0 = g_xx_f - s_xx * f_center;
-            let rhs1 = g_xy_f - s_xy * f_center;
-            let rhs2 = g_yy_f - s_yy * f_center;
-
-            let det_a = g_xx_xx * (g_xy_xy * g_yy_yy - g_xy_yy * g_xy_yy)
-                - g_xx_xy * (g_xx_xy * g_yy_yy - g_xy_yy * g_xx_yy)
-                + g_xx_yy * (g_xx_xy * g_xy_yy - g_xy_xy * g_xx_yy);
-
-            if det_a.abs() > 1e-10 {
-                let inv = 1.0 / det_a;
-                a11[idx] = inv
-                    * (rhs0 * (g_xy_xy * g_yy_yy - g_xy_yy * g_xy_yy)
-                        - g_xx_xy * (rhs1 * g_yy_yy - g_xy_yy * rhs2)
-                        + g_xx_yy * (rhs1 * g_xy_yy - g_xy_xy * rhs2));
-                // The basis [dx², dx·dy, dy²] gives the coefficient of dx·dy,
-                // which is 2·A₁₂ for the symmetric matrix A. Halve to get A₁₂.
-                a12[idx] = 0.5
-                    * inv
-                    * (g_xx_xx * (rhs1 * g_yy_yy - g_xy_yy * rhs2)
-                        - rhs0 * (g_xx_xy * g_yy_yy - g_xy_yy * g_xx_yy)
-                        + g_xx_yy * (g_xx_xy * rhs2 - rhs1 * g_xx_yy));
-                a22[idx] = inv
-                    * (g_xx_xx * (g_xy_xy * rhs2 - rhs1 * g_xy_yy)
-                        - g_xx_xy * (g_xx_xy * rhs2 - rhs1 * g_xx_yy)
-                        + rhs0 * (g_xx_xy * g_xy_yy - g_xy_xy * g_xx_yy));
-            }
+            // Solve the polynomial systems and store results
+            let (pa11, pa12, pa22, pb1, pb2) = solve_poly_systems(
+                g_dxdx, g_dxdy, g_dydy, g_dx_f, g_dy_f,
+                g_xx_xx, g_xx_xy, g_xx_yy, g_xy_xy, g_xy_yy, g_yy_yy,
+                g_xx_f, g_xy_f, g_yy_f,
+                s_xx, s_xy, s_yy, f_center,
+            );
+            a11[idx] = pa11;
+            a12[idx] = pa12;
+            a22[idx] = pa22;
+            b1[idx] = pb1;
+            b2[idx] = pb2;
         }
     }
 
@@ -189,6 +161,60 @@ pub fn poly_expand(
         width: w,
         height: h,
     }
+}
+
+/// Solve the 2x2 and 3x3 systems for polynomial expansion coefficients.
+#[allow(clippy::too_many_arguments, clippy::suspicious_operation_groupings)]
+fn solve_poly_systems(
+    g_dxdx: f32, g_dxdy: f32, g_dydy: f32, g_dx_f: f32, g_dy_f: f32,
+    g_xx_xx: f32, g_xx_xy: f32, g_xx_yy: f32,
+    g_xy_xy: f32, g_xy_yy: f32, g_yy_yy: f32,
+    g_xx_f: f32, g_xy_f: f32, g_yy_f: f32,
+    s_xx: f32, s_xy: f32, s_yy: f32, f_center: f32,
+) -> (f32, f32, f32, f32, f32) {
+    let mut pb1 = 0.0f32;
+    let mut pb2 = 0.0f32;
+    let mut pa11 = 0.0f32;
+    let mut pa12 = 0.0f32;
+    let mut pa22 = 0.0f32;
+
+    // Solve for b (gradient) using 2x2 system
+    let det_b = g_dxdx * g_dydy - (g_dxdy * g_dxdy);
+    if det_b.abs() > 1e-10 {
+        let inv = 1.0 / det_b;
+        pb1 = inv * (g_dydy * g_dx_f - g_dxdy * g_dy_f);
+        pb2 = inv * (-g_dxdy * g_dx_f + g_dxdx * g_dy_f);
+    }
+
+    // Solve for A (Hessian/2) using 3x3 system
+    let rhs0 = g_xx_f - s_xx * f_center;
+    let rhs1 = g_xy_f - s_xy * f_center;
+    let rhs2 = g_yy_f - s_yy * f_center;
+
+    let det_a = g_xx_xx * (g_xy_xy * g_yy_yy - (g_xy_yy * g_xy_yy))
+        - g_xx_xy * (g_xx_xy * g_yy_yy - g_xy_yy * g_xx_yy)
+        + g_xx_yy * (g_xx_xy * g_xy_yy - g_xy_xy * g_xx_yy);
+
+    if det_a.abs() > 1e-10 {
+        let inv = 1.0 / det_a;
+        pa11 = inv
+            * (rhs0 * (g_xy_xy * g_yy_yy - (g_xy_yy * g_xy_yy))
+                - g_xx_xy * (rhs1 * g_yy_yy - g_xy_yy * rhs2)
+                + g_xx_yy * (rhs1 * g_xy_yy - g_xy_xy * rhs2));
+        // The basis [dx^2, dx*dy, dy^2] gives the coefficient of dx*dy,
+        // which is 2*A12 for the symmetric matrix A. Halve to get A12.
+        pa12 = 0.5
+            * inv
+            * (g_xx_xx * (rhs1 * g_yy_yy - g_xy_yy * rhs2)
+                - rhs0 * (g_xx_xy * g_yy_yy - g_xy_yy * g_xx_yy)
+                + g_xx_yy * (g_xx_xy * rhs2 - rhs1 * g_xx_yy));
+        pa22 = inv
+            * (g_xx_xx * (g_xy_xy * rhs2 - rhs1 * g_xy_yy)
+                - g_xx_xy * (g_xx_xy * rhs2 - rhs1 * g_xx_yy)
+                + rhs0 * (g_xx_xy * g_xy_yy - g_xy_xy * g_xx_yy));
+    }
+
+    (pa11, pa12, pa22, pb1, pb2)
 }
 
 #[cfg(test)]

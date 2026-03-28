@@ -37,11 +37,13 @@ impl FastRng {
     }
 
     /// Uniform f64 in \[0, 1).
+    #[allow(dead_code)]
     pub(crate) fn f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
     }
 
     /// Uniform f32 in \[0, 1).
+    #[allow(dead_code)]
     pub(crate) fn f32(&mut self) -> f32 {
         self.f64() as f32
     }
@@ -54,6 +56,7 @@ impl FastRng {
     }
 
     /// Shuffle a slice in-place (Fisher-Yates).
+    #[allow(dead_code)]
     pub(crate) fn shuffle<T>(&mut self, slice: &mut [T]) {
         for i in (1..slice.len()).rev() {
             let j = (self.next_u64() as usize) % (i + 1);

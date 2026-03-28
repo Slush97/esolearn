@@ -22,7 +22,7 @@ pub enum Connectivity {
 pub struct ComponentStats {
     /// Number of pixels in the component.
     pub area: u32,
-    /// Bounding box: (x_min, y_min, x_max, y_max) inclusive.
+    /// Bounding box: (`x_min`, `y_min`, `x_max`, `y_max`) inclusive.
     pub bbox: (u32, u32, u32, u32),
     /// Centroid (mean x, mean y).
     pub centroid: (f64, f64),
@@ -37,7 +37,7 @@ pub struct ConnectedComponents {
     pub width: u32,
     /// Image height.
     pub height: u32,
-    /// Number of foreground labels (component IDs are 1..=num_labels).
+    /// Number of foreground labels (component IDs are `1..=num_labels`).
     pub num_labels: u32,
     /// Statistics for each component (index 0 = label 1, etc.).
     pub stats: Vec<ComponentStats>,
@@ -118,14 +118,14 @@ pub fn connected_components(
             } else {
                 // Find minimum neighbor label and union all
                 let mut min_label = neighbors[0];
-                for i in 1..nn {
-                    if neighbors[i] < min_label {
-                        min_label = neighbors[i];
+                for &nb in &neighbors[1..nn] {
+                    if nb < min_label {
+                        min_label = nb;
                     }
                 }
                 labels[idx] = min_label;
-                for i in 0..nn {
-                    uf.union(min_label as usize, neighbors[i] as usize);
+                for &nb in &neighbors[..nn] {
+                    uf.union(min_label as usize, nb as usize);
                 }
             }
         }
@@ -151,6 +151,19 @@ pub fn connected_components(
 
     // --- Pass 3: compute stats ---
     let num_labels = final_label;
+    let stats = compute_stats(&labels, w, h, num_labels);
+
+    Ok(ConnectedComponents {
+        labels,
+        width: img.width(),
+        height: img.height(),
+        num_labels,
+        stats,
+    })
+}
+
+/// Compute per-component statistics from a finalized label map.
+fn compute_stats(labels: &[u32], w: usize, h: usize, num_labels: u32) -> Vec<ComponentStats> {
     let mut stats: Vec<ComponentStats> = (0..num_labels)
         .map(|_| ComponentStats {
             area: 0,
@@ -183,13 +196,7 @@ pub fn connected_components(
         }
     }
 
-    Ok(ConnectedComponents {
-        labels,
-        width: img.width(),
-        height: img.height(),
-        num_labels,
-        stats,
-    })
+    stats
 }
 
 // ---------- Union-Find (disjoint set) ----------

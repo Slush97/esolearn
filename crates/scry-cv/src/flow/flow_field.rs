@@ -45,7 +45,7 @@ impl FlowField {
     }
 
     /// Compute the average endpoint error against a ground truth flow.
-    pub fn endpoint_error(&self, gt: &FlowField) -> f32 {
+    pub fn endpoint_error(&self, gt: &Self) -> f32 {
         assert_eq!(self.width, gt.width);
         assert_eq!(self.height, gt.height);
         let n = self.vx.len() as f32;
