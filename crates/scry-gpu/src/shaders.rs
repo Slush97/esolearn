@@ -152,6 +152,124 @@ fn main(
         }
     }
 }";
+    /// Thread-coarsened matmul: 128x128 tile, 8x8 per thread with vec4 accumulators.
+    ///
+    /// Uses 16 named `vec4<f32>` accumulator variables instead of `array<f32, 64>`
+    /// to avoid NVIDIA SPIR-V register spill (which triggers at `array<f32, 32+>`).
+    /// Vec4 loads from the B shared-memory tile halve load instruction count.
+    ///
+    /// **Push constants:** `struct Dims { M: u32, N: u32, K: u32 }` (12 bytes)
+    /// **Workgroup size:** `(16, 16)` = 256 threads, each owns an 8×8 output block.
+    /// **Dispatch:** `[N.div_ceil(128), M.div_ceil(128), 1]`
+    /// **Shared memory:** A\[128×(16+1)\] + B\[16×128\] ≈ 16.6 KB
+    /// **Arithmetic intensity:** 64 FLOP per (8+2) loads ≈ 6.4 FMA/load (3.2× over 4×4).
+    pub const COARSE_8X8: &str = "\
+struct Dims { M: u32, N: u32, K: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> A: array<f32>;
+@group(0) @binding(1) var<storage, read> B: array<f32>;
+@group(0) @binding(2) var<storage, read_write> C: array<f32>;
+
+var<workgroup> sa: array<f32, 2176>;
+var<workgroup> sb: array<f32, 2048>;
+
+fn store_row(gr: u32, gc: u32, lo: vec4<f32>, hi: vec4<f32>) {
+    if gr >= dims.M { return; }
+    let base = gr * dims.N + gc;
+    if gc < dims.N { C[base] = lo.x; }
+    if gc + 1u < dims.N { C[base + 1u] = lo.y; }
+    if gc + 2u < dims.N { C[base + 2u] = lo.z; }
+    if gc + 3u < dims.N { C[base + 3u] = lo.w; }
+    if gc + 4u < dims.N { C[base + 4u] = hi.x; }
+    if gc + 5u < dims.N { C[base + 5u] = hi.y; }
+    if gc + 6u < dims.N { C[base + 6u] = hi.z; }
+    if gc + 7u < dims.N { C[base + 7u] = hi.w; }
+}
+
+@compute @workgroup_size(16, 16)
+fn main(
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(local_invocation_index) li: u32,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    let block_row = wid.y * 128u;
+    let block_col = wid.x * 128u;
+    let tr = lid.y * 8u;
+    let tc = lid.x * 8u;
+
+    // 16 named vec4 accumulators — avoids array-based register spill.
+    var r0l = vec4<f32>(0.0); var r0h = vec4<f32>(0.0);
+    var r1l = vec4<f32>(0.0); var r1h = vec4<f32>(0.0);
+    var r2l = vec4<f32>(0.0); var r2h = vec4<f32>(0.0);
+    var r3l = vec4<f32>(0.0); var r3h = vec4<f32>(0.0);
+    var r4l = vec4<f32>(0.0); var r4h = vec4<f32>(0.0);
+    var r5l = vec4<f32>(0.0); var r5h = vec4<f32>(0.0);
+    var r6l = vec4<f32>(0.0); var r6h = vec4<f32>(0.0);
+    var r7l = vec4<f32>(0.0); var r7h = vec4<f32>(0.0);
+
+    let num_k_tiles = (dims.K + 15u) / 16u;
+
+    for (var kt = 0u; kt < num_k_tiles; kt++) {
+        // Load A tile [128x16] — 2048 elements, 8 per thread, padded stride 17
+        for (var x = 0u; x < 8u; x++) {
+            let flat = li * 8u + x;
+            let r = flat / 16u;
+            let c = flat % 16u;
+            let gr = block_row + r;
+            let gc = kt * 16u + c;
+            if gr < dims.M && gc < dims.K {
+                sa[r * 17u + c] = A[gr * dims.K + gc];
+            } else {
+                sa[r * 17u + c] = 0.0;
+            }
+        }
+
+        // Load B tile [16x128] — 2048 elements, 8 per thread
+        for (var x = 0u; x < 8u; x++) {
+            let flat = li * 8u + x;
+            let r = flat / 128u;
+            let c = flat % 128u;
+            let gr = kt * 16u + r;
+            let gc = block_col + c;
+            if gr < dims.K && gc < dims.N {
+                sb[flat] = B[gr * dims.N + gc];
+            } else {
+                sb[flat] = 0.0;
+            }
+        }
+
+        workgroupBarrier();
+
+        // Inner loop: 8 a-scalar loads + 2 vec4 b-loads + 16 vec4 FMAs per k
+        for (var k = 0u; k < 16u; k++) {
+            let bk = k * 128u + tc;
+            let bl = vec4<f32>(sb[bk], sb[bk+1u], sb[bk+2u], sb[bk+3u]);
+            let bh = vec4<f32>(sb[bk+4u], sb[bk+5u], sb[bk+6u], sb[bk+7u]);
+
+            let a0 = sa[(tr    ) * 17u + k]; r0l += a0 * bl; r0h += a0 * bh;
+            let a1 = sa[(tr+1u) * 17u + k]; r1l += a1 * bl; r1h += a1 * bh;
+            let a2 = sa[(tr+2u) * 17u + k]; r2l += a2 * bl; r2h += a2 * bh;
+            let a3 = sa[(tr+3u) * 17u + k]; r3l += a3 * bl; r3h += a3 * bh;
+            let a4 = sa[(tr+4u) * 17u + k]; r4l += a4 * bl; r4h += a4 * bh;
+            let a5 = sa[(tr+5u) * 17u + k]; r5l += a5 * bl; r5h += a5 * bh;
+            let a6 = sa[(tr+6u) * 17u + k]; r6l += a6 * bl; r6h += a6 * bh;
+            let a7 = sa[(tr+7u) * 17u + k]; r7l += a7 * bl; r7h += a7 * bh;
+        }
+
+        workgroupBarrier();
+    }
+
+    let gc = block_col + tc;
+    store_row(block_row + tr,      gc, r0l, r0h);
+    store_row(block_row + tr + 1u, gc, r1l, r1h);
+    store_row(block_row + tr + 2u, gc, r2l, r2h);
+    store_row(block_row + tr + 3u, gc, r3l, r3h);
+    store_row(block_row + tr + 4u, gc, r4l, r4h);
+    store_row(block_row + tr + 5u, gc, r5l, r5h);
+    store_row(block_row + tr + 6u, gc, r6l, r6h);
+    store_row(block_row + tr + 7u, gc, r7l, r7h);
+}";
 }
 
 /// Pairwise distance shaders.

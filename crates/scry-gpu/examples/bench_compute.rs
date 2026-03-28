@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use scry_gpu::shaders::matmul::{COARSE_64X64, TILED_16X16};
+use scry_gpu::shaders::matmul::{COARSE_64X64, COARSE_8X8, TILED_16X16};
 use scry_gpu::{Device, GpuBuf, Kernel};
 
 // ── Shaders ─────────────────────────────────────────────────────────────────
@@ -548,6 +548,12 @@ fn bench_matmul(gpu: &Device) {
         MatmulKernel {
             name: "large 128×128",
             kernel: gpu.compile(MATMUL_LARGE_SHADER).expect("compile large"),
+            tile_m: 128,
+            tile_n: 128,
+        },
+        MatmulKernel {
+            name: "coarse 8×8",
+            kernel: gpu.compile(COARSE_8X8).expect("compile coarse 8x8"),
             tile_m: 128,
             tile_n: 128,
         },

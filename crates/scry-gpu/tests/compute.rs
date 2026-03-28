@@ -977,6 +977,69 @@ fn matmul_identity() {
     assert_matmul_close(&result, &a, "identity", 0.001);
 }
 
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_coarse_8x8_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::COARSE_8X8)
+        .expect("compile 8x8 matmul");
+
+    let m: u32 = 128;
+    let n: u32 = 128;
+    let k: u32 = 128;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i % 13) as f32 - 6.0).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i % 9) as f32 - 4.0).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(128), m.div_ceil(128), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "coarse_8x8 128x128", 1.0);
+}
+
+#[test]
+#[allow(clippy::many_single_char_names)]
+fn matmul_coarse_8x8_non_square() {
+    let gpu = gpu();
+    let kernel = gpu
+        .compile(scry_gpu::shaders::matmul::COARSE_8X8)
+        .expect("compile 8x8 matmul");
+
+    // Non-square: 200x300 * 300x250 = 200x250
+    let m: u32 = 200;
+    let n: u32 = 250;
+    let k: u32 = 300;
+
+    let a: Vec<f32> = (0..m * k).map(|i| (i % 17) as f32 - 8.0).collect();
+    let b: Vec<f32> = (0..k * n).map(|i| (i % 11) as f32 - 5.0).collect();
+    let expected = cpu_matmul(&a, &b, m as usize, n as usize, k as usize);
+
+    let buf_a = gpu.upload(&a).unwrap();
+    let buf_b = gpu.upload(&b).unwrap();
+    let buf_c = gpu.alloc::<f32>((m * n) as usize).unwrap();
+
+    let dims = [m, n, k];
+    let push = bytemuck::cast_slice::<u32, u8>(&dims);
+    let workgroups = [n.div_ceil(128), m.div_ceil(128), 1];
+
+    gpu.run_configured(&kernel, &[&buf_a, &buf_b, &buf_c], workgroups, Some(push))
+        .unwrap();
+
+    let result = buf_c.download().unwrap();
+    assert_matmul_close(&result, &expected, "coarse_8x8 200x250", 2.0);
+}
+
 // ── Built-in shader tests: pairwise distance ──
 
 #[test]
