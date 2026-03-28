@@ -66,3 +66,68 @@ impl Embed for ArcFaceEmbedder {
         Ok(embedding)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::mock::MockModel;
+    use crate::postprocess::embedding::l2_norm;
+
+    fn mock_arcface(output: Vec<f32>) -> ArcFaceEmbedder {
+        ArcFaceEmbedder::new(Box::new(MockModel { output }), 112, 512)
+    }
+
+    /// A 112×112 RGB face crop (uniform color, sufficient for mock tests).
+    fn face_image() -> Vec<u8> {
+        vec![128u8; 112 * 112 * 3]
+    }
+
+    #[test]
+    fn embed_returns_unit_norm() {
+        // Mock returns an unnormalized 512-dim vector
+        let mut raw = vec![0.0f32; 512];
+        raw[0] = 3.0;
+        raw[1] = 4.0;
+
+        let embedder = mock_arcface(raw);
+        let emb = embedder.embed(&face_image(), 112, 112).unwrap();
+
+        let norm = l2_norm(&emb);
+        assert!((norm - 1.0).abs() < 1e-5, "expected unit norm, got {norm}");
+    }
+
+    #[test]
+    fn embed_preserves_direction() {
+        // [3, 4, 0, ...] normalized → [0.6, 0.8, 0, ...]
+        let mut raw = vec![0.0f32; 512];
+        raw[0] = 3.0;
+        raw[1] = 4.0;
+
+        let embedder = mock_arcface(raw);
+        let emb = embedder.embed(&face_image(), 112, 112).unwrap();
+
+        assert!((emb[0] - 0.6).abs() < 1e-5);
+        assert!((emb[1] - 0.8).abs() < 1e-5);
+        assert!((emb[2]).abs() < 1e-5);
+    }
+
+    #[test]
+    fn embed_zero_output_handled() {
+        // Zero vector stays zero — no NaN from division by zero
+        let raw = vec![0.0f32; 512];
+        let embedder = mock_arcface(raw);
+        let emb = embedder.embed(&face_image(), 112, 112).unwrap();
+
+        assert!(emb.iter().all(|&v| v == 0.0));
+        assert!(!emb.iter().any(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn embed_512_dim() {
+        let raw = vec![1.0f32; 512];
+        let embedder = mock_arcface(raw);
+        let emb = embedder.embed(&face_image(), 112, 112).unwrap();
+
+        assert_eq!(emb.len(), 512);
+    }
+}

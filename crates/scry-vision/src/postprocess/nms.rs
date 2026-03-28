@@ -44,12 +44,14 @@ impl BBox {
     }
 }
 
-/// A single detection: bounding box + class + confidence.
+/// A single detection: bounding box + class + confidence + optional keypoints.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Detection {
     pub bbox: BBox,
     pub class_id: u32,
     pub confidence: f32,
+    /// Optional keypoints as `[x, y]` pairs (e.g. facial landmarks from SCRFD).
+    pub keypoints: Option<Vec<[f32; 2]>>,
 }
 
 /// Soft-NMS decay method.
@@ -189,6 +191,7 @@ mod tests {
             bbox: BBox::new(x1, y1, x2, y2),
             class_id,
             confidence: conf,
+            keypoints: None,
         }
     }
 

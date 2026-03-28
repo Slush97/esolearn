@@ -12,6 +12,8 @@
 pub mod native;
 #[cfg(feature = "onnx")]
 pub mod onnx;
+#[cfg(test)]
+pub(crate) mod mock;
 
 pub use native::NativeModel;
 #[cfg(feature = "onnx")]

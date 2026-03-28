@@ -35,8 +35,9 @@
 //! ```
 
 use crate::dataset::Dataset;
-use crate::distance::euclidean_sq;
+use crate::distance::{cosine_distance, euclidean_sq, manhattan};
 use crate::error::{Result, ScryLearnError};
+use crate::neighbors::DistanceMetric;
 
 /// HDBSCAN clustering model.
 ///
@@ -50,6 +51,8 @@ pub struct Hdbscan {
     min_cluster_size: usize,
     /// Number of neighbors used to compute core distance (default = min_cluster_size).
     min_samples: Option<usize>,
+    /// Distance metric for pairwise distance computation.
+    metric: DistanceMetric,
     /// Cluster labels after fitting (-1 = noise).
     labels: Vec<i32>,
     /// Number of clusters found (excluding noise).
@@ -70,6 +73,7 @@ impl Hdbscan {
         Self {
             min_cluster_size: 5,
             min_samples: None,
+            metric: DistanceMetric::Euclidean,
             labels: Vec::new(),
             n_clusters: 0,
             outlier_scores: Vec::new(),
@@ -92,6 +96,15 @@ impl Hdbscan {
     /// more clusters; larger values make the algorithm more conservative.
     pub fn min_samples(mut self, k: usize) -> Self {
         self.min_samples = Some(k);
+        self
+    }
+
+    /// Set the distance metric (default: [`DistanceMetric::Euclidean`]).
+    ///
+    /// Use [`DistanceMetric::Cosine`] for L2-normalized embeddings
+    /// (e.g. face embeddings, CLIP vectors).
+    pub fn metric(mut self, m: DistanceMetric) -> Self {
+        self.metric = m;
         self
     }
 
@@ -140,7 +153,7 @@ impl Hdbscan {
         let k = k.min(n - 1).max(1);
 
         // Step 1: Compute pairwise distances and core distances.
-        let dist = pairwise_distances(&rows);
+        let dist = pairwise_distances(&rows, self.metric);
         let core_dist = core_distances(&dist, k);
 
         // Step 2: Mutual reachability distances.
@@ -181,13 +194,17 @@ impl Default for Hdbscan {
 // Internal algorithms
 // ---------------------------------------------------------------------------
 
-/// Compute pairwise squared Euclidean distances.
-fn pairwise_distances(rows: &[Vec<f64>]) -> Vec<Vec<f64>> {
+/// Compute pairwise distances using the configured metric.
+fn pairwise_distances(rows: &[Vec<f64>], metric: DistanceMetric) -> Vec<Vec<f64>> {
     let n = rows.len();
     let mut dist = vec![vec![0.0; n]; n];
     for i in 0..n {
         for j in (i + 1)..n {
-            let d = euclidean_sq(&rows[i], &rows[j]).sqrt();
+            let d = match metric {
+                DistanceMetric::Euclidean => euclidean_sq(&rows[i], &rows[j]).sqrt(),
+                DistanceMetric::Manhattan => manhattan(&rows[i], &rows[j]),
+                DistanceMetric::Cosine => cosine_distance(&rows[i], &rows[j]),
+            };
             dist[i][j] = d;
             dist[j][i] = d;
         }
@@ -591,6 +608,46 @@ mod tests {
                 "cluster point should have outlier score < 1.0, got {s}"
             );
         }
+    }
+
+    #[test]
+    fn test_hdbscan_cosine_metric() {
+        use crate::neighbors::DistanceMetric;
+
+        // Two groups of unit vectors in opposite-ish directions
+        // Group A: vectors near [1, 0] (normalized)
+        // Group B: vectors near [0, 1] (normalized)
+        let n_per = 5;
+        let mut f1 = Vec::new();
+        let mut f2 = Vec::new();
+        for i in 0..n_per {
+            // Group A: angle near 0°
+            let angle = 0.05 * i as f64;
+            f1.push(angle.cos());
+            f2.push(angle.sin());
+        }
+        for i in 0..n_per {
+            // Group B: angle near 90°
+            let angle = std::f64::consts::FRAC_PI_2 + 0.05 * i as f64;
+            f1.push(angle.cos());
+            f2.push(angle.sin());
+        }
+
+        let data = Dataset::new(
+            vec![f1, f2],
+            vec![0.0; n_per * 2],
+            vec!["x".into(), "y".into()],
+            "label",
+        );
+
+        let mut hdb = Hdbscan::new()
+            .min_cluster_size(3)
+            .metric(DistanceMetric::Cosine);
+        hdb.fit(&data).unwrap();
+
+        assert_eq!(hdb.n_clusters(), 2, "should find 2 clusters with cosine metric");
+        let labels = hdb.labels();
+        assert_ne!(labels[0], labels[n_per], "groups should have different labels");
     }
 
     #[test]

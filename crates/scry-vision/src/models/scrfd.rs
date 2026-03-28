@@ -158,10 +158,12 @@ fn decode_multi_output(
 ) -> Vec<Detection> {
     let strides = [8u32, 16, 32];
     let mut detections = Vec::new();
+    let has_keypoints = outputs.len() >= 9;
 
     for (i, &stride) in strides.iter().enumerate() {
         let scores = &outputs[i];       // [N, 1]
         let bboxes = &outputs[3 + i];   // [N, 4]
+        let kps = if has_keypoints { Some(&outputs[6 + i]) } else { None };
 
         let grid_size = input_size / stride;
         let anchors_per_cell = 2; // SCRFD uses 2 anchors per grid cell
@@ -170,6 +172,9 @@ fn decode_multi_output(
         if scores.len() != num_anchors || bboxes.len() != num_anchors * 4 {
             continue;
         }
+
+        // Validate keypoint tensor size: 5 landmarks × 2 coords = 10 per anchor
+        let kps = kps.filter(|k| k.len() == num_anchors * 10);
 
         for idx in 0..num_anchors {
             // Scores are already sigmoided in the InsightFace ONNX export
@@ -197,10 +202,23 @@ fn decode_multi_output(
             let x2 = cx + right;
             let y2 = cy + bottom;
 
+            // Decode 5 facial landmarks (eyes, nose, mouth corners)
+            let keypoints = kps.map(|kp_data| {
+                let base = idx * 10;
+                (0..5)
+                    .map(|k| {
+                        let kp_x = cx + kp_data[base + k * 2] * stride as f32;
+                        let kp_y = cy + kp_data[base + k * 2 + 1] * stride as f32;
+                        [kp_x, kp_y]
+                    })
+                    .collect()
+            });
+
             detections.push(Detection {
                 bbox: BBox::new(x1, y1, x2, y2),
                 class_id: 0,
                 confidence: score,
+                keypoints,
             });
         }
     }

@@ -72,6 +72,7 @@ pub fn decode_anchor_free(
             bbox: BBox::new(x1, y1, x2, y2),
             class_id: best_class,
             confidence: best_score,
+            keypoints: None,
         });
     }
 
@@ -181,6 +182,7 @@ pub fn decode_anchor_based(
             bbox: BBox::new(x1, y1, x2, y2),
             class_id: best_class,
             confidence,
+            keypoints: None,
         });
     }
 
@@ -209,6 +211,13 @@ pub fn rescale_detections(
         d.bbox.y1 = (d.bbox.y1 - pad_y) * scale_y;
         d.bbox.x2 = (d.bbox.x2 - pad_x) * scale_x;
         d.bbox.y2 = (d.bbox.y2 - pad_y) * scale_y;
+
+        if let Some(kps) = &mut d.keypoints {
+            for kp in kps.iter_mut() {
+                kp[0] = (kp[0] - pad_x) * scale_x;
+                kp[1] = (kp[1] - pad_y) * scale_y;
+            }
+        }
     }
 }
 
@@ -308,6 +317,7 @@ mod tests {
             bbox: BBox::new(10.0, 20.0, 30.0, 40.0),
             class_id: 0,
             confidence: 0.9,
+            keypoints: None,
         }];
         rescale_detections(&mut dets, 1.0, 1.0, 0.0, 0.0);
         assert!((dets[0].bbox.x1 - 10.0).abs() < 1e-6);
@@ -319,6 +329,7 @@ mod tests {
             bbox: BBox::new(20.0, 20.0, 120.0, 120.0),
             class_id: 0,
             confidence: 0.9,
+            keypoints: None,
         }];
         // Model input was 640×640, original was 1280×960
         // scale_x = 1280/640 = 2.0, scale_y = 960/480 = 2.0
