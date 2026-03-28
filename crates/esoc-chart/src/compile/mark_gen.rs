@@ -924,6 +924,7 @@ fn generate_treemap(
         if h > label_size + value_size + pad * 2.0 + 4.0 {
             let value = layer.y_data.get(cell.index).copied().unwrap_or(0.0);
             let pct = if total > 0.0 { value / total * 100.0 } else { 0.0 };
+            #[allow(clippy::float_cmp)] // intentional: checking if value is integer
             let value_text = if value == value.round() {
                 format!("{} ({:.1}%)", value as i64, pct)
             } else {

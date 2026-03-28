@@ -134,7 +134,7 @@ fn format_si(v: f64, sign: &str, suffix: &str) -> String {
     if (abs_v - abs_v.round()).abs() < 0.05 {
         format!("{sign}{}{suffix}", abs_v.round() as i64)
     } else {
-        format!("{sign}{:.1}{suffix}", abs_v)
+        format!("{sign}{abs_v:.1}{suffix}")
     }
 }
 
