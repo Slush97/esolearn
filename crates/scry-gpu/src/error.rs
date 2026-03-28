@@ -1,5 +1,50 @@
 //! Error types for scry-gpu.
 
+/// The Vulkan operation that failed.
+///
+/// Variant names mirror the Vulkan API call (e.g. `CreateBuffer` →
+/// `vkCreateBuffer`). Used inside [`GpuError::Backend`] for programmatic
+/// error matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+#[allow(missing_docs)]
+pub enum BackendOp {
+    CreateBuffer,
+    BindMemory,
+    CreateShaderModule,
+    CreatePipeline,
+    CreatePipelineLayout,
+    CreateDescriptorPool,
+    CreateDescriptorSetLayout,
+    CreateFence,
+    CreateCommandPool,
+    AllocCommandBuffer,
+    AllocDescriptorSet,
+    ResetDescriptorPool,
+    ResetCommandBuffer,
+    BeginCommandBuffer,
+    EndCommandBuffer,
+    ResetFence,
+    QueueSubmit,
+    WaitFence,
+    FreeMemory,
+    MapMemory,
+    CopyBuffer,
+    MutexPoisoned,
+    CreateInstance,
+    CreateDevice,
+    EnumerateDevices,
+    CreateAllocator,
+}
+
+/// Helper to build a [`GpuError::Backend`] concisely.
+pub(crate) fn backend_err(op: BackendOp, e: impl std::fmt::Display) -> GpuError {
+    GpuError::Backend {
+        op,
+        detail: e.to_string(),
+    }
+}
+
 /// Errors that can occur during GPU operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -53,8 +98,13 @@ pub enum GpuError {
     },
 
     /// Internal backend error (Vulkan, Metal, etc.).
-    #[error("backend error: {0}")]
-    Backend(String),
+    #[error("backend error ({op:?}): {detail}")]
+    Backend {
+        /// The operation that failed.
+        op: BackendOp,
+        /// Human-readable detail string.
+        detail: String,
+    },
 }
 
 /// Convenience alias.

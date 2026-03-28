@@ -55,12 +55,19 @@ pub fn compile_wgsl(source: &str, entry_point: &str) -> Result<CompiledShader> {
     })
 }
 
-/// Returns `true` if the shader declares any push constant variables.
-pub fn uses_push_constants(module: &naga::Module) -> bool {
-    module
-        .global_variables
-        .iter()
-        .any(|(_, var)| var.space == naga::AddressSpace::PushConstant)
+/// Returns the byte size of the push constant block, or 0 if none.
+///
+/// Reflects the struct `span` from the naga module's type arena.
+pub fn push_constant_size(module: &naga::Module) -> u32 {
+    for (_, var) in module.global_variables.iter() {
+        if var.space == naga::AddressSpace::PushConstant {
+            let ty = &module.types[var.ty];
+            if let naga::TypeInner::Struct { span, .. } = ty.inner {
+                return span;
+            }
+        }
+    }
+    0
 }
 
 /// Reflect binding info from a compiled shader.

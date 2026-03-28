@@ -41,7 +41,10 @@ impl<T: bytemuck::Pod> Buffer<T> {
 
     /// Size in bytes.
     pub const fn byte_size(&self) -> u64 {
-        (self.len * std::mem::size_of::<T>()) as u64
+        match self.len.checked_mul(std::mem::size_of::<T>()) {
+            Some(s) => s as u64,
+            None => u64::MAX,
+        }
     }
 
     /// Copy buffer contents back to the CPU.

@@ -54,5 +54,5 @@ pub use batch::Batch;
 pub use buffer::{Buffer, GpuBuf};
 pub use device::{BackendKind, Device};
 pub use dispatch::DispatchConfig;
-pub use error::{GpuError, Result};
+pub use error::{BackendOp, GpuError, Result};
 pub use kernel::Kernel;

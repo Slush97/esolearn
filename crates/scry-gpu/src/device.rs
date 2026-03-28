@@ -95,7 +95,12 @@ impl Device {
 
     /// Allocate an uninitialized GPU buffer for `count` elements of type `T`.
     pub fn alloc<T: bytemuck::Pod>(&self, count: usize) -> Result<Buffer<T>> {
-        let size = (count * std::mem::size_of::<T>()) as u64;
+        let size = count
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| GpuError::AllocationFailed {
+                requested: u64::MAX,
+                device_max: self.memory(),
+            })? as u64;
         let inner = self.alloc_raw(size)?;
         Ok(Buffer {
             inner,
@@ -181,11 +186,7 @@ impl Device {
         let compiled = shader::compile_wgsl(shader_src, entry_point)?;
         let binding_count = shader::binding_count(&compiled.module);
         let workgroup_size = dispatch::extract_workgroup_size(&compiled.module, entry_point);
-        let push_constant_size = if shader::uses_push_constants(&compiled.module) {
-            128
-        } else {
-            0
-        };
+        let push_constant_size = shader::push_constant_size(&compiled.module);
 
         let inner = self.create_pipeline(
             &compiled.spirv,

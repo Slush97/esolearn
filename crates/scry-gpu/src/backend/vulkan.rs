@@ -15,19 +15,35 @@ use ash::vk;
 use gpu_allocator::MemoryLocation;
 
 use crate::backend::{Backend, BackendBufferOps};
-use crate::error::{GpuError, Result};
+use crate::error::{backend_err, BackendOp, GpuError, Result};
+
+/// Default fence timeout: 5 seconds (in nanoseconds).
+const FENCE_TIMEOUT_NS: u64 = 5_000_000_000;
 
 // ── Shared state (Arc'd between backend and buffers) ──
 
-struct SharedState {
-    device: ash::Device,
-    queue: vk::Queue,
-    cmd_pool: vk::CommandPool,
-    // Persistent dispatch resources — reused across calls to avoid
-    // Vulkan object create/destroy churn on every dispatch.
+/// Persistent command buffer + fence + descriptor pool for single-shot dispatches.
+/// Protected by a mutex so concurrent dispatch/upload/download are serialized.
+struct SubmissionContext {
     fence: vk::Fence,
     cmd: vk::CommandBuffer,
     desc_pool: vk::DescriptorPool,
+}
+
+struct SharedState {
+    device: ash::Device,
+    /// Serializes queue submissions (both one-shot and batch paths).
+    queue: Mutex<vk::Queue>,
+    /// Serializes command buffer alloc/free from the shared pool.
+    cmd_pool: Mutex<vk::CommandPool>,
+    /// Serializes one-shot dispatch: record → submit → fence-wait.
+    submit_ctx: Mutex<SubmissionContext>,
+    /// Vulkan pipeline cache — speeds up `create_compute_pipelines` by
+    /// reusing driver-compiled ISA across calls and across process restarts
+    /// (persisted to disk on drop, loaded on init).
+    pipeline_cache: vk::PipelineCache,
+    /// Path to the on-disk cache file, if any.
+    cache_path: Option<std::path::PathBuf>,
     allocator: std::mem::ManuallyDrop<Mutex<gpu_allocator::vulkan::Allocator>>,
     // Must outlive device — dropped after ManuallyDrop'd allocator + destroy_device.
     instance: ash::Instance,
@@ -38,10 +54,27 @@ impl Drop for SharedState {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
-            self.device.destroy_descriptor_pool(self.desc_pool, None);
-            self.device.destroy_fence(self.fence, None);
+
+            // Persist pipeline cache to disk (best-effort).
+            if let Some(path) = &self.cache_path {
+                if let Ok(data) = self.device.get_pipeline_cache_data(self.pipeline_cache) {
+                    if let Some(dir) = path.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    let _ = std::fs::write(path, data);
+                }
+            }
+            self.device
+                .destroy_pipeline_cache(self.pipeline_cache, None);
+
+            // &mut self guarantees exclusive access — no lock contention.
+            let ctx = self.submit_ctx.get_mut().unwrap();
+            self.device.destroy_descriptor_pool(ctx.desc_pool, None);
+            self.device.destroy_fence(ctx.fence, None);
             // cmd is freed implicitly when cmd_pool is destroyed
-            self.device.destroy_command_pool(self.cmd_pool, None);
+            let cmd_pool = *self.cmd_pool.get_mut().unwrap();
+            self.device.destroy_command_pool(cmd_pool, None);
+
             std::mem::ManuallyDrop::drop(&mut self.allocator);
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
@@ -50,47 +83,80 @@ impl Drop for SharedState {
 }
 
 impl SharedState {
-    /// Record a one-shot command buffer, submit it, and fence-wait.
+    /// Record, submit, and fence-wait using an already-locked [`SubmissionContext`].
     ///
-    /// Reuses persistent fence and command buffer to avoid Vulkan object churn.
-    fn one_shot_submit(&self, record: impl FnOnce(vk::CommandBuffer)) -> Result<()> {
+    /// Callers that need the descriptor pool from `ctx` (e.g. `dispatch_pipeline`)
+    /// lock `submit_ctx` themselves and call this directly.
+    fn submit_with_ctx(
+        &self,
+        ctx: &SubmissionContext,
+        record: impl FnOnce(vk::CommandBuffer),
+    ) -> Result<()> {
         unsafe {
             self.device
-                .reset_command_buffer(self.cmd, vk::CommandBufferResetFlags::empty())
-                .map_err(|e| GpuError::Backend(format!("reset cmd buf: {e}")))?;
+                .reset_command_buffer(ctx.cmd, vk::CommandBufferResetFlags::empty())
+                .map_err(|e| backend_err(BackendOp::ResetCommandBuffer, e))?;
 
             self.device
                 .begin_command_buffer(
-                    self.cmd,
+                    ctx.cmd,
                     &vk::CommandBufferBeginInfo::default()
                         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )
-                .map_err(|e| GpuError::Backend(format!("begin cmd buf: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::BeginCommandBuffer, e))?;
 
-            record(self.cmd);
-
-            self.device
-                .end_command_buffer(self.cmd)
-                .map_err(|e| GpuError::Backend(format!("end cmd buf: {e}")))?;
+            record(ctx.cmd);
 
             self.device
-                .reset_fences(&[self.fence])
-                .map_err(|e| GpuError::Backend(format!("reset fence: {e}")))?;
+                .end_command_buffer(ctx.cmd)
+                .map_err(|e| backend_err(BackendOp::EndCommandBuffer, e))?;
+
+            self.device
+                .reset_fences(&[ctx.fence])
+                .map_err(|e| backend_err(BackendOp::ResetFence, e))?;
+
+            // Lock ordering: submit_ctx (held by caller) → queue.
+            let queue = self
+                .queue
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "queue"))?;
 
             self.device
                 .queue_submit(
-                    self.queue,
-                    &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
-                    self.fence,
+                    *queue,
+                    &[vk::SubmitInfo::default().command_buffers(&[ctx.cmd])],
+                    ctx.fence,
                 )
-                .map_err(|e| GpuError::Backend(format!("queue submit: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::QueueSubmit, e))?;
 
-            self.device
-                .wait_for_fences(&[self.fence], true, u64::MAX)
-                .map_err(|e| GpuError::Backend(format!("wait fence: {e}")))?;
+            drop(queue); // release queue lock before blocking on fence
+
+            let wait = self
+                .device
+                .wait_for_fences(&[ctx.fence], true, FENCE_TIMEOUT_NS);
+            match wait {
+                Ok(()) => {}
+                Err(vk::Result::TIMEOUT) => {
+                    return Err(GpuError::ReadbackTimeout {
+                        ms: FENCE_TIMEOUT_NS / 1_000_000,
+                    })
+                }
+                Err(e) => return Err(backend_err(BackendOp::WaitFence, e)),
+            }
         }
 
         Ok(())
+    }
+
+    /// Record a one-shot command buffer, submit it, and fence-wait.
+    ///
+    /// Acquires the submission lock, then delegates to [`submit_with_ctx`].
+    fn one_shot_submit(&self, record: impl FnOnce(vk::CommandBuffer)) -> Result<()> {
+        let ctx = self
+            .submit_ctx
+            .lock()
+            .map_err(|_| backend_err(BackendOp::MutexPoisoned, "submission"))?;
+        self.submit_with_ctx(&ctx, record)
     }
 }
 
@@ -115,7 +181,9 @@ pub struct VulkanBuffer {
 impl Drop for VulkanBuffer {
     fn drop(&mut self) {
         if let Some(alloc) = self.allocation.take() {
-            let _ = self.state.allocator.lock().unwrap().free(alloc);
+            if let Ok(mut a) = self.state.allocator.lock() {
+                let _ = a.free(alloc);
+            }
         }
         unsafe {
             self.state.device.destroy_buffer(self.buffer, None);
@@ -123,20 +191,23 @@ impl Drop for VulkanBuffer {
     }
 }
 
-/// A compiled Vulkan compute pipeline, reusable across dispatches.
-pub struct VulkanKernel {
-    shader_module: vk::ShaderModule,
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    pipeline_layout: vk::PipelineLayout,
-    pipeline: vk::Pipeline,
-    binding_count: usize,
+/// Inner Vulkan pipeline objects behind an `Arc` so that batches can
+/// retain a reference and prevent destruction while recorded commands
+/// are still pending.
+pub(crate) struct VulkanKernelInner {
+    pub(crate) shader_module: vk::ShaderModule,
+    pub(crate) descriptor_set_layout: vk::DescriptorSetLayout,
+    pub(crate) pipeline_layout: vk::PipelineLayout,
+    pub(crate) pipeline: vk::Pipeline,
     state: Arc<SharedState>,
 }
 
-impl Drop for VulkanKernel {
+impl Drop for VulkanKernelInner {
     fn drop(&mut self) {
+        // No device_wait_idle — callers guarantee no in-flight references:
+        // • One-shot dispatches fence-wait before returning.
+        // • Batches hold an Arc<VulkanKernelInner> until submitted + waited.
         unsafe {
-            let _ = self.state.device.device_wait_idle();
             self.state.device.destroy_pipeline(self.pipeline, None);
             self.state
                 .device
@@ -149,6 +220,11 @@ impl Drop for VulkanKernel {
                 .destroy_shader_module(self.shader_module, None);
         }
     }
+}
+
+/// A compiled Vulkan compute pipeline, reusable across dispatches.
+pub struct VulkanKernel {
+    pub(crate) inner: Arc<VulkanKernelInner>,
 }
 
 // ── Backend trait impl ──
@@ -240,7 +316,7 @@ impl Backend for VulkanBackend {
                     &vk::ShaderModuleCreateInfo::default().code(spirv),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("shader module: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreateShaderModule, e))?;
 
             // Descriptor set layout: N storage buffers
             let bindings: Vec<vk::DescriptorSetLayoutBinding> = (0..buffers.len())
@@ -258,7 +334,7 @@ impl Backend for VulkanBackend {
                     &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("desc set layout: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreateDescriptorSetLayout, e))?;
 
             // Pipeline layout (+ optional push constants)
             let pc_ranges;
@@ -276,11 +352,11 @@ impl Backend for VulkanBackend {
 
             let pipeline_layout = device
                 .create_pipeline_layout(&layout_info, None)
-                .map_err(|e| GpuError::Backend(format!("pipeline layout: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreatePipelineLayout, e))?;
 
             // Compute pipeline
             let entry_name = std::ffi::CString::new(entry_point)
-                .map_err(|e| GpuError::Backend(format!("entry point name: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreatePipeline, e))?;
 
             let pipeline_info = vk::ComputePipelineCreateInfo::default()
                 .layout(pipeline_layout)
@@ -293,11 +369,11 @@ impl Backend for VulkanBackend {
 
             let pipeline = device
                 .create_compute_pipelines(
-                    vk::PipelineCache::null(),
+                    self.state.pipeline_cache,
                     &[pipeline_info],
                     None,
                 )
-                .map_err(|(_, e)| GpuError::Backend(format!("compute pipeline: {e}")))?[0];
+                .map_err(|(_, e)| backend_err(BackendOp::CreatePipeline, e))?[0];
 
             // Descriptor pool + set
             let desc_pool = device
@@ -310,7 +386,7 @@ impl Backend for VulkanBackend {
                         }]),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("desc pool: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?;
 
             let desc_set = device
                 .allocate_descriptor_sets(
@@ -318,7 +394,7 @@ impl Backend for VulkanBackend {
                         .descriptor_pool(desc_pool)
                         .set_layouts(std::slice::from_ref(&desc_layout)),
                 )
-                .map_err(|e| GpuError::Backend(format!("alloc desc set: {e}")))?[0];
+                .map_err(|e| backend_err(BackendOp::AllocDescriptorSet, e))?[0];
 
             // Write buffer bindings
             let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
@@ -398,7 +474,7 @@ impl Backend for VulkanBackend {
                     &vk::ShaderModuleCreateInfo::default().code(spirv),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("shader module: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::CreateShaderModule, e))?;
 
             // Descriptor set layout: N storage buffers
             let bindings: Vec<vk::DescriptorSetLayoutBinding> = (0..binding_count)
@@ -418,7 +494,7 @@ impl Backend for VulkanBackend {
                 )
                 .map_err(|e| {
                     device.destroy_shader_module(shader_module, None);
-                    GpuError::Backend(format!("desc set layout: {e}"))
+                    backend_err(BackendOp::CreateDescriptorSetLayout, e)
                 })?;
 
             // Pipeline layout (with optional push constant range)
@@ -444,7 +520,7 @@ impl Backend for VulkanBackend {
                 .map_err(|e| {
                     device.destroy_descriptor_set_layout(descriptor_set_layout, None);
                     device.destroy_shader_module(shader_module, None);
-                    GpuError::Backend(format!("pipeline layout: {e}"))
+                    backend_err(BackendOp::CreatePipelineLayout, e)
                 })?;
 
             // Compute pipeline
@@ -452,7 +528,7 @@ impl Backend for VulkanBackend {
                 device.destroy_pipeline_layout(pipeline_layout, None);
                 device.destroy_descriptor_set_layout(descriptor_set_layout, None);
                 device.destroy_shader_module(shader_module, None);
-                GpuError::Backend(format!("entry point name: {e}"))
+                backend_err(BackendOp::CreatePipeline, e)
             })?;
 
             let pipeline_info = vk::ComputePipelineCreateInfo::default()
@@ -466,7 +542,7 @@ impl Backend for VulkanBackend {
 
             let pipeline = device
                 .create_compute_pipelines(
-                    vk::PipelineCache::null(),
+                    self.state.pipeline_cache,
                     &[pipeline_info],
                     None,
                 )
@@ -474,16 +550,17 @@ impl Backend for VulkanBackend {
                     device.destroy_pipeline_layout(pipeline_layout, None);
                     device.destroy_descriptor_set_layout(descriptor_set_layout, None);
                     device.destroy_shader_module(shader_module, None);
-                    GpuError::Backend(format!("compute pipeline: {e}"))
+                    backend_err(BackendOp::CreatePipeline, e)
                 })?[0];
 
             Ok(VulkanKernel {
-                shader_module,
-                descriptor_set_layout,
-                pipeline_layout,
-                pipeline,
-                binding_count,
-                state: Arc::clone(&self.state),
+                inner: Arc::new(VulkanKernelInner {
+                    shader_module,
+                    descriptor_set_layout,
+                    pipeline_layout,
+                    pipeline,
+                    state: Arc::clone(&self.state),
+                }),
             })
         }
     }
@@ -497,24 +574,31 @@ impl Backend for VulkanBackend {
     ) -> Result<()> {
         let device = &self.state.device;
 
+        // Lock submit_ctx for the descriptor pool AND the command buffer.
+        let ctx = self
+            .state
+            .submit_ctx
+            .lock()
+            .map_err(|_| backend_err(BackendOp::MutexPoisoned, "submission"))?;
+
         unsafe {
             // Reset persistent pool (safe: previous fence was waited on)
             device
                 .reset_descriptor_pool(
-                    self.state.desc_pool,
+                    ctx.desc_pool,
                     vk::DescriptorPoolResetFlags::empty(),
                 )
-                .map_err(|e| GpuError::Backend(format!("reset desc pool: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::ResetDescriptorPool, e))?;
 
             let desc_set = device
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
-                        .descriptor_pool(self.state.desc_pool)
+                        .descriptor_pool(ctx.desc_pool)
                         .set_layouts(std::slice::from_ref(
-                            &kernel.descriptor_set_layout,
+                            &kernel.inner.descriptor_set_layout,
                         )),
                 )
-                .map_err(|e| GpuError::Backend(format!("alloc desc set: {e}")))?[0];
+                .map_err(|e| backend_err(BackendOp::AllocDescriptorSet, e))?[0];
 
             // Write buffer bindings
             let buf_infos: Vec<vk::DescriptorBufferInfo> = buffers
@@ -540,10 +624,10 @@ impl Backend for VulkanBackend {
 
             device.update_descriptor_sets(&writes, &[]);
 
-            // Record + submit
-            let pl = kernel.pipeline_layout;
-            let pipe = kernel.pipeline;
-            self.state.one_shot_submit(|cmd| {
+            // Record + submit (ctx already locked, use submit_with_ctx)
+            let pl = kernel.inner.pipeline_layout;
+            let pipe = kernel.inner.pipeline;
+            self.state.submit_with_ctx(&ctx, |cmd| {
                 device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, pipe);
 
                 device.cmd_bind_descriptor_sets(
@@ -583,6 +667,36 @@ impl Backend for VulkanBackend {
     fn subgroup_size(&self) -> u32 {
         self.subgroup_size
     }
+}
+
+// ── Pipeline cache helpers ──
+
+/// Returns `~/.cache/scry-gpu/<vendor_id>-<device_id>.bin`, or `None` if
+/// the home directory cannot be determined.
+fn cache_path(props: &vk::PhysicalDeviceProperties) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let mut p = std::path::PathBuf::from(home);
+    p.push(".cache");
+    p.push("scry-gpu");
+    p.push(format!("{:04x}-{:04x}.bin", props.vendor_id, props.device_id));
+    Some(p)
+}
+
+/// Try to load an existing pipeline cache blob, or create an empty one.
+unsafe fn create_pipeline_cache(
+    device: &ash::Device,
+    path: &Option<std::path::PathBuf>,
+) -> vk::PipelineCache {
+    let data = path.as_ref().and_then(|p| std::fs::read(p).ok());
+    let info = match &data {
+        Some(blob) => vk::PipelineCacheCreateInfo::default().initial_data(blob),
+        None => vk::PipelineCacheCreateInfo::default(),
+    };
+    // If loading fails (e.g. stale blob), fall back to empty cache.
+    device
+        .create_pipeline_cache(&info, None)
+        .or_else(|_| device.create_pipeline_cache(&vk::PipelineCacheCreateInfo::default(), None))
+        .unwrap_or(vk::PipelineCache::null())
 }
 
 // ── Initialization ──
@@ -674,6 +788,10 @@ impl VulkanBackend {
 
         let queue = device.get_device_queue(qf_index, 0);
 
+        // Pipeline cache — load from disk or create empty.
+        let cp = cache_path(&props);
+        let pipeline_cache = create_pipeline_cache(&device, &cp);
+
         // Memory allocator
         let allocator = gpu_allocator::vulkan::Allocator::new(
             &gpu_allocator::vulkan::AllocatorCreateDesc {
@@ -685,7 +803,7 @@ impl VulkanBackend {
                 allocation_sizes: gpu_allocator::AllocationSizes::default(),
             },
         )
-        .map_err(|e| GpuError::Backend(format!("allocator: {e}")))?;
+        .map_err(|e| backend_err(BackendOp::CreateAllocator, e))?;
 
         // Command pool
         let cmd_pool = device
@@ -695,12 +813,12 @@ impl VulkanBackend {
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
                 None,
             )
-            .map_err(|e| GpuError::Backend(format!("cmd pool: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::CreateCommandPool, e))?;
 
         // Persistent dispatch resources — reused across calls
         let fence = device
             .create_fence(&vk::FenceCreateInfo::default(), None)
-            .map_err(|e| GpuError::Backend(format!("fence: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::CreateFence, e))?;
 
         let cmd = device
             .allocate_command_buffers(
@@ -709,7 +827,7 @@ impl VulkanBackend {
                     .level(vk::CommandBufferLevel::PRIMARY)
                     .command_buffer_count(1),
             )
-            .map_err(|e| GpuError::Backend(format!("cmd buf: {e}")))?[0];
+            .map_err(|e| backend_err(BackendOp::AllocCommandBuffer, e))?[0];
 
         let desc_pool = device
             .create_descriptor_pool(
@@ -721,15 +839,15 @@ impl VulkanBackend {
                     }]),
                 None,
             )
-            .map_err(|e| GpuError::Backend(format!("desc pool: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?;
 
         let state = Arc::new(SharedState {
             device,
-            queue,
-            cmd_pool,
-            fence,
-            cmd,
-            desc_pool,
+            queue: Mutex::new(queue),
+            cmd_pool: Mutex::new(cmd_pool),
+            submit_ctx: Mutex::new(SubmissionContext { fence, cmd, desc_pool }),
+            pipeline_cache,
+            cache_path: cp,
             allocator: std::mem::ManuallyDrop::new(Mutex::new(allocator)),
             instance,
             _entry: entry,
@@ -750,14 +868,21 @@ impl VulkanBackend {
 ///
 /// Created via [`VulkanBackend::begin_batch`]. Records dispatches into a
 /// single command buffer, then submits them all at once with a single fence.
+///
+/// Owns its own fence and command buffer — fully independent of the
+/// shared one-shot submission path, so batches and single dispatches
+/// can coexist safely across threads.
 pub struct VulkanBatch {
     cmd: vk::CommandBuffer,
+    fence: vk::Fence,
     desc_pool: vk::DescriptorPool,
     overflow_pools: Vec<vk::DescriptorPool>,
     sets_allocated: u32,
     pool_capacity: u32,
+    /// Keeps kernel pipelines alive while the batch's command buffer
+    /// references them. Dropped after the batch is submitted + waited.
+    retained_kernels: Vec<Arc<VulkanKernelInner>>,
     state: Arc<SharedState>,
-    submitted: bool,
 }
 
 const BATCH_POOL_SETS: u32 = 64;
@@ -768,8 +893,8 @@ impl VulkanBatch {
         if self.sets_allocated < self.pool_capacity {
             return Ok(self.desc_pool);
         }
-        // Current pool exhausted — allocate overflow
-        let pool = unsafe {
+        // Current pool exhausted — retire it and allocate a new one.
+        let new_pool = unsafe {
             self.state
                 .device
                 .create_descriptor_pool(
@@ -781,11 +906,12 @@ impl VulkanBatch {
                         }]),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("batch overflow pool: {e}")))?
+                .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?
         };
-        self.overflow_pools.push(pool);
+        let old = std::mem::replace(&mut self.desc_pool, new_pool);
+        self.overflow_pools.push(old);
         self.sets_allocated = 0;
-        Ok(pool)
+        Ok(self.desc_pool)
     }
 
     pub fn record_dispatch(
@@ -795,6 +921,9 @@ impl VulkanBatch {
         workgroups: [u32; 3],
         push_constants: Option<&[u8]>,
     ) -> Result<()> {
+        // Retain kernel so its pipeline stays alive until this batch is done.
+        self.retained_kernels.push(Arc::clone(&kernel.inner));
+
         let pool = self.current_pool()?;
         let device = &self.state.device;
 
@@ -804,10 +933,10 @@ impl VulkanBatch {
                     &vk::DescriptorSetAllocateInfo::default()
                         .descriptor_pool(pool)
                         .set_layouts(std::slice::from_ref(
-                            &kernel.descriptor_set_layout,
+                            &kernel.inner.descriptor_set_layout,
                         )),
                 )
-                .map_err(|e| GpuError::Backend(format!("batch alloc desc: {e}")))?[0];
+                .map_err(|e| backend_err(BackendOp::AllocDescriptorSet, e))?[0];
 
             self.sets_allocated += 1;
 
@@ -837,13 +966,13 @@ impl VulkanBatch {
             device.cmd_bind_pipeline(
                 self.cmd,
                 vk::PipelineBindPoint::COMPUTE,
-                kernel.pipeline,
+                kernel.inner.pipeline,
             );
 
             device.cmd_bind_descriptor_sets(
                 self.cmd,
                 vk::PipelineBindPoint::COMPUTE,
-                kernel.pipeline_layout,
+                kernel.inner.pipeline_layout,
                 0,
                 &[desc_set],
                 &[],
@@ -852,7 +981,7 @@ impl VulkanBatch {
             if let Some(pc) = push_constants {
                 device.cmd_push_constants(
                     self.cmd,
-                    kernel.pipeline_layout,
+                    kernel.inner.pipeline_layout,
                     vk::ShaderStageFlags::COMPUTE,
                     0,
                     pc,
@@ -884,32 +1013,47 @@ impl VulkanBatch {
         }
     }
 
-    pub fn submit(mut self) -> Result<()> {
+    pub fn submit(self) -> Result<()> {
         let device = &self.state.device;
 
         unsafe {
             device
                 .end_command_buffer(self.cmd)
-                .map_err(|e| GpuError::Backend(format!("batch end cmd: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::EndCommandBuffer, e))?;
 
+            // Own fence — independent of the shared one-shot path.
             device
-                .reset_fences(&[self.state.fence])
-                .map_err(|e| GpuError::Backend(format!("batch reset fence: {e}")))?;
+                .reset_fences(&[self.fence])
+                .map_err(|e| backend_err(BackendOp::ResetFence, e))?;
+
+            let queue = self
+                .state
+                .queue
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "queue"))?;
 
             device
                 .queue_submit(
-                    self.state.queue,
+                    *queue,
                     &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
-                    self.state.fence,
+                    self.fence,
                 )
-                .map_err(|e| GpuError::Backend(format!("batch submit: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::QueueSubmit, e))?;
 
-            device
-                .wait_for_fences(&[self.state.fence], true, u64::MAX)
-                .map_err(|e| GpuError::Backend(format!("batch wait: {e}")))?;
+            drop(queue);
+
+            let wait = device.wait_for_fences(&[self.fence], true, FENCE_TIMEOUT_NS);
+            match wait {
+                Ok(()) => {}
+                Err(vk::Result::TIMEOUT) => {
+                    return Err(GpuError::ReadbackTimeout {
+                        ms: FENCE_TIMEOUT_NS / 1_000_000,
+                    })
+                }
+                Err(e) => return Err(backend_err(BackendOp::WaitFence, e)),
+            }
         }
 
-        self.submitted = true;
         Ok(())
     }
 }
@@ -918,7 +1062,10 @@ impl Drop for VulkanBatch {
     fn drop(&mut self) {
         unsafe {
             let device = &self.state.device;
-            device.free_command_buffers(self.state.cmd_pool, &[self.cmd]);
+            if let Ok(cmd_pool) = self.state.cmd_pool.lock() {
+                device.free_command_buffers(*cmd_pool, &[self.cmd]);
+            }
+            device.destroy_fence(self.fence, None);
             device.destroy_descriptor_pool(self.desc_pool, None);
             for pool in &self.overflow_pools {
                 device.destroy_descriptor_pool(*pool, None);
@@ -931,15 +1078,30 @@ impl VulkanBackend {
     pub fn begin_batch(&self) -> Result<VulkanBatch> {
         let device = &self.state.device;
 
-        let cmd = unsafe {
+        // Lock cmd_pool for the allocation only.
+        let cmd = {
+            let cmd_pool = self
+                .state
+                .cmd_pool
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cmd pool"))?;
+            unsafe {
+                device
+                    .allocate_command_buffers(
+                        &vk::CommandBufferAllocateInfo::default()
+                            .command_pool(*cmd_pool)
+                            .level(vk::CommandBufferLevel::PRIMARY)
+                            .command_buffer_count(1),
+                    )
+                    .map_err(|e| backend_err(BackendOp::AllocCommandBuffer, e))?[0]
+            }
+        };
+
+        // Own fence — independent of the shared one-shot path.
+        let fence = unsafe {
             device
-                .allocate_command_buffers(
-                    &vk::CommandBufferAllocateInfo::default()
-                        .command_pool(self.state.cmd_pool)
-                        .level(vk::CommandBufferLevel::PRIMARY)
-                        .command_buffer_count(1),
-                )
-                .map_err(|e| GpuError::Backend(format!("batch alloc cmd: {e}")))?[0]
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+                .map_err(|e| backend_err(BackendOp::CreateFence, e))?
         };
 
         unsafe {
@@ -949,7 +1111,7 @@ impl VulkanBackend {
                     &vk::CommandBufferBeginInfo::default()
                         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
                 )
-                .map_err(|e| GpuError::Backend(format!("batch begin cmd: {e}")))?;
+                .map_err(|e| backend_err(BackendOp::BeginCommandBuffer, e))?;
         }
 
         let desc_pool = unsafe {
@@ -963,17 +1125,18 @@ impl VulkanBackend {
                         }]),
                     None,
                 )
-                .map_err(|e| GpuError::Backend(format!("batch desc pool: {e}")))?
+                .map_err(|e| backend_err(BackendOp::CreateDescriptorPool, e))?
         };
 
         Ok(VulkanBatch {
             cmd,
+            fence,
             desc_pool,
             overflow_pools: Vec::new(),
             sets_allocated: 0,
             pool_capacity: BATCH_POOL_SETS,
+            retained_kernels: Vec::new(),
             state: Arc::clone(&self.state),
-            submitted: false,
         })
     }
 }
@@ -999,7 +1162,7 @@ impl VulkanBackend {
                 None,
             )
         }
-        .map_err(|e| GpuError::Backend(format!("create buffer: {e}")))?;
+        .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
 
         let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
 
@@ -1007,7 +1170,10 @@ impl VulkanBackend {
             .state
             .allocator
             .lock()
-            .unwrap()
+            .map_err(|_| {
+                unsafe { device.destroy_buffer(buffer, None) };
+                backend_err(BackendOp::MutexPoisoned, "allocator")
+            })?
             .allocate(&gpu_allocator::vulkan::AllocationCreateDesc {
                 name,
                 requirements,
@@ -1026,7 +1192,7 @@ impl VulkanBackend {
             })?;
 
         unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
-            .map_err(|e| GpuError::Backend(format!("bind memory: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
 
         Ok((buffer, allocation))
     }
@@ -1037,7 +1203,7 @@ impl VulkanBackend {
     ) -> Result<()> {
         let ptr = alloc
             .mapped_ptr()
-            .ok_or_else(|| GpuError::Backend("staging buffer not mappable".into()))?;
+            .ok_or_else(|| backend_err(BackendOp::MapMemory, "staging buffer not mappable"))?;
 
         unsafe {
             std::ptr::copy_nonoverlapping(
@@ -1074,9 +1240,9 @@ impl VulkanBackend {
         self.state
             .allocator
             .lock()
-            .unwrap()
+            .map_err(|_| backend_err(BackendOp::MutexPoisoned, "allocator"))?
             .free(alloc)
-            .map_err(|e| GpuError::Backend(format!("free: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::FreeMemory, e))?;
         unsafe { self.state.device.destroy_buffer(buffer, None) };
         Ok(())
     }
@@ -1102,7 +1268,7 @@ impl BackendBufferOps for VulkanBuffer {
                 None,
             )
         }
-        .map_err(|e| GpuError::Backend(format!("readback buffer: {e}")))?;
+        .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
 
         let requirements = unsafe { device.get_buffer_memory_requirements(staging_buf) };
 
@@ -1110,7 +1276,10 @@ impl BackendBufferOps for VulkanBuffer {
             .state
             .allocator
             .lock()
-            .unwrap()
+            .map_err(|_| {
+                unsafe { device.destroy_buffer(staging_buf, None) };
+                backend_err(BackendOp::MutexPoisoned, "allocator")
+            })?
             .allocate(&gpu_allocator::vulkan::AllocationCreateDesc {
                 name: "staging_readback",
                 requirements,
@@ -1119,7 +1288,7 @@ impl BackendBufferOps for VulkanBuffer {
                 allocation_scheme:
                     gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
             })
-            .map_err(|e| GpuError::Backend(format!("readback alloc: {e}")))?;
+            .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
 
         unsafe {
             device.bind_buffer_memory(
@@ -1128,7 +1297,7 @@ impl BackendBufferOps for VulkanBuffer {
                 staging_alloc.offset(),
             )
         }
-        .map_err(|e| GpuError::Backend(format!("bind readback: {e}")))?;
+        .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
 
         // Copy device → staging
         let src = self.buffer;
@@ -1149,7 +1318,7 @@ impl BackendBufferOps for VulkanBuffer {
         // Read mapped memory
         let ptr = staging_alloc
             .mapped_ptr()
-            .ok_or_else(|| GpuError::Backend("readback not mappable".into()))?;
+            .ok_or_else(|| backend_err(BackendOp::MapMemory, "readback not mappable"))?;
 
         let mut data = vec![0u8; self.size as usize];
         unsafe {
@@ -1161,7 +1330,9 @@ impl BackendBufferOps for VulkanBuffer {
         }
 
         // Cleanup staging
-        let _ = self.state.allocator.lock().unwrap().free(staging_alloc);
+        if let Ok(mut a) = self.state.allocator.lock() {
+            let _ = a.free(staging_alloc);
+        }
         unsafe { device.destroy_buffer(staging_buf, None) };
 
         Ok(data)
