@@ -2,22 +2,23 @@
 
 ## Workspace Overview
 
-Rust workspace with 11 crates in two families. Edition 2021, MSRV 1.83.0.
+Rust workspace with 10 crates in two families. Edition 2021, MSRV 1.83.0.
 
 **scry family** (AI/ML inference):
 - `scry-gpu` — Compute-only GPU backend (Vulkan/ash, WGSL→SPIR-V via naga)
 - `scry-learn` — ML toolkit: trees, forests, boosting, neural nets, clustering, SVMs, TreeSHAP
-- `scry-llm` — Llama inference (CUDA, BLAS, MKL, quantization, safetensors)
+- `scry-llm` — Llama/GPT-2 inference (CUDA, BLAS, MKL, quantization, safetensors)
 - `scry-stt` — Whisper speech-to-text (zero-copy models, live mic, dictation)
 - `scry-vision` — Vision inference (ResNet, CLIP, SCRFD, ArcFace, ONNX)
 
 **esoc family** (Graphics/visualization):
 - `esoc-chart` — High-level charting API (grammar-of-graphics, SVG/PNG output)
 - `esoc-gfx` — SVG-first 2D vector graphics engine
-- `esoc-gpu` — wgpu GPU rendering (instanced marks, SDF, MSDF text)
 - `esoc-scene` — Arena scene graph with typed visual marks
 - `esoc-color` — OKLab/OKLCH perceptual color math (zero dependencies)
 - `esoc-geo` — Map projections, GeoJSON, bundled geometries
+
+**Archived** (`archived/`): `esoc-gpu` (wgpu rendering — beta, moved out of workspace)
 
 ## Build Commands
 
@@ -45,6 +46,7 @@ GPU features are optional — standard tests run without Vulkan/CUDA.
 - **Errors**: Custom `#[non_exhaustive]` enums per crate with `thiserror`. Type alias `Result<T>`.
 - **Docs**: `#![warn(missing_docs)]` on all crates. SPDX headers: MIT OR Apache-2.0.
 - **Safety**: `#![deny(unsafe_code)]` on pure-Rust crates (esoc-chart, esoc-gfx, scry-learn). Unsafe allowed in GPU/FFI crates.
+- **Scope**: `scry-llm` is inference-only (no training/autograd).
 - **Clippy**: Workspace pedantic config with numerical-code exceptions (cast_precision_loss, many_single_char_names).
 - **Modules**: `pub mod` for public API, `pub(crate) mod` for internals. Domain-organized (e.g., scry-learn: tree, ensemble, cluster, neural, metrics).
 
