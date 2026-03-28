@@ -311,6 +311,21 @@ impl Backend for CudaBackend {
         // NVIDIA warp size is always 32.
         32
     }
+
+    fn copy_buffer(&self, src: &Self::Buffer, size: u64) -> Result<Self::Buffer> {
+        let mut dst = self
+            .stream
+            .alloc_zeros::<u8>(size as usize)
+            .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
+        self.stream
+            .memcpy_dtod(&mut dst, &src.inner, size as usize)
+            .map_err(|e| backend_err(BackendOp::CopyBuffer, e))?;
+        Ok(CudaBuffer {
+            inner: dst,
+            size,
+            stream: Arc::clone(&self.stream),
+        })
+    }
 }
 
 // ── Buffer operations ──

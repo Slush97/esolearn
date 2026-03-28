@@ -295,6 +295,20 @@ impl Device {
         self.run_pipeline(kernel, &backend_bufs, workgroups, push_constants)
     }
 
+    /// Create a GPU-to-GPU copy of a buffer.
+    ///
+    /// Allocates a new buffer on the same device and copies the contents
+    /// of `src` into it. The copy is synchronous (blocks until complete).
+    pub fn copy_buffer<T: bytemuck::Pod>(&self, src: &Buffer<T>) -> Result<Buffer<T>> {
+        let size = src.byte_size();
+        let inner = self.copy_buffer_raw(&src.inner, size)?;
+        Ok(Buffer {
+            inner,
+            len: src.len,
+            _marker: std::marker::PhantomData,
+        })
+    }
+
     /// Begin a batched dispatch session.
     ///
     /// Records multiple dispatches into a single command buffer, submitted
@@ -369,6 +383,27 @@ impl Device {
             #[cfg(feature = "cuda")]
             DeviceInner::Cuda(b) => {
                 let buf = b.upload(data)?;
+                Ok(BackendBuffer::Cuda(buf))
+            }
+        }
+    }
+
+    fn copy_buffer_raw(&self, src: &BackendBuffer, size: u64) -> Result<BackendBuffer> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let BackendBuffer::Vulkan(vk_src) = src else {
+                    unreachable!("Vulkan backend received non-Vulkan buffer");
+                };
+                let buf = b.copy_buffer(vk_src, size)?;
+                Ok(BackendBuffer::Vulkan(buf))
+            }
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(b) => {
+                let BackendBuffer::Cuda(cuda_src) = src else {
+                    unreachable!("CUDA backend received non-CUDA buffer");
+                };
+                let buf = b.copy_buffer(cuda_src, size)?;
                 Ok(BackendBuffer::Cuda(buf))
             }
         }

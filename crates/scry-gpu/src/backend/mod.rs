@@ -66,6 +66,12 @@ pub trait Backend: Sized {
     ///
     /// Typically 32 on NVIDIA, 64 on AMD, 32 on Intel.
     fn subgroup_size(&self) -> u32;
+
+    /// GPU-to-GPU buffer copy.
+    ///
+    /// Allocates a new buffer and copies `size` bytes from `src` into it.
+    /// The copy is synchronous (blocks until complete).
+    fn copy_buffer(&self, src: &Self::Buffer, size: u64) -> Result<Self::Buffer>;
 }
 
 /// Operations available on a backend buffer.

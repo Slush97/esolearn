@@ -321,6 +321,146 @@ fn main(
 }";
 }
 
+/// Element-wise activation and bias shaders.
+///
+/// All shaders use workgroup size 256 (1D) and take a push constant `N: u32`
+/// for bounds checking. Each thread processes one element.
+pub mod elementwise {
+    /// Bias add: `out[i] = z[i] + bias[i % cols]`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32, cols: u32 }` (8 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations (N = rows * cols)
+    /// **Bindings:**
+    ///   - `@binding(0)` `z: array<f32>` (read) — input matrix `[rows, cols]`
+    ///   - `@binding(1)` `bias: array<f32>` (read) — bias vector `[cols]`
+    ///   - `@binding(2)` `out: array<f32>` (read_write) — output `[rows, cols]`
+    pub const BIAS_ADD: &str = "\
+struct Dims { N: u32, cols: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> z: array<f32>;
+@group(0) @binding(1) var<storage, read> bias: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = z[i] + bias[i % dims.cols];
+}";
+
+    /// CUDA C equivalent of [`BIAS_ADD`].
+    #[cfg(feature = "cuda")]
+    pub const BIAS_ADD_CUDA: &str = "\
+extern \"C\" __global__ void bias_add(
+    const float* z, const float* bias, float* out,
+    unsigned int N, unsigned int cols
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = z[i] + bias[i % cols];
+}";
+
+    /// ReLU activation: `out[i] = max(0, in[i])`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    pub const RELU: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = max(0.0, input[i]);
+}";
+
+    /// CUDA C equivalent of [`RELU`].
+    #[cfg(feature = "cuda")]
+    pub const RELU_CUDA: &str = "\
+extern \"C\" __global__ void relu(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = fmaxf(0.0f, input[i]);
+}";
+
+    /// Tanh activation: `out[i] = tanh(in[i])`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    pub const TANH: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = tanh(input[i]);
+}";
+
+    /// CUDA C equivalent of [`TANH`].
+    #[cfg(feature = "cuda")]
+    pub const TANH_CUDA: &str = "\
+extern \"C\" __global__ void tanh_fwd(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = tanhf(input[i]);
+}";
+
+    /// Sigmoid activation: `out[i] = 1 / (1 + exp(-in[i]))`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    pub const SIGMOID: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = 1.0 / (1.0 + exp(-input[i]));
+}";
+
+    /// CUDA C equivalent of [`SIGMOID`].
+    #[cfg(feature = "cuda")]
+    pub const SIGMOID_CUDA: &str = "\
+extern \"C\" __global__ void sigmoid(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = 1.0f / (1.0f + expf(-input[i]));
+}";
+}
+
 /// Pairwise distance shaders.
 pub mod distance {
     /// Pairwise squared Euclidean distance.

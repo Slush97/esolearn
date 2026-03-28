@@ -357,10 +357,7 @@ impl Backend for VulkanBackend {
         unsafe {
             // Shader module
             let shader_module = device
-                .create_shader_module(
-                    &vk::ShaderModuleCreateInfo::default().code(spirv),
-                    None,
-                )
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
                 .map_err(|e| backend_err(BackendOp::CreateShaderModule, e))?;
 
             // Descriptor set layout: N storage buffers
@@ -413,11 +410,7 @@ impl Backend for VulkanBackend {
                 );
 
             let pipeline = device
-                .create_compute_pipelines(
-                    self.state.pipeline_cache,
-                    &[pipeline_info],
-                    None,
-                )
+                .create_compute_pipelines(self.state.pipeline_cache, &[pipeline_info], None)
                 .map_err(|(_, e)| backend_err(BackendOp::CreatePipeline, e))?[0];
 
             // Descriptor pool + set
@@ -515,10 +508,7 @@ impl Backend for VulkanBackend {
         unsafe {
             // Shader module
             let shader_module = device
-                .create_shader_module(
-                    &vk::ShaderModuleCreateInfo::default().code(spirv),
-                    None,
-                )
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
                 .map_err(|e| backend_err(BackendOp::CreateShaderModule, e))?;
 
             // Descriptor set layout: N storage buffers
@@ -560,13 +550,14 @@ impl Backend for VulkanBackend {
                 layout_info = layout_info.push_constant_ranges(&pc_ranges);
             }
 
-            let pipeline_layout = device
-                .create_pipeline_layout(&layout_info, None)
-                .map_err(|e| {
-                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                    device.destroy_shader_module(shader_module, None);
-                    backend_err(BackendOp::CreatePipelineLayout, e)
-                })?;
+            let pipeline_layout =
+                device
+                    .create_pipeline_layout(&layout_info, None)
+                    .map_err(|e| {
+                        device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                        device.destroy_shader_module(shader_module, None);
+                        backend_err(BackendOp::CreatePipelineLayout, e)
+                    })?;
 
             // Compute pipeline
             let entry_name = std::ffi::CString::new(entry_point).map_err(|e| {
@@ -586,11 +577,7 @@ impl Backend for VulkanBackend {
                 );
 
             let pipeline = device
-                .create_compute_pipelines(
-                    self.state.pipeline_cache,
-                    &[pipeline_info],
-                    None,
-                )
+                .create_compute_pipelines(self.state.pipeline_cache, &[pipeline_info], None)
                 .map_err(|(_, e)| {
                     device.destroy_pipeline_layout(pipeline_layout, None);
                     device.destroy_descriptor_set_layout(descriptor_set_layout, None);
@@ -630,19 +617,14 @@ impl Backend for VulkanBackend {
         unsafe {
             // Reset persistent pool (safe: previous fence was waited on)
             device
-                .reset_descriptor_pool(
-                    ctx.desc_pool,
-                    vk::DescriptorPoolResetFlags::empty(),
-                )
+                .reset_descriptor_pool(ctx.desc_pool, vk::DescriptorPoolResetFlags::empty())
                 .map_err(|e| backend_err(BackendOp::ResetDescriptorPool, e))?;
 
             let desc_set = device
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
                         .descriptor_pool(ctx.desc_pool)
-                        .set_layouts(std::slice::from_ref(
-                            &kernel.inner.descriptor_set_layout,
-                        )),
+                        .set_layouts(std::slice::from_ref(&kernel.inner.descriptor_set_layout)),
                 )
                 .map_err(|e| backend_err(BackendOp::AllocDescriptorSet, e))?[0];
 
@@ -686,13 +668,7 @@ impl Backend for VulkanBackend {
                 );
 
                 if let Some(pc) = push_constants {
-                    device.cmd_push_constants(
-                        cmd,
-                        pl,
-                        vk::ShaderStageFlags::COMPUTE,
-                        0,
-                        pc,
-                    );
+                    device.cmd_push_constants(cmd, pl, vk::ShaderStageFlags::COMPUTE, 0, pc);
                 }
 
                 device.cmd_dispatch(cmd, workgroups[0], workgroups[1], workgroups[2]);
@@ -713,6 +689,26 @@ impl Backend for VulkanBackend {
     fn subgroup_size(&self) -> u32 {
         self.subgroup_size
     }
+
+    fn copy_buffer(&self, src: &Self::Buffer, size: u64) -> Result<Self::Buffer> {
+        let dst = self.alloc(size)?;
+        let device = &self.state.device;
+        let src_buf = src.buffer;
+        let dst_buf = dst.buffer;
+        self.state.one_shot_submit(|cmd| unsafe {
+            device.cmd_copy_buffer(
+                cmd,
+                src_buf,
+                dst_buf,
+                &[vk::BufferCopy {
+                    src_offset: 0,
+                    dst_offset: 0,
+                    size,
+                }],
+            );
+        })?;
+        Ok(dst)
+    }
 }
 
 // ── Pipeline cache helpers ──
@@ -724,7 +720,10 @@ fn cache_path(props: &vk::PhysicalDeviceProperties) -> Option<std::path::PathBuf
     let mut p = std::path::PathBuf::from(home);
     p.push(".cache");
     p.push("scry-gpu");
-    p.push(format!("{:04x}-{:04x}.bin", props.vendor_id, props.device_id));
+    p.push(format!(
+        "{:04x}-{:04x}.bin",
+        props.vendor_id, props.device_id
+    ));
     Some(p)
 }
 
@@ -778,12 +777,9 @@ impl VulkanBackend {
         }
 
         let pick = |ty| {
-            phys_devs.iter().find(|&&pd| {
-                instance
-                    .get_physical_device_properties(pd)
-                    .device_type
-                    == ty
-            })
+            phys_devs
+                .iter()
+                .find(|&&pd| instance.get_physical_device_properties(pd).device_type == ty)
         };
 
         let &physical_device = pick(vk::PhysicalDeviceType::DISCRETE_GPU)
@@ -797,22 +793,19 @@ impl VulkanBackend {
 
         // Query subgroup properties (core in Vulkan 1.1+)
         let mut subgroup_props = vk::PhysicalDeviceSubgroupProperties::default();
-        let mut props2 = vk::PhysicalDeviceProperties2::default()
-            .push_next(&mut subgroup_props);
+        let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut subgroup_props);
         instance.get_physical_device_properties2(physical_device, &mut props2);
         let subgroup_size = subgroup_props.subgroup_size;
 
         let mem_props = instance.get_physical_device_memory_properties(physical_device);
-        let device_memory: u64 = mem_props.memory_heaps
-            [..mem_props.memory_heap_count as usize]
+        let device_memory: u64 = mem_props.memory_heaps[..mem_props.memory_heap_count as usize]
             .iter()
             .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
             .map(|h| h.size)
             .sum();
 
         // Compute queue family
-        let queue_families =
-            instance.get_physical_device_queue_family_properties(physical_device);
+        let queue_families = instance.get_physical_device_queue_family_properties(physical_device);
 
         let qf_index = queue_families
             .iter()
@@ -841,17 +834,16 @@ impl VulkanBackend {
         let pipeline_cache = create_pipeline_cache(&device, cp.as_ref());
 
         // Memory allocator
-        let allocator = gpu_allocator::vulkan::Allocator::new(
-            &gpu_allocator::vulkan::AllocatorCreateDesc {
+        let allocator =
+            gpu_allocator::vulkan::Allocator::new(&gpu_allocator::vulkan::AllocatorCreateDesc {
                 instance: instance.clone(),
                 device: device.clone(),
                 physical_device,
                 debug_settings: gpu_allocator::AllocatorDebugSettings::default(),
                 buffer_device_address: false,
                 allocation_sizes: gpu_allocator::AllocationSizes::default(),
-            },
-        )
-        .map_err(|e| backend_err(BackendOp::CreateAllocator, e))?;
+            })
+            .map_err(|e| backend_err(BackendOp::CreateAllocator, e))?;
 
         // Command pool
         let cmd_pool = device
@@ -893,7 +885,11 @@ impl VulkanBackend {
             device,
             queue: Mutex::new(queue),
             cmd_pool: Mutex::new(cmd_pool),
-            submit_ctx: Mutex::new(SubmissionContext { fence, cmd, desc_pool }),
+            submit_ctx: Mutex::new(SubmissionContext {
+                fence,
+                cmd,
+                desc_pool,
+            }),
             batch_pool: Mutex::new(Vec::new()),
             upload_staging: Mutex::new(Vec::new()),
             download_staging: Mutex::new(Vec::new()),
@@ -983,9 +979,7 @@ impl VulkanBatch {
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
                         .descriptor_pool(pool)
-                        .set_layouts(std::slice::from_ref(
-                            &kernel.inner.descriptor_set_layout,
-                        )),
+                        .set_layouts(std::slice::from_ref(&kernel.inner.descriptor_set_layout)),
                 )
                 .map_err(|e| backend_err(BackendOp::AllocDescriptorSet, e))?[0];
 
@@ -1157,10 +1151,7 @@ impl VulkanBackend {
                     .reset_command_buffer(res.cmd, vk::CommandBufferResetFlags::empty())
                     .map_err(|e| backend_err(BackendOp::ResetCommandBuffer, e))?;
                 device
-                    .reset_descriptor_pool(
-                        res.desc_pool,
-                        vk::DescriptorPoolResetFlags::empty(),
-                    )
+                    .reset_descriptor_pool(res.desc_pool, vk::DescriptorPoolResetFlags::empty())
                     .map_err(|e| backend_err(BackendOp::ResetDescriptorPool, e))?;
             }
             (res.cmd, res.fence, res.desc_pool)
@@ -1268,8 +1259,7 @@ impl VulkanBackend {
                 requirements,
                 location,
                 linear: true,
-                allocation_scheme:
-                    gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
+                allocation_scheme: gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
             })
             .map_err(|_| {
                 // Clean up the buffer on allocation failure
@@ -1286,20 +1276,13 @@ impl VulkanBackend {
         Ok((buffer, allocation))
     }
 
-    fn write_mapped(
-        alloc: &gpu_allocator::vulkan::Allocation,
-        data: &[u8],
-    ) -> Result<()> {
+    fn write_mapped(alloc: &gpu_allocator::vulkan::Allocation, data: &[u8]) -> Result<()> {
         let ptr = alloc
             .mapped_ptr()
             .ok_or_else(|| backend_err(BackendOp::MapMemory, "staging buffer not mappable"))?;
 
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                data.as_ptr(),
-                ptr.as_ptr().cast::<u8>(),
-                data.len(),
-            );
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.as_ptr().cast::<u8>(), data.len());
         }
 
         Ok(())
@@ -1472,18 +1455,15 @@ impl VulkanBuffer {
                 requirements,
                 location: MemoryLocation::GpuToCpu,
                 linear: true,
-                allocation_scheme:
-                    gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
+                allocation_scheme: gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
             })
             .map_err(|_| GpuError::AllocationFailed {
                 requested: capacity,
                 device_max: 0,
             })?;
 
-        unsafe {
-            device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
-        }
-        .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
+        unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
+            .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
 
         Ok(StagingBuffer {
             buffer,
