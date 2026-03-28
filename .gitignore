@@ -6,6 +6,8 @@ Cargo.lock
 *~
 .DS_Store
 .env
+
+# Model weights
 *.safetensors
 *.bin
 *.gguf
@@ -16,6 +18,9 @@ Cargo.lock
 *.log
 *.out
 *.toc
+
+# Editor lock files
+.~lock.*
 
 # Generated chart outputs in repo root
 /*.svg

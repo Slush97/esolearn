@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "examples/book/ch01_hello_data_science", "examples/bank_report", "examples/learned_index_report", "examples/pipeline_report", "examples/chart_audit"]
+members = ["crates/*", "examples/chart_audit"]
 
 [workspace.package]
 edition = "2021"

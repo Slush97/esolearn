@@ -1,8 +1,0 @@
-[package]
-name = "learned-index-report"
-version = "0.1.0"
-edition.workspace = true
-publish = false
-
-[dependencies]
-esoc-chart = { path = "../../crates/esoc-chart" }
