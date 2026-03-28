@@ -38,6 +38,14 @@ struct BatchResources {
     desc_pool: vk::DescriptorPool,
 }
 
+/// A reusable host-visible staging buffer for upload or download transfers.
+/// Pooled on `SharedState` to avoid per-transfer alloc/free overhead.
+struct StagingBuffer {
+    buffer: vk::Buffer,
+    allocation: gpu_allocator::vulkan::Allocation,
+    capacity: u64,
+}
+
 struct SharedState {
     device: ash::Device,
     /// Serializes queue submissions (both one-shot and batch paths).
@@ -49,6 +57,10 @@ struct SharedState {
     /// Recycled batch resources (cmd + fence + `desc_pool`) to avoid
     /// per-batch Vulkan object creation/destruction.
     batch_pool: Mutex<Vec<BatchResources>>,
+    /// Pooled host-visible staging buffers for upload (`CpuToGpu`).
+    upload_staging: Mutex<Vec<StagingBuffer>>,
+    /// Pooled host-visible staging buffers for download (`GpuToCpu`).
+    download_staging: Mutex<Vec<StagingBuffer>>,
     /// Vulkan pipeline cache — speeds up `create_compute_pipelines` by
     /// reusing driver-compiled ISA across calls and across process restarts
     /// (persisted to disk on drop, loaded on init).
@@ -89,6 +101,18 @@ impl Drop for SharedState {
                 self.device.destroy_descriptor_pool(res.desc_pool, None);
                 self.device.destroy_fence(res.fence, None);
                 // cmd buffers freed implicitly when cmd_pool is destroyed
+            }
+
+            // Drain staging buffer pools.
+            let allocator = self.allocator.get_mut().unwrap();
+            for pool in [
+                self.upload_staging.get_mut().unwrap(),
+                self.download_staging.get_mut().unwrap(),
+            ] {
+                for sb in pool.drain(..) {
+                    let _ = allocator.free(sb.allocation);
+                    self.device.destroy_buffer(sb.buffer, None);
+                }
             }
 
             // cmd is freed implicitly when cmd_pool is destroyed
@@ -273,22 +297,23 @@ impl Backend for VulkanBackend {
             "storage",
         )?;
 
-        // Host-visible staging buffer
-        let (staging_buf, staging_alloc) = self.create_buffer(
+        // Pooled host-visible staging buffer
+        let staging = self.acquire_staging(
             size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
+            &self.state.upload_staging,
             "staging_upload",
         )?;
 
         // Copy data into staging
-        Self::write_mapped(&staging_alloc, data)?;
+        Self::write_mapped(&staging.allocation, data)?;
 
         // Transfer staging → storage
-        self.copy_buffer(staging_buf, storage_buf, size)?;
+        self.copy_buffer(staging.buffer, storage_buf, size)?;
 
-        // Free staging
-        self.free_buffer(staging_buf, staging_alloc)?;
+        // Return staging to pool
+        self.return_staging(&self.state.upload_staging, staging);
 
         Ok(VulkanBuffer {
             buffer: storage_buf,
@@ -870,6 +895,8 @@ impl VulkanBackend {
             cmd_pool: Mutex::new(cmd_pool),
             submit_ctx: Mutex::new(SubmissionContext { fence, cmd, desc_pool }),
             batch_pool: Mutex::new(Vec::new()),
+            upload_staging: Mutex::new(Vec::new()),
+            download_staging: Mutex::new(Vec::new()),
             pipeline_cache,
             cache_path: cp,
             allocator: std::mem::ManuallyDrop::new(Mutex::new(allocator)),
@@ -1308,6 +1335,46 @@ impl VulkanBackend {
         unsafe { self.state.device.destroy_buffer(buffer, None) };
         Ok(())
     }
+
+    /// Acquire a staging buffer from the pool, or allocate a fresh one.
+    /// Returned buffer capacity is >= `size` (rounded to next power of 2).
+    fn acquire_staging(
+        &self,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        location: MemoryLocation,
+        pool: &Mutex<Vec<StagingBuffer>>,
+        name: &str,
+    ) -> Result<StagingBuffer> {
+        // Try to find a buffer large enough in the pool.
+        if let Ok(mut pool) = pool.lock() {
+            if let Some(idx) = pool.iter().position(|sb| sb.capacity >= size) {
+                return Ok(pool.swap_remove(idx));
+            }
+        }
+
+        // Allocate fresh, rounded up to power-of-2 for reuse efficiency.
+        let capacity = size.next_power_of_two().max(4096);
+        let (buffer, allocation) = self.create_buffer(capacity, usage, location, name)?;
+        Ok(StagingBuffer {
+            buffer,
+            allocation,
+            capacity,
+        })
+    }
+
+    /// Return a staging buffer to the pool for reuse, or free it if the pool is full.
+    fn return_staging(&self, pool: &Mutex<Vec<StagingBuffer>>, sb: StagingBuffer) {
+        if let Ok(mut pool) = pool.lock() {
+            // Cap pool size to avoid unbounded growth.
+            if pool.len() < 8 {
+                pool.push(sb);
+                return;
+            }
+        }
+        // Pool full or poisoned — free the buffer.
+        let _ = self.free_buffer(sb.buffer, sb.allocation);
+    }
 }
 
 // ── Buffer readback ──
@@ -1319,51 +1386,14 @@ impl BackendBufferOps for VulkanBuffer {
         }
 
         let device = &self.state.device;
+        let size = self.size;
 
-        // Host-visible staging buffer for readback
-        let staging_buf = unsafe {
-            device.create_buffer(
-                &vk::BufferCreateInfo::default()
-                    .size(self.size)
-                    .usage(vk::BufferUsageFlags::TRANSFER_DST)
-                    .sharing_mode(vk::SharingMode::EXCLUSIVE),
-                None,
-            )
-        }
-        .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
-
-        let requirements = unsafe { device.get_buffer_memory_requirements(staging_buf) };
-
-        let staging_alloc = self
-            .state
-            .allocator
-            .lock()
-            .map_err(|_| {
-                unsafe { device.destroy_buffer(staging_buf, None) };
-                backend_err(BackendOp::MutexPoisoned, "allocator")
-            })?
-            .allocate(&gpu_allocator::vulkan::AllocationCreateDesc {
-                name: "staging_readback",
-                requirements,
-                location: MemoryLocation::GpuToCpu,
-                linear: true,
-                allocation_scheme:
-                    gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
-            })
-            .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
-
-        unsafe {
-            device.bind_buffer_memory(
-                staging_buf,
-                staging_alloc.memory(),
-                staging_alloc.offset(),
-            )
-        }
-        .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
+        // Acquire pooled staging buffer for readback.
+        let staging = Self::acquire_download_staging(&self.state, size)?;
 
         // Copy device → staging
         let src = self.buffer;
-        let size = self.size;
+        let staging_buf = staging.buffer;
         self.state.one_shot_submit(|cmd| unsafe {
             device.cmd_copy_buffer(
                 cmd,
@@ -1378,29 +1408,102 @@ impl BackendBufferOps for VulkanBuffer {
         })?;
 
         // Read mapped memory
-        let ptr = staging_alloc
+        let ptr = staging
+            .allocation
             .mapped_ptr()
             .ok_or_else(|| backend_err(BackendOp::MapMemory, "readback not mappable"))?;
 
-        let mut data = vec![0u8; self.size as usize];
+        let mut data = vec![0u8; size as usize];
         unsafe {
             std::ptr::copy_nonoverlapping(
                 ptr.as_ptr().cast::<u8>(),
                 data.as_mut_ptr(),
-                self.size as usize,
+                size as usize,
             );
         }
 
-        // Cleanup staging
-        if let Ok(mut a) = self.state.allocator.lock() {
-            let _ = a.free(staging_alloc);
-        }
-        unsafe { device.destroy_buffer(staging_buf, None) };
+        // Return staging to pool
+        Self::return_download_staging(&self.state, staging);
 
         Ok(data)
     }
 
     fn byte_size(&self) -> u64 {
         self.size
+    }
+}
+
+impl VulkanBuffer {
+    /// Acquire a staging buffer for download from the pool, or allocate fresh.
+    fn acquire_download_staging(state: &SharedState, size: u64) -> Result<StagingBuffer> {
+        // Try pool first.
+        if let Ok(mut pool) = state.download_staging.lock() {
+            if let Some(idx) = pool.iter().position(|sb| sb.capacity >= size) {
+                return Ok(pool.swap_remove(idx));
+            }
+        }
+
+        // Allocate fresh, rounded to power-of-2.
+        let capacity = size.next_power_of_two().max(4096);
+        let device = &state.device;
+
+        let buffer = unsafe {
+            device.create_buffer(
+                &vk::BufferCreateInfo::default()
+                    .size(capacity)
+                    .usage(vk::BufferUsageFlags::TRANSFER_DST)
+                    .sharing_mode(vk::SharingMode::EXCLUSIVE),
+                None,
+            )
+        }
+        .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
+
+        let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let allocation = state
+            .allocator
+            .lock()
+            .map_err(|_| {
+                unsafe { device.destroy_buffer(buffer, None) };
+                backend_err(BackendOp::MutexPoisoned, "allocator")
+            })?
+            .allocate(&gpu_allocator::vulkan::AllocationCreateDesc {
+                name: "staging_readback",
+                requirements,
+                location: MemoryLocation::GpuToCpu,
+                linear: true,
+                allocation_scheme:
+                    gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
+            })
+            .map_err(|_| GpuError::AllocationFailed {
+                requested: capacity,
+                device_max: 0,
+            })?;
+
+        unsafe {
+            device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
+        }
+        .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
+
+        Ok(StagingBuffer {
+            buffer,
+            allocation,
+            capacity,
+        })
+    }
+
+    /// Return a download staging buffer to the pool.
+    fn return_download_staging(state: &SharedState, sb: StagingBuffer) {
+        if let Ok(mut pool) = state.download_staging.lock() {
+            if pool.len() < 8 {
+                pool.push(sb);
+                return;
+            }
+        }
+        // Pool full — free the buffer.
+        if let Ok(mut a) = state.allocator.lock() {
+            let _ = a.free(sb.allocation);
+        }
+        unsafe { state.device.destroy_buffer(sb.buffer, None) };
     }
 }

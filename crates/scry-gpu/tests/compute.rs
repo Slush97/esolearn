@@ -1270,6 +1270,30 @@ fn buffer_len_and_byte_size() {
 }
 
 #[test]
+#[test]
+fn upload_download_repeated_reuses_pool() {
+    // Repeated upload+dispatch+download cycles should reuse staging buffers.
+    // This test verifies correctness (not timing), but exercises the pool path.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    for i in 0..20u32 {
+        let data: Vec<f32> = (0..1000).map(|j| (i * 1000 + j) as f32).collect();
+        let input = gpu.upload(&data).unwrap();
+        let output = gpu.alloc::<f32>(1000).unwrap();
+        gpu.run(&kernel, &[&input, &output], 1000).unwrap();
+
+        let result = output.download().unwrap();
+        assert!(
+            (result[0] - data[0] * 2.0).abs() < f32::EPSILON,
+            "iter {i}: got {}, expected {}",
+            result[0],
+            data[0] * 2.0,
+        );
+    }
+}
+
+#[test]
 fn alloc_download_is_zeroed_or_deterministic() {
     // GPU alloc doesn't guarantee zeroed memory, but download should succeed
     let gpu = gpu();
