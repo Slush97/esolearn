@@ -11,8 +11,8 @@ use crate::neural::layer::{DenseLayer, FastRng};
 use crate::neural::optimizer::OptimizerState;
 use crate::neural::traits::Layer;
 
-/// GPU dispatch threshold: use backend matmul when batch * max_dim exceeds this.
-/// Only affects the forward pass — the backward pass is always CPU.
+/// GPU dispatch threshold: use GPU path when batch * max_dim exceeds this.
+/// Applies to both forward and backward passes in MLP mode.
 const GPU_THRESHOLD: usize = 4096;
 
 /// A feedforward neural network.
@@ -159,13 +159,18 @@ impl Network {
     }
 
     /// GPU-resident MLP forward pass: 1 upload → N GPU layers → 1 download.
+    ///
+    /// When training, caches are kept on GPU for the GPU backward pass
+    /// (no PCIe downloads until the optimizer step).
     fn forward_mlp_gpu(&mut self, input: &[f64], batch: usize, training: bool) -> Vec<f64> {
         let backend = &*self.backend;
         let in_size = self.dense_layers[0].in_size;
         let mut current = backend.gpu_upload(input, batch, in_size);
 
+        // When training, keep caches on GPU for backward_mlp_gpu.
+        let gpu_backward = training;
         for layer in &mut self.dense_layers {
-            current = layer.forward_gpu(&current, batch, training, backend);
+            current = layer.forward_gpu(&current, batch, training, gpu_backward, backend);
         }
 
         backend.gpu_download(&current)
@@ -180,21 +185,69 @@ impl Network {
         current
     }
 
-    /// Backward pass through all layers (always CPU — not GPU-accelerated).
+    /// Backward pass through all layers.
     ///
     /// `grad_output` is `[batch, n_outputs]` — the gradient of loss w.r.t. network output.
     /// `alpha` is the L2 regularization strength.
     ///
+    /// Uses GPU when the forward pass cached on device (gpu_backward path).
+    ///
     /// Returns weight and bias gradients for all layers.
-    pub fn backward(&self, grad_output: &[f64], alpha: f64) -> Vec<(Vec<f64>, Vec<f64>)> {
-        if self.is_mlp {
+    pub fn backward(&mut self, grad_output: &[f64], alpha: f64) -> Vec<(Vec<f64>, Vec<f64>)> {
+        if self.is_mlp && self.has_gpu_caches() {
+            self.backward_mlp_gpu(grad_output, alpha)
+        } else if self.is_mlp {
             self.backward_mlp(grad_output, alpha)
         } else {
             self.backward_generic(grad_output, alpha)
         }
     }
 
-    /// MLP backward pass — always CPU, no GPU dispatch.
+    /// Whether the forward pass cached on GPU (backward should use GPU too).
+    fn has_gpu_caches(&self) -> bool {
+        self.dense_layers
+            .first()
+            .is_some_and(|l| l.cache_z_gpu.is_some())
+    }
+
+    /// GPU-resident MLP backward pass.
+    ///
+    /// Gradient flows backward through layers on device. Only the final
+    /// dw/db per layer are downloaded for the CPU optimizer step.
+    fn backward_mlp_gpu(
+        &mut self,
+        grad_output: &[f64],
+        alpha: f64,
+    ) -> Vec<(Vec<f64>, Vec<f64>)> {
+        let backend = &*self.backend;
+        let n = self.dense_layers.len();
+        let batch = self.dense_layers.last().map_or(0, |l| l.cache_batch);
+        let last_out = self.dense_layers.last().map_or(0, |l| l.out_size);
+
+        // Upload grad_output to GPU — only PCIe transfer in the backward pass.
+        let mut current_grad = backend.gpu_upload(grad_output, batch, last_out);
+        let mut grads = Vec::with_capacity(n);
+
+        for i in (0..n).rev() {
+            let (grad_input, mut dw, db) =
+                self.dense_layers[i].backward_gpu(current_grad, backend);
+
+            // L2 regularization on weights
+            if alpha > 0.0 {
+                for (w_idx, dw_val) in dw.iter_mut().enumerate() {
+                    *dw_val += alpha * self.dense_layers[i].weights[w_idx];
+                }
+            }
+
+            current_grad = grad_input;
+            grads.push((dw, db));
+        }
+
+        grads.reverse();
+        grads
+    }
+
+    /// MLP backward pass — CPU path.
     fn backward_mlp(&self, grad_output: &[f64], alpha: f64) -> Vec<(Vec<f64>, Vec<f64>)> {
         let n = self.dense_layers.len();
         let mut grads = Vec::with_capacity(n);

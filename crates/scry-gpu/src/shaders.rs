@@ -461,6 +461,245 @@ extern \"C\" __global__ void sigmoid(
 }";
 }
 
+/// Backward activation and utility shaders for backpropagation.
+///
+/// All shaders use workgroup size 256 (1D) and follow the same dispatch
+/// pattern as the [`elementwise`] forward shaders.
+pub mod backward {
+    /// ReLU backward: `out[i] = grad[i] * (z[i] > 0 ? 1 : 0)`.
+    ///
+    /// Uses the pre-activation value `z` (not the activated output).
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
+    ///   - `@binding(1)` `z: array<f32>` (read) — pre-activation values
+    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    pub const RELU_BACKWARD: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> grad: array<f32>;
+@group(0) @binding(1) var<storage, read> z: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = select(0.0, grad[i], z[i] > 0.0);
+}";
+
+    /// CUDA C equivalent of [`RELU_BACKWARD`].
+    #[cfg(feature = "cuda")]
+    pub const RELU_BACKWARD_CUDA: &str = "\
+extern \"C\" __global__ void relu_backward(
+    const float* grad, const float* z, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = z[i] > 0.0f ? grad[i] : 0.0f;
+}";
+
+    /// Sigmoid backward: `out[i] = grad[i] * a[i] * (1 - a[i])`.
+    ///
+    /// Uses the post-activation value `a = sigmoid(z)`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
+    ///   - `@binding(1)` `activated: array<f32>` (read) — post-activation values
+    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    pub const SIGMOID_BACKWARD: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> grad: array<f32>;
+@group(0) @binding(1) var<storage, read> activated: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    let a = activated[i];
+    out[i] = grad[i] * a * (1.0 - a);
+}";
+
+    /// CUDA C equivalent of [`SIGMOID_BACKWARD`].
+    #[cfg(feature = "cuda")]
+    pub const SIGMOID_BACKWARD_CUDA: &str = "\
+extern \"C\" __global__ void sigmoid_backward(
+    const float* grad, const float* activated, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float a = activated[i];
+    out[i] = grad[i] * a * (1.0f - a);
+}";
+
+    /// Tanh backward: `out[i] = grad[i] * (1 - a[i]^2)`.
+    ///
+    /// Uses the post-activation value `a = tanh(z)`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `grad: array<f32>` (read) — upstream gradient
+    ///   - `@binding(1)` `activated: array<f32>` (read) — post-activation values
+    ///   - `@binding(2)` `out: array<f32>` (read_write) — output gradient
+    pub const TANH_BACKWARD: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> grad: array<f32>;
+@group(0) @binding(1) var<storage, read> activated: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    let a = activated[i];
+    out[i] = grad[i] * (1.0 - a * a);
+}";
+
+    /// CUDA C equivalent of [`TANH_BACKWARD`].
+    #[cfg(feature = "cuda")]
+    pub const TANH_BACKWARD_CUDA: &str = "\
+extern \"C\" __global__ void tanh_backward(
+    const float* grad, const float* activated, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float a = activated[i];
+    out[i] = grad[i] * (1.0f - a * a);
+}";
+
+    /// Matrix transpose: `out[col * rows + row] = in[row * cols + col]`.
+    ///
+    /// Transposes a row-major `[rows, cols]` matrix to `[cols, rows]`.
+    /// Each thread handles one element.
+    ///
+    /// **Push constants:** `struct Dims { rows: u32, cols: u32 }` (8 bytes)
+    /// **Workgroup size:** 256 — dispatch `rows * cols` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    pub const TRANSPOSE: &str = "\
+struct Dims { rows: u32, cols: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    let n = dims.rows * dims.cols;
+    if i >= n { return; }
+    let row = i / dims.cols;
+    let col = i % dims.cols;
+    out[col * dims.rows + row] = input[i];
+}";
+
+    /// CUDA C equivalent of [`TRANSPOSE`].
+    #[cfg(feature = "cuda")]
+    pub const TRANSPOSE_CUDA: &str = "\
+extern \"C\" __global__ void transpose_2d(
+    const float* input, float* out,
+    unsigned int rows, unsigned int cols
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= rows * cols) return;
+    unsigned int row = i / cols;
+    unsigned int col = i % cols;
+    out[col * rows + row] = input[i];
+}";
+
+    /// Element-wise scale: `out[i] = in[i] * alpha`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32, alpha: f32 }` (8 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (read_write)
+    pub const SCALE: &str = "\
+struct Dims { N: u32, alpha: f32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = input[i] * dims.alpha;
+}";
+
+    /// CUDA C equivalent of [`SCALE`].
+    #[cfg(feature = "cuda")]
+    pub const SCALE_CUDA: &str = "\
+extern \"C\" __global__ void scale_fwd(
+    const float* input, float* out,
+    unsigned int N, float alpha
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = input[i] * alpha;
+}";
+
+    /// Column-wise reduction: `out[j] = sum_i(in[i * cols + j]) * scale`.
+    ///
+    /// Sums over the row (batch) dimension for each column, then scales.
+    /// Used for bias gradient computation: `db = reduce_cols(delta, 1/batch)`.
+    ///
+    /// **Push constants:** `struct Dims { rows: u32, cols: u32, scale: f32 }` (12 bytes)
+    /// **Workgroup size:** 256 — dispatch `cols` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read) — `[rows, cols]` matrix
+    ///   - `@binding(1)` `out: array<f32>` (read_write) — `[cols]` vector
+    pub const REDUCE_COLS: &str = "\
+struct Dims { rows: u32, cols: u32, scale: f32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let j = gid.x;
+    if j >= dims.cols { return; }
+    var sum = 0.0;
+    for (var i = 0u; i < dims.rows; i++) {
+        sum += input[i * dims.cols + j];
+    }
+    out[j] = sum * dims.scale;
+}";
+
+    /// CUDA C equivalent of [`REDUCE_COLS`].
+    #[cfg(feature = "cuda")]
+    pub const REDUCE_COLS_CUDA: &str = "\
+extern \"C\" __global__ void reduce_cols(
+    const float* input, float* out,
+    unsigned int rows, unsigned int cols, float scale
+) {
+    unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= cols) return;
+    float sum = 0.0f;
+    for (unsigned int i = 0; i < rows; i++) {
+        sum += input[i * cols + j];
+    }
+    out[j] = sum * scale;
+}";
+}
+
 /// Pairwise distance shaders.
 pub mod distance {
     /// Pairwise squared Euclidean distance.

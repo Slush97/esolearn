@@ -215,6 +215,91 @@ pub trait ComputeBackend {
         t.to_cpu()
     }
 
+    /// GPU-to-GPU copy of a tensor. Returns an independent copy.
+    ///
+    /// Default: clones the CPU data.
+    fn gpu_copy(&self, x: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = x.shape();
+        GpuTensor::Cpu(x.to_cpu(), rows, cols)
+    }
+
+    // ── Backward-pass GPU operations ──
+
+    /// ReLU backward: `out[i] = grad[i] * (z[i] > 0 ? 1 : 0)`.
+    ///
+    /// `grad` and `z` must have the same shape.
+    fn gpu_relu_backward(&self, grad: &GpuTensor, z: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = grad.shape();
+        let g = grad.to_cpu();
+        let zv = z.to_cpu();
+        let out: Vec<f64> = g.iter().zip(zv.iter())
+            .map(|(&gi, &zi)| if zi > 0.0 { gi } else { 0.0 })
+            .collect();
+        GpuTensor::Cpu(out, rows, cols)
+    }
+
+    /// Sigmoid backward: `out[i] = grad[i] * a[i] * (1 - a[i])`.
+    ///
+    /// `activated` is the post-sigmoid output.
+    fn gpu_sigmoid_backward(&self, grad: &GpuTensor, activated: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = grad.shape();
+        let g = grad.to_cpu();
+        let a = activated.to_cpu();
+        let out: Vec<f64> = g.iter().zip(a.iter())
+            .map(|(&gi, &ai)| gi * ai * (1.0 - ai))
+            .collect();
+        GpuTensor::Cpu(out, rows, cols)
+    }
+
+    /// Tanh backward: `out[i] = grad[i] * (1 - a[i]^2)`.
+    ///
+    /// `activated` is the post-tanh output.
+    fn gpu_tanh_backward(&self, grad: &GpuTensor, activated: &GpuTensor) -> GpuTensor {
+        let (rows, cols) = grad.shape();
+        let g = grad.to_cpu();
+        let a = activated.to_cpu();
+        let out: Vec<f64> = g.iter().zip(a.iter())
+            .map(|(&gi, &ai)| gi * (1.0 - ai * ai))
+            .collect();
+        GpuTensor::Cpu(out, rows, cols)
+    }
+
+    /// Transpose a `[rows, cols]` matrix to `[cols, rows]`.
+    fn gpu_transpose(&self, m: &GpuTensor, rows: usize, cols: usize) -> GpuTensor {
+        let data = m.to_cpu();
+        let mut t = vec![0.0; rows * cols];
+        for i in 0..rows {
+            for j in 0..cols {
+                t[j * rows + i] = data[i * cols + j];
+            }
+        }
+        GpuTensor::Cpu(t, cols, rows)
+    }
+
+    /// Element-wise scale: `out[i] = x[i] * alpha`.
+    fn gpu_scale(&self, x: &GpuTensor, alpha: f64) -> GpuTensor {
+        let (rows, cols) = x.shape();
+        let out: Vec<f64> = x.to_cpu().iter().map(|&v| v * alpha).collect();
+        GpuTensor::Cpu(out, rows, cols)
+    }
+
+    /// Column-wise reduction: `out[j] = sum_i(x[i * cols + j]) * scale`.
+    ///
+    /// Sums over the row dimension, producing a `[1, cols]` vector.
+    fn gpu_reduce_cols(&self, x: &GpuTensor, rows: usize, cols: usize, scale: f64) -> GpuTensor {
+        let data = x.to_cpu();
+        let mut out = vec![0.0; cols];
+        for i in 0..rows {
+            for j in 0..cols {
+                out[j] += data[i * cols + j];
+            }
+        }
+        for v in &mut out {
+            *v *= scale;
+        }
+        GpuTensor::Cpu(out, 1, cols)
+    }
+
     /// Build gradient/hessian histograms for histogram-based GBT.
     ///
     /// - `binned`: column-major binned features `[n_features][n_samples]` as u8

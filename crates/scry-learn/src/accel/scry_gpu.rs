@@ -37,6 +37,16 @@ struct ElementwiseKernels {
     sigmoid: ::scry_gpu::Kernel,
 }
 
+/// Pre-compiled backward + utility kernels for GPU-resident backpropagation.
+struct BackwardKernels {
+    relu_backward: ::scry_gpu::Kernel,
+    sigmoid_backward: ::scry_gpu::Kernel,
+    tanh_backward: ::scry_gpu::Kernel,
+    transpose: ::scry_gpu::Kernel,
+    scale: ::scry_gpu::Kernel,
+    reduce_cols: ::scry_gpu::Kernel,
+}
+
 struct ScryCtx {
     /// Mutex serializes GPU dispatches (the Device reuses internal
     /// synchronization objects, so concurrent access must be serialized).
@@ -48,6 +58,7 @@ struct ScryCtxInner {
     matmul: MatmulStrategy,
     distance: ::scry_gpu::Kernel,
     elementwise: ElementwiseKernels,
+    backward: BackwardKernels,
 }
 
 /// Leaked on purpose: Vulkan teardown during static destructor ordering
@@ -74,13 +85,14 @@ fn init_ctx() -> Result<ScryCtx, String> {
     #[cfg(feature = "cuda")]
     if dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
         match init_cuda_kernels(&dev) {
-            Ok((distance, elementwise)) => {
+            Ok((distance, elementwise, backward)) => {
                 return Ok(ScryCtx {
                     inner: Mutex::new(ScryCtxInner {
                         dev,
                         matmul: MatmulStrategy::CuBlas,
                         distance,
                         elementwise,
+                        backward,
                     }),
                 });
             }
@@ -100,8 +112,8 @@ fn init_ctx() -> Result<ScryCtx, String> {
 #[cfg(feature = "cuda")]
 fn init_cuda_kernels(
     dev: &::scry_gpu::Device,
-) -> Result<(::scry_gpu::Kernel, ElementwiseKernels), String> {
-    use ::scry_gpu::shaders::{distance, elementwise};
+) -> Result<(::scry_gpu::Kernel, ElementwiseKernels, BackwardKernels), String> {
+    use ::scry_gpu::shaders::{backward, distance, elementwise};
 
     let distance = dev
         .compile_cuda(distance::PAIRWISE_EUCLIDEAN_CUDA, "pairwise_euclidean", 3, [256, 1, 1])
@@ -118,11 +130,38 @@ fn init_cuda_kernels(
     let sigmoid = dev
         .compile_cuda(elementwise::SIGMOID_CUDA, "sigmoid", 2, [256, 1, 1])
         .map_err(|e| format!("sigmoid: {e}"))?;
-    Ok((distance, ElementwiseKernels { bias_add, relu, tanh, sigmoid }))
+
+    let relu_backward = dev
+        .compile_cuda(backward::RELU_BACKWARD_CUDA, "relu_backward", 3, [256, 1, 1])
+        .map_err(|e| format!("relu_backward: {e}"))?;
+    let sigmoid_backward = dev
+        .compile_cuda(backward::SIGMOID_BACKWARD_CUDA, "sigmoid_backward", 3, [256, 1, 1])
+        .map_err(|e| format!("sigmoid_backward: {e}"))?;
+    let tanh_backward = dev
+        .compile_cuda(backward::TANH_BACKWARD_CUDA, "tanh_backward", 3, [256, 1, 1])
+        .map_err(|e| format!("tanh_backward: {e}"))?;
+    let transpose = dev
+        .compile_cuda(backward::TRANSPOSE_CUDA, "transpose_2d", 2, [256, 1, 1])
+        .map_err(|e| format!("transpose: {e}"))?;
+    let scale = dev
+        .compile_cuda(backward::SCALE_CUDA, "scale_fwd", 2, [256, 1, 1])
+        .map_err(|e| format!("scale: {e}"))?;
+    let reduce_cols = dev
+        .compile_cuda(backward::REDUCE_COLS_CUDA, "reduce_cols", 2, [256, 1, 1])
+        .map_err(|e| format!("reduce_cols: {e}"))?;
+
+    Ok((
+        distance,
+        ElementwiseKernels { bias_add, relu, tanh, sigmoid },
+        BackwardKernels { relu_backward, sigmoid_backward, tanh_backward, transpose, scale, reduce_cols },
+    ))
 }
 
 fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
-    use ::scry_gpu::shaders::{elementwise, matmul as matmul_shaders, distance as dist_shaders};
+    use ::scry_gpu::shaders::{
+        backward as bwd_shaders, distance as dist_shaders, elementwise,
+        matmul as matmul_shaders,
+    };
 
     let matmul = dev
         .compile(matmul_shaders::COARSE_64X64)
@@ -142,12 +181,40 @@ fn init_vulkan(dev: ::scry_gpu::Device) -> Result<ScryCtx, String> {
     let sigmoid = dev
         .compile(elementwise::SIGMOID)
         .map_err(|e| format!("scry-gpu: sigmoid shader: {e}"))?;
+
+    let relu_backward = dev
+        .compile(bwd_shaders::RELU_BACKWARD)
+        .map_err(|e| format!("scry-gpu: relu_backward shader: {e}"))?;
+    let sigmoid_backward = dev
+        .compile(bwd_shaders::SIGMOID_BACKWARD)
+        .map_err(|e| format!("scry-gpu: sigmoid_backward shader: {e}"))?;
+    let tanh_backward = dev
+        .compile(bwd_shaders::TANH_BACKWARD)
+        .map_err(|e| format!("scry-gpu: tanh_backward shader: {e}"))?;
+    let transpose = dev
+        .compile(bwd_shaders::TRANSPOSE)
+        .map_err(|e| format!("scry-gpu: transpose shader: {e}"))?;
+    let scale = dev
+        .compile(bwd_shaders::SCALE)
+        .map_err(|e| format!("scry-gpu: scale shader: {e}"))?;
+    let reduce_cols = dev
+        .compile(bwd_shaders::REDUCE_COLS)
+        .map_err(|e| format!("scry-gpu: reduce_cols shader: {e}"))?;
+
     Ok(ScryCtx {
         inner: Mutex::new(ScryCtxInner {
             dev,
             matmul: MatmulStrategy::Wgsl(matmul),
             distance,
             elementwise: ElementwiseKernels { bias_add, relu, tanh, sigmoid },
+            backward: BackwardKernels {
+                relu_backward,
+                sigmoid_backward,
+                tanh_backward,
+                transpose,
+                scale,
+                reduce_cols,
+            },
         }),
     })
 }
@@ -567,12 +634,198 @@ impl ComputeBackend for ScryGpuBackend {
             super::GpuTensor::Cpu(data, _, _) => data.clone(),
         }
     }
+
+    fn gpu_copy(&self, x: &super::GpuTensor) -> super::GpuTensor {
+        match x {
+            super::GpuTensor::Gpu(buf, rows, cols) => {
+                let result = (|| {
+                    let gpu = ctx_lock()?;
+                    gpu.dev.copy_buffer(buf).ok()
+                })();
+                match result {
+                    Some(copy) => super::GpuTensor::Gpu(copy, *rows, *cols),
+                    None => x.to_cpu_tensor(),
+                }
+            }
+            super::GpuTensor::Cpu(data, rows, cols) => {
+                super::GpuTensor::Cpu(data.clone(), *rows, *cols)
+            }
+        }
+    }
+
+    fn gpu_relu_backward(&self, grad: &super::GpuTensor, z: &super::GpuTensor) -> super::GpuTensor {
+        dispatch_binary(grad, z, |gpu, g_buf, z_buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.relu_backward,
+                    &[g_buf, z_buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_sigmoid_backward(
+        &self,
+        grad: &super::GpuTensor,
+        activated: &super::GpuTensor,
+    ) -> super::GpuTensor {
+        dispatch_binary(grad, activated, |gpu, g_buf, a_buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.sigmoid_backward,
+                    &[g_buf, a_buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_tanh_backward(
+        &self,
+        grad: &super::GpuTensor,
+        activated: &super::GpuTensor,
+    ) -> super::GpuTensor {
+        dispatch_binary(grad, activated, |gpu, g_buf, a_buf, n| {
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 1] = [n as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.tanh_backward,
+                    &[g_buf, a_buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(out)
+        })
+    }
+
+    fn gpu_transpose(&self, m: &super::GpuTensor, rows: usize, cols: usize) -> super::GpuTensor {
+        let super::GpuTensor::Gpu(buf, ..) = m else {
+            return super::CpuBackend.gpu_transpose(m, rows, cols);
+        };
+
+        let n = rows * cols;
+        let result = (|| {
+            let gpu = ctx_lock()?;
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 2] = [rows as u32, cols as u32];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.transpose,
+                    &[buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(super::GpuTensor::Gpu(out, cols, rows))
+        })();
+
+        result.unwrap_or_else(|| {
+            super::CpuBackend.gpu_transpose(m, rows, cols)
+        })
+    }
+
+    fn gpu_scale(&self, x: &super::GpuTensor, alpha: f64) -> super::GpuTensor {
+        let super::GpuTensor::Gpu(buf, rows, cols) = x else {
+            return super::CpuBackend.gpu_scale(x, alpha);
+        };
+
+        let n = rows * cols;
+        let result = (|| {
+            let gpu = ctx_lock()?;
+            let out = gpu.dev.alloc::<f32>(n).ok()?;
+            let dims: [u32; 2] = [n as u32, (alpha as f32).to_bits()];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.scale,
+                    &[buf, &out],
+                    [(n as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(super::GpuTensor::Gpu(out, *rows, *cols))
+        })();
+
+        result.unwrap_or_else(|| {
+            super::CpuBackend.gpu_scale(x, alpha)
+        })
+    }
+
+    fn gpu_reduce_cols(
+        &self,
+        x: &super::GpuTensor,
+        rows: usize,
+        cols: usize,
+        scale: f64,
+    ) -> super::GpuTensor {
+        let super::GpuTensor::Gpu(buf, ..) = x else {
+            return super::CpuBackend.gpu_reduce_cols(x, rows, cols, scale);
+        };
+
+        let result = (|| {
+            let gpu = ctx_lock()?;
+            let out = gpu.dev.alloc::<f32>(cols).ok()?;
+            let dims: [u32; 3] = [rows as u32, cols as u32, (scale as f32).to_bits()];
+            gpu.dev
+                .run_configured(
+                    &gpu.backward.reduce_cols,
+                    &[buf, &out],
+                    [(cols as u32).div_ceil(256), 1, 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+            Some(super::GpuTensor::Gpu(out, 1, cols))
+        })();
+
+        result.unwrap_or_else(|| {
+            super::CpuBackend.gpu_reduce_cols(x, rows, cols, scale)
+        })
+    }
 }
 
 // ── Helpers for GPU-resident dispatch ──
 
 fn ctx_lock() -> Option<std::sync::MutexGuard<'static, ScryCtxInner>> {
     get_ctx()?.inner.lock().ok()
+}
+
+/// Dispatch a binary element-wise kernel on two GPU tensors (e.g. backward
+/// activations). Falls back to CPU if either tensor isn't GPU-resident.
+fn dispatch_binary(
+    a: &super::GpuTensor,
+    b: &super::GpuTensor,
+    f: impl FnOnce(
+        &ScryCtxInner,
+        &::scry_gpu::Buffer<f32>,
+        &::scry_gpu::Buffer<f32>,
+        usize,
+    ) -> Option<::scry_gpu::Buffer<f32>>,
+) -> super::GpuTensor {
+    let (super::GpuTensor::Gpu(a_buf, rows, cols), super::GpuTensor::Gpu(b_buf, ..)) = (a, b)
+    else {
+        return a.to_cpu_tensor();
+    };
+
+    let n = rows * cols;
+    let result = (|| {
+        let gpu = ctx_lock()?;
+        f(&gpu, a_buf, b_buf, n)
+    })();
+
+    match result {
+        Some(out) => super::GpuTensor::Gpu(out, *rows, *cols),
+        None => a.to_cpu_tensor(),
+    }
 }
 
 /// Dispatch a unary element-wise kernel on a GPU tensor. Falls back to CPU

@@ -36,8 +36,18 @@ pub(crate) struct DenseLayer {
     // ── GPU-resident weight caches (uploaded once, reused across batches) ──
     /// Transposed weight matrix W^T `[in_size, out_size]` on GPU.
     pub weights_gpu: Option<crate::accel::GpuTensor>,
+    /// Original weight matrix W `[out_size, in_size]` on GPU (for backward pass).
+    pub weights_w_gpu: Option<crate::accel::GpuTensor>,
     /// Bias vector `[1, out_size]` on GPU.
     pub biases_gpu: Option<crate::accel::GpuTensor>,
+
+    // ── GPU-resident training caches (populated during forward, consumed during backward) ──
+    /// Cached input on GPU: `[batch, in_size]`.
+    pub cache_input_gpu: Option<crate::accel::GpuTensor>,
+    /// Cached pre-activation on GPU: `[batch, out_size]`.
+    pub cache_z_gpu: Option<crate::accel::GpuTensor>,
+    /// Cached post-activation on GPU: `[batch, out_size]`.
+    pub cache_a_gpu: Option<crate::accel::GpuTensor>,
 }
 
 impl DenseLayer {
@@ -71,7 +81,11 @@ impl DenseLayer {
             cache_a: Vec::new(),
             cache_batch: 0,
             weights_gpu: None,
+            weights_w_gpu: None,
             biases_gpu: None,
+            cache_input_gpu: None,
+            cache_z_gpu: None,
+            cache_a_gpu: None,
         }
     }
 
@@ -121,19 +135,22 @@ impl DenseLayer {
     /// on subsequent calls. The matmul, bias add, and activation all
     /// execute on-device — no CPU round-trip per layer.
     ///
-    /// Training caches are still populated (via CPU download) for the
-    /// backward pass which remains CPU-based.
+    /// When `gpu_backward` is true, training caches are kept as GPU tensors
+    /// (no PCIe download). When false, caches are downloaded to CPU for the
+    /// CPU backward path.
     pub fn forward_gpu(
         &mut self,
         input: &crate::accel::GpuTensor,
         batch: usize,
         training: bool,
+        gpu_backward: bool,
         backend: &dyn crate::accel::ComputeBackend,
     ) -> crate::accel::GpuTensor {
-        // Lazy upload of transposed weights W^T and biases to GPU.
+        // Lazy upload of transposed weights W^T, original W, and biases to GPU.
         if self.weights_gpu.is_none() {
             let wt = transpose(&self.weights, self.out_size, self.in_size);
             self.weights_gpu = Some(backend.gpu_upload(&wt, self.in_size, self.out_size));
+            self.weights_w_gpu = Some(backend.gpu_upload(&self.weights, self.out_size, self.in_size));
             self.biases_gpu = Some(backend.gpu_upload(&self.biases, 1, self.out_size));
         }
 
@@ -149,8 +166,13 @@ impl DenseLayer {
         // z += bias (GPU element-wise)
         let z = backend.gpu_bias_add(&z, self.biases_gpu.as_ref().unwrap(), batch, self.out_size);
 
-        // Cache for backward pass (downloads to CPU — backward is still CPU-based)
-        if training {
+        if training && gpu_backward {
+            // Keep caches on GPU — backward pass will also run on GPU.
+            self.cache_input_gpu = Some(backend.gpu_copy(input));
+            self.cache_z_gpu = Some(backend.gpu_copy(&z));
+            self.cache_batch = batch;
+        } else if training {
+            // Download caches to CPU for CPU backward path.
             self.cache_input = backend.gpu_download(input);
             self.cache_z = backend.gpu_download(&z);
         }
@@ -158,7 +180,9 @@ impl DenseLayer {
         // activation(z) on GPU
         let a = self.activation.forward_gpu(z, backend);
 
-        if training {
+        if training && gpu_backward {
+            self.cache_a_gpu = Some(backend.gpu_copy(&a));
+        } else if training {
             self.cache_a = backend.gpu_download(&a);
             self.cache_batch = batch;
         }
@@ -166,9 +190,72 @@ impl DenseLayer {
         a
     }
 
+    /// GPU-resident backward pass: all computation stays on device.
+    ///
+    /// Consumes the GPU training caches (cache_input_gpu, cache_z_gpu,
+    /// cache_a_gpu) populated by `forward_gpu(..., gpu_backward=true)`.
+    ///
+    /// Returns `(grad_input_gpu, dw, db)` where:
+    /// - `grad_input_gpu`: GPU tensor `[batch, in_size]` to pass to previous layer
+    /// - `dw`: CPU `Vec<f64>` weight gradients `[out_size * in_size]`
+    /// - `db`: CPU `Vec<f64>` bias gradients `[out_size]`
+    pub fn backward_gpu(
+        &mut self,
+        grad_output: crate::accel::GpuTensor,
+        backend: &dyn crate::accel::ComputeBackend,
+    ) -> (crate::accel::GpuTensor, Vec<f64>, Vec<f64>) {
+        let batch = self.cache_batch;
+
+        // 1. Activation backward: delta = f'(z) ⊙ grad_output
+        let delta = self.activation.backward_gpu(
+            grad_output,
+            self.cache_z_gpu.as_ref().unwrap(),
+            self.cache_a_gpu.as_ref().unwrap(),
+            backend,
+        );
+
+        // 2. Bias gradient: db[j] = sum_i(delta[i,j]) / batch
+        let db_gpu = backend.gpu_reduce_cols(&delta, batch, self.out_size, 1.0 / batch as f64);
+        let db = backend.gpu_download(&db_gpu);
+
+        // 3. Weight gradient: dW = delta^T · input / batch
+        //    delta: [batch, out_size] → delta^T: [out_size, batch]
+        //    input: [batch, in_size]
+        //    dW: [out_size, in_size]
+        let delta_t = backend.gpu_transpose(&delta, batch, self.out_size);
+        let dw_gpu = backend.gpu_matmul(
+            &delta_t,
+            self.cache_input_gpu.as_ref().unwrap(),
+            self.out_size,
+            batch,
+            self.in_size,
+        );
+        let dw_gpu = backend.gpu_scale(&dw_gpu, 1.0 / batch as f64);
+        let dw = backend.gpu_download(&dw_gpu);
+
+        // 4. Input gradient: grad_input = delta · W
+        //    delta: [batch, out_size], W: [out_size, in_size]
+        //    grad_input: [batch, in_size]
+        let grad_input = backend.gpu_matmul(
+            &delta,
+            self.weights_w_gpu.as_ref().unwrap(),
+            batch,
+            self.out_size,
+            self.in_size,
+        );
+
+        // Clear GPU caches (consumed).
+        self.cache_z_gpu = None;
+        self.cache_a_gpu = None;
+        self.cache_input_gpu = None;
+
+        (grad_input, dw, db)
+    }
+
     /// Invalidate GPU weight caches (call after optimizer updates weights).
     pub fn invalidate_gpu_weights(&mut self) {
         self.weights_gpu = None;
+        self.weights_w_gpu = None;
         self.biases_gpu = None;
     }
 
@@ -186,10 +273,26 @@ impl DenseLayer {
         debug_assert_eq!(dw.len(), self.out_size * self.in_size);
         debug_assert_eq!(db.len(), self.out_size);
 
+        // Resolve caches: download from GPU if forward used gpu_backward=true
+        let z_tmp;
+        let a_tmp;
+        let inp_tmp;
+        let (cache_z, cache_a, cache_input) =
+            if let (Some(z_gpu), Some(a_gpu), Some(i_gpu)) =
+                (&self.cache_z_gpu, &self.cache_a_gpu, &self.cache_input_gpu)
+            {
+                z_tmp = z_gpu.to_cpu();
+                a_tmp = a_gpu.to_cpu();
+                inp_tmp = i_gpu.to_cpu();
+                (&z_tmp[..], &a_tmp[..], &inp_tmp[..])
+            } else {
+                (&self.cache_z[..], &self.cache_a[..], &self.cache_input[..])
+            };
+
         // Apply activation derivative: delta = grad_output ⊙ f'(z)
         let mut delta = grad_output.to_vec();
         self.activation
-            .backward_from_activated(&self.cache_z, &self.cache_a, &mut delta);
+            .backward_from_activated(cache_z, cache_a, &mut delta);
 
         // Bias gradient: db[j] = sum_i(delta[i,j]) / batch
         let batch_f = batch as f64;
@@ -207,7 +310,7 @@ impl DenseLayer {
             for k in 0..self.in_size {
                 let mut sum = 0.0;
                 for i in 0..batch {
-                    sum += delta[i * self.out_size + o] * self.cache_input[i * self.in_size + k];
+                    sum += delta[i * self.out_size + o] * cache_input[i * self.in_size + k];
                 }
                 dw[o * self.in_size + k] = sum / batch_f;
             }

@@ -103,6 +103,28 @@ impl Activation {
             Self::Identity => z,
         }
     }
+
+    /// Backward pass on GPU-resident tensors.
+    ///
+    /// Computes `delta = grad ⊙ f'(z)` on device. For `Identity`, returns
+    /// `grad` unchanged (no dispatch, no copy).
+    ///
+    /// - ReLU uses pre-activation `z` to compute the mask.
+    /// - Sigmoid/Tanh use the post-activation `activated` value.
+    pub(crate) fn backward_gpu(
+        self,
+        grad: crate::accel::GpuTensor,
+        z: &crate::accel::GpuTensor,
+        activated: &crate::accel::GpuTensor,
+        backend: &dyn crate::accel::ComputeBackend,
+    ) -> crate::accel::GpuTensor {
+        match self {
+            Self::Relu => backend.gpu_relu_backward(&grad, z),
+            Self::Sigmoid => backend.gpu_sigmoid_backward(&grad, activated),
+            Self::Tanh => backend.gpu_tanh_backward(&grad, activated),
+            Self::Identity => grad,
+        }
+    }
 }
 
 /// Numerically stable sigmoid.
