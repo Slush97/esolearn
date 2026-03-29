@@ -26,10 +26,10 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace
+      - run: cargo check --workspace --locked
       - name: clippy
         if: matrix.rust == 'stable'
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
         if: matrix.rust == 'stable'
         run: cargo fmt --all -- --check
