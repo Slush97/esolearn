@@ -520,7 +520,7 @@ fn solve_det_cubic(f1: &[f64; 9], f2: &[f64; 9]) -> Vec<f64> {
     let s3 = d2 - c0;
 
     // s1 + s2 = 2 c2  =>  c2 = (s1 + s2) / 2
-    let c2 = (s1 + s2) / 2.0;
+    let c2 = f64::midpoint(s1, s2);
     // s1 - s2 = 2(c1 + c3)  => c1 + c3 = (s1 - s2) / 2
     let c1_plus_c3 = (s1 - s2) / 2.0;
     // s3 = 2 c1 + 4 c2 + 8 c3  => c1 + 4 c3 = (s3 - 4 c2) / 2

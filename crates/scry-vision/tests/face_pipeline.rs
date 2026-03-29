@@ -107,8 +107,8 @@ fn full_pipeline_detect_crop_embed_compare() {
 
     // Verify bbox geometry for face A (centered at 200, 200)
     let face_a = &dets[0];
-    let cx_a = (face_a.bbox.x1 + face_a.bbox.x2) / 2.0;
-    let cy_a = (face_a.bbox.y1 + face_a.bbox.y2) / 2.0;
+    let cx_a = f32::midpoint(face_a.bbox.x1, face_a.bbox.x2);
+    let cy_a = f32::midpoint(face_a.bbox.y1, face_a.bbox.y2);
     assert!(
         (cx_a - 200.0).abs() < 2.0,
         "face A cx={cx_a}, expected ~200"

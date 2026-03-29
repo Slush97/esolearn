@@ -2,7 +2,7 @@
 name = "scry-cv"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.83.0"
+rust-version = "1.85.0"
 authors = ["esoc"]
 description = "Classical computer vision: feature detection, matching, registration, optical flow, stereo, segmentation"
 license = "MIT OR Apache-2.0"

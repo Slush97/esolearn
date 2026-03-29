@@ -279,8 +279,8 @@ mod tests {
 
         assert_eq!(dets.len(), 1);
         let d = &dets[0];
-        let cx = (d.bbox.x1 + d.bbox.x2) / 2.0;
-        let cy = (d.bbox.y1 + d.bbox.y2) / 2.0;
+        let cx = f32::midpoint(d.bbox.x1, d.bbox.x2);
+        let cy = f32::midpoint(d.bbox.y1, d.bbox.y2);
         assert!((cx - 640.0).abs() < 2.0);
         assert!((cy - 360.0).abs() < 2.0);
     }

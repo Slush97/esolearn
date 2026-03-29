@@ -592,7 +592,7 @@ impl DecisionTreeClassifier {
                         let weighted_imp = (left_n as f64 * left_imp + right_n as f64 * right_imp)
                             / n_parent as f64;
 
-                        let threshold = (prev_val + val) / 2.0;
+                        let threshold = f64::midpoint(prev_val, val);
 
                         let is_better = best
                             .as_ref()
@@ -801,7 +801,7 @@ impl DecisionTreeClassifier {
                         let weighted_imp =
                             (left_w_total * left_imp + right_w_total * right_imp) / w_parent_total;
 
-                        let threshold = (prev_val + val) / 2.0;
+                        let threshold = f64::midpoint(prev_val, val);
 
                         let is_better = best
                             .as_ref()
@@ -1215,7 +1215,7 @@ impl DecisionTreeRegressor {
                         let weighted = (left_n as f64 * left_mse + right_n as f64 * right_mse)
                             / n_parent as f64;
 
-                        let threshold = (prev_val + feat_val) / 2.0;
+                        let threshold = f64::midpoint(prev_val, feat_val);
 
                         let is_better =
                             best.as_ref().is_none_or(|b| weighted < b.impurity_decrease);

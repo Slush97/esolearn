@@ -5,7 +5,7 @@ exclude = ["crates/scry-app", "crates/scry-stt"]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.83.0"
+rust-version = "1.85.0"
 authors = ["esoc"]
 license = "MIT OR Apache-2.0"
 

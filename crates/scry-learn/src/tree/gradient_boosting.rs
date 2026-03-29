@@ -166,7 +166,7 @@ fn median(data: &[f64]) -> f64 {
     if n % 2 == 1 {
         sorted[n / 2]
     } else {
-        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+        f64::midpoint(sorted[n / 2 - 1], sorted[n / 2])
     }
 }
 

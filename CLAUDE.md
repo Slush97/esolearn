@@ -2,7 +2,7 @@
 
 ## Workspace Overview
 
-Rust workspace with 10 crates in two families. Edition 2021, MSRV 1.83.0.
+Rust workspace with 10 crates in two families. Edition 2021, MSRV 1.85.0.
 
 **scry family** (AI/ML inference):
 - `scry-gpu` — Compute-only GPU backend (Vulkan/ash, WGSL→SPIR-V via naga)

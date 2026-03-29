@@ -70,7 +70,7 @@ pub fn adjusted_rand_index(labels_true: &[f64], labels_pred: &[f64]) -> f64 {
     }
 
     let expected = sum_comb_a as f64 * sum_comb_b as f64 / comb_n as f64;
-    let max_index = (sum_comb_a as f64 + sum_comb_b as f64) / 2.0;
+    let max_index = f64::midpoint(sum_comb_a as f64, sum_comb_b as f64);
 
     if (max_index - expected).abs() < 1e-15 {
         return if (sum_comb_c as f64 - expected).abs() < 1e-15 {

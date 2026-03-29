@@ -114,7 +114,7 @@ fn median_ignore_nan(col: &[f64]) -> f64 {
     valid.sort_unstable_by(|a, b| a.total_cmp(b));
     let mid = valid.len() / 2;
     if valid.len() % 2 == 0 {
-        (valid[mid - 1] + valid[mid]) / 2.0
+        f64::midpoint(valid[mid - 1], valid[mid])
     } else {
         valid[mid]
     }

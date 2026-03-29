@@ -403,7 +403,7 @@ impl IsotonicRegression {
         let mut lo = 0;
         let mut hi = self.xs.len() - 1;
         while lo + 1 < hi {
-            let mid = (lo + hi) / 2;
+            let mid = usize::midpoint(lo, hi);
             if self.xs[mid] <= x {
                 lo = mid;
             } else {
@@ -414,7 +414,7 @@ impl IsotonicRegression {
         // Linear interpolation.
         let dx = self.xs[hi] - self.xs[lo];
         if dx.abs() < crate::constants::NEAR_ZERO {
-            return (self.ys[lo] + self.ys[hi]) / 2.0;
+            return f64::midpoint(self.ys[lo], self.ys[hi]);
         }
         let t = (x - self.xs[lo]) / dx;
         self.ys[lo] + t * (self.ys[hi] - self.ys[lo])

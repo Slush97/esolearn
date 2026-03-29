@@ -530,7 +530,7 @@ fn median_of(times: &mut [f64]) -> f64 {
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mid = times.len() / 2;
     if times.len() % 2 == 0 {
-        (times[mid - 1] + times[mid]) / 2.0
+        f64::midpoint(times[mid - 1], times[mid])
     } else {
         times[mid]
     }
