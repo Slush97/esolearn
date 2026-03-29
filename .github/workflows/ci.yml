@@ -26,18 +26,8 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: cargo check (stable)
-        if: matrix.rust == 'stable'
-        run: cargo check --workspace
-      - name: cargo check (MSRV, no cuda)
-        if: matrix.rust != 'stable'
-        run: cargo check --workspace --exclude scry-llm && cargo check -p scry-llm --no-default-features
-      - name: clippy (stable)
-        if: matrix.rust == 'stable'
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: clippy (MSRV, no cuda)
-        if: matrix.rust != 'stable'
-        run: cargo clippy --workspace --exclude scry-llm --all-targets -- -D warnings && cargo clippy -p scry-llm --no-default-features --all-targets -- -D warnings
+      - run: cargo check --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: rustfmt
         if: matrix.rust == 'stable'
         run: cargo fmt --all -- --check

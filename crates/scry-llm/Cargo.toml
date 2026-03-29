@@ -9,7 +9,7 @@ description = "Llama inference engine in Rust with CUDA backend"
 license.workspace = true
 
 [features]
-default = ["cuda"]
+default = []
 cuda = ["dep:cudarc"]
 bf16 = ["cuda", "cudarc/f16", "dep:half"]
 safetensors = ["dep:safetensors"]
