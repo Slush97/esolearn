@@ -104,11 +104,13 @@ impl Batch {
                 let vk_bufs: Vec<&crate::backend::vulkan::VulkanBuffer> = backend_bufs
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Vulkan(vb) => vb,
+                        BackendBuffer::Vulkan(vb) => Ok(vb),
                         #[cfg(feature = "cuda")]
-                        _ => unreachable!("Vulkan batch received non-Vulkan buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected Vulkan buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 vk_batch.record_dispatch(vk_kernel, &vk_bufs, workgroups, push_constants)?;
             }
             #[cfg(feature = "cuda")]
@@ -121,11 +123,13 @@ impl Batch {
                 let cuda_bufs: Vec<&crate::backend::cuda::CudaBuffer> = backend_bufs
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Cuda(cb) => cb,
+                        BackendBuffer::Cuda(cb) => Ok(cb),
                         #[cfg(feature = "vulkan")]
-                        _ => unreachable!("CUDA batch received non-CUDA buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected CUDA buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 cuda_batch.record_dispatch(cuda_kernel, &cuda_bufs, workgroups, push_constants)?;
             }
         }

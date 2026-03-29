@@ -1270,8 +1270,16 @@ impl VulkanBackend {
                 }
             })?;
 
-        unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
-            .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
+        if let Err(e) =
+            unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
+        {
+            // Clean up both allocation and buffer on bind failure.
+            if let Ok(mut a) = self.state.allocator.lock() {
+                let _ = a.free(allocation);
+            }
+            unsafe { device.destroy_buffer(buffer, None) };
+            return Err(backend_err(BackendOp::BindMemory, e));
+        }
 
         Ok((buffer, allocation))
     }
@@ -1457,13 +1465,23 @@ impl VulkanBuffer {
                 linear: true,
                 allocation_scheme: gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged,
             })
-            .map_err(|_| GpuError::AllocationFailed {
-                requested: capacity,
-                device_max: 0,
+            .map_err(|_| {
+                unsafe { device.destroy_buffer(buffer, None) };
+                GpuError::AllocationFailed {
+                    requested: capacity,
+                    device_max: 0,
+                }
             })?;
 
-        unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
-            .map_err(|e| backend_err(BackendOp::BindMemory, e))?;
+        if let Err(e) =
+            unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) }
+        {
+            if let Ok(mut a) = state.allocator.lock() {
+                let _ = a.free(allocation);
+            }
+            unsafe { device.destroy_buffer(buffer, None) };
+            return Err(backend_err(BackendOp::BindMemory, e));
+        }
 
         Ok(StagingBuffer {
             buffer,

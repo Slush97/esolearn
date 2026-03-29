@@ -395,7 +395,9 @@ impl Device {
                 #[allow(irrefutable_let_patterns)]
                 let BackendBuffer::Vulkan(vk_src) = src
                 else {
-                    unreachable!("Vulkan backend received non-Vulkan buffer");
+                    return Err(GpuError::BackendUnavailable(
+                        "buffer/backend mismatch: expected Vulkan buffer".into(),
+                    ));
                 };
                 let buf = b.copy_buffer(vk_src, size)?;
                 Ok(BackendBuffer::Vulkan(buf))
@@ -405,7 +407,9 @@ impl Device {
                 #[allow(irrefutable_let_patterns)]
                 let BackendBuffer::Cuda(cuda_src) = src
                 else {
-                    unreachable!("CUDA backend received non-CUDA buffer");
+                    return Err(GpuError::BackendUnavailable(
+                        "buffer/backend mismatch: expected CUDA buffer".into(),
+                    ));
                 };
                 let buf = b.copy_buffer(cuda_src, size)?;
                 Ok(BackendBuffer::Cuda(buf))
@@ -442,11 +446,13 @@ impl Device {
                 let vk_bufs: Vec<&crate::backend::vulkan::VulkanBuffer> = buffers
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Vulkan(vb) => vb,
+                        BackendBuffer::Vulkan(vb) => Ok(vb),
                         #[cfg(feature = "cuda")]
-                        _ => unreachable!("Vulkan backend received non-Vulkan buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected Vulkan buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 b.dispatch(spirv, entry_point, &vk_bufs, workgroups, push_constants)
             }
             #[cfg(feature = "cuda")]
@@ -454,11 +460,13 @@ impl Device {
                 let cuda_bufs: Vec<&crate::backend::cuda::CudaBuffer> = buffers
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Cuda(cb) => cb,
+                        BackendBuffer::Cuda(cb) => Ok(cb),
                         #[cfg(feature = "vulkan")]
-                        _ => unreachable!("CUDA backend received non-CUDA buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected CUDA buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 b.dispatch(spirv, entry_point, &cuda_bufs, workgroups, push_constants)
             }
         }
@@ -507,11 +515,13 @@ impl Device {
                 let vk_bufs: Vec<&crate::backend::vulkan::VulkanBuffer> = buffers
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Vulkan(vb) => vb,
+                        BackendBuffer::Vulkan(vb) => Ok(vb),
                         #[cfg(feature = "cuda")]
-                        _ => unreachable!("Vulkan backend received non-Vulkan buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected Vulkan buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 b.dispatch_pipeline(vk_kernel, &vk_bufs, workgroups, push_constants)
             }
             #[cfg(feature = "cuda")]
@@ -524,11 +534,13 @@ impl Device {
                 let cuda_bufs: Vec<&crate::backend::cuda::CudaBuffer> = buffers
                     .iter()
                     .map(|buf| match buf {
-                        BackendBuffer::Cuda(cb) => cb,
+                        BackendBuffer::Cuda(cb) => Ok(cb),
                         #[cfg(feature = "vulkan")]
-                        _ => unreachable!("CUDA backend received non-CUDA buffer"),
+                        _ => Err(GpuError::BackendUnavailable(
+                            "buffer/backend mismatch: expected CUDA buffer".into(),
+                        )),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 b.dispatch_pipeline(cuda_kernel, &cuda_bufs, workgroups, push_constants)
             }
         }
