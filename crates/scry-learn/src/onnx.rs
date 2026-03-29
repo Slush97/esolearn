@@ -1045,7 +1045,7 @@ impl ToOnnx for GradientBoostingClassifier {
         if class_trees.is_empty() {
             return Err(ScryLearnError::NotFitted);
         }
-        let n_classes = self.n_classes();
+        let _n_classes = self.n_classes();
         let n_features = self.n_features();
         let lr = self.learning_rate_val();
 

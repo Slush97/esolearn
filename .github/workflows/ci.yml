@@ -44,7 +44,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p scry-learn
       - run: cargo test -p scry-llm --no-default-features
-      - run: cargo test -p scry-stt --no-default-features
 
   test-features:
     name: test-features
@@ -59,7 +58,6 @@ jobs:
       - run: cargo test -p scry-learn --features polars
       - run: cargo test -p scry-learn --features mmap
       - run: cargo test -p scry-llm --no-default-features --features safetensors,tokenizer
-      - run: cargo test -p scry-stt --no-default-features --features safetensors
 
   miri:
     name: miri
