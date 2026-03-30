@@ -35,12 +35,15 @@ pub enum BackendOp {
     CreateDevice,
     EnumerateDevices,
     CreateAllocator,
+    // Fence polling
+    GetFenceStatus,
     // CUDA-specific operations
     CompileKernel,
     LoadModule,
     LoadFunction,
     LaunchKernel,
     StreamSync,
+    RecordEvent,
     DeviceQuery,
     CuBlas,
 }

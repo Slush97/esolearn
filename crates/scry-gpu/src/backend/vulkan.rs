@@ -1058,16 +1058,21 @@ impl VulkanBatch {
         }
     }
 
-    pub fn submit(self) -> Result<()> {
-        let device = &self.state.device;
-
+    /// Submit all recorded dispatches and return a [`VulkanTicket`] for
+    /// non-blocking completion tracking.
+    ///
+    /// The GPU work is queued immediately. Resources are transferred to
+    /// the ticket and recycled when it is waited or dropped.
+    pub fn submit_async(self) -> Result<VulkanTicket> {
         unsafe {
-            device
+            self.state
+                .device
                 .end_command_buffer(self.cmd)
                 .map_err(|e| backend_err(BackendOp::EndCommandBuffer, e))?;
 
             // Own fence — independent of the shared one-shot path.
-            device
+            self.state
+                .device
                 .reset_fences(&[self.fence])
                 .map_err(|e| backend_err(BackendOp::ResetFence, e))?;
 
@@ -1077,57 +1082,139 @@ impl VulkanBatch {
                 .lock()
                 .map_err(|_| backend_err(BackendOp::MutexPoisoned, "queue"))?;
 
-            device
+            self.state
+                .device
                 .queue_submit(
                     *queue,
                     &[vk::SubmitInfo::default().command_buffers(&[self.cmd])],
                     self.fence,
                 )
                 .map_err(|e| backend_err(BackendOp::QueueSubmit, e))?;
-
-            drop(queue);
-
-            let wait = device.wait_for_fences(&[self.fence], true, FENCE_TIMEOUT_NS);
-            match wait {
-                Ok(()) => {}
-                Err(vk::Result::TIMEOUT) => {
-                    return Err(GpuError::ReadbackTimeout {
-                        ms: FENCE_TIMEOUT_NS / 1_000_000,
-                    })
-                }
-                Err(e) => return Err(backend_err(BackendOp::WaitFence, e)),
-            }
         }
 
-        Ok(())
+        // Queue submit succeeded. Transfer resource ownership to the ticket
+        // and suppress VulkanBatch::Drop via ManuallyDrop + ptr::read.
+        let batch = std::mem::ManuallyDrop::new(self);
+
+        Ok(VulkanTicket {
+            cmd: batch.cmd,
+            fence: batch.fence,
+            desc_pool: batch.desc_pool,
+            // SAFETY: `batch` is ManuallyDrop so its destructor won't run.
+            // Each field is read exactly once, transferring ownership.
+            overflow_pools: unsafe { std::ptr::read(&raw const batch.overflow_pools) },
+            retained_kernels: unsafe { std::ptr::read(&raw const batch.retained_kernels) },
+            state: unsafe { std::ptr::read(&raw const batch.state) },
+        })
     }
 }
 
 impl Drop for VulkanBatch {
     fn drop(&mut self) {
+        // Recycle resources. This only runs if submit/submit_async was NOT
+        // called (e.g. batch recorded but never submitted). If submit_async
+        // was called, ManuallyDrop suppresses this destructor.
+        recycle_batch_resources(
+            &self.state,
+            self.cmd,
+            self.fence,
+            self.desc_pool,
+            &mut self.overflow_pools,
+        );
+    }
+}
+
+/// In-flight GPU submission handle for the Vulkan backend.
+///
+/// Owns the command buffer, fence, descriptor pools, and retained kernel
+/// references that were moved out of a [`VulkanBatch`] on `submit_async()`.
+/// Resources are recycled when waited or dropped.
+pub struct VulkanTicket {
+    cmd: vk::CommandBuffer,
+    fence: vk::Fence,
+    desc_pool: vk::DescriptorPool,
+    overflow_pools: Vec<vk::DescriptorPool>,
+    /// Held to keep kernel pipelines alive while the command buffer is
+    /// in-flight. Dropped when the ticket is waited or dropped.
+    #[allow(dead_code)]
+    retained_kernels: Vec<Arc<VulkanKernelInner>>,
+    state: Arc<SharedState>,
+}
+
+impl VulkanTicket {
+    /// Block until the GPU signals the fence, then return.
+    ///
+    /// Resources are recycled in [`Drop`], which runs after this returns.
+    pub(crate) fn wait(self) -> Result<()> {
+        let wait = unsafe {
+            self.state
+                .device
+                .wait_for_fences(&[self.fence], true, FENCE_TIMEOUT_NS)
+        };
+        match wait {
+            Ok(()) => Ok(()),
+            Err(vk::Result::TIMEOUT) => Err(GpuError::ReadbackTimeout {
+                ms: FENCE_TIMEOUT_NS / 1_000_000,
+            }),
+            Err(e) => Err(backend_err(BackendOp::WaitFence, e)),
+        }
+        // Drop runs here → recycles cmd/fence/desc_pool
+    }
+
+    /// Check whether the GPU has finished without blocking.
+    pub(crate) fn is_ready(&self) -> Result<bool> {
         unsafe {
-            let device = &self.state.device;
+            self.state
+                .device
+                .get_fence_status(self.fence)
+                .map_err(|e| backend_err(BackendOp::GetFenceStatus, e))
+        }
+    }
+}
 
-            // Destroy overflow pools (these are extra, not worth pooling).
-            for pool in &self.overflow_pools {
-                device.destroy_descriptor_pool(*pool, None);
-            }
+impl Drop for VulkanTicket {
+    fn drop(&mut self) {
+        recycle_batch_resources(
+            &self.state,
+            self.cmd,
+            self.fence,
+            self.desc_pool,
+            &mut self.overflow_pools,
+        );
+    }
+}
 
-            // Recycle the primary resources back to the free-list.
-            if let Ok(mut pool) = self.state.batch_pool.lock() {
-                pool.push(BatchResources {
-                    cmd: self.cmd,
-                    fence: self.fence,
-                    desc_pool: self.desc_pool,
-                });
-            } else {
-                // Poisoned mutex — fall back to destruction.
-                if let Ok(cmd_pool) = self.state.cmd_pool.lock() {
-                    device.free_command_buffers(*cmd_pool, &[self.cmd]);
-                }
-                device.destroy_fence(self.fence, None);
-                device.destroy_descriptor_pool(self.desc_pool, None);
+/// Shared cleanup: destroy overflow pools, recycle primary resources to the
+/// batch free-list. Used by both `VulkanBatch::Drop` and `VulkanTicket::Drop`.
+fn recycle_batch_resources(
+    state: &SharedState,
+    cmd: vk::CommandBuffer,
+    fence: vk::Fence,
+    desc_pool: vk::DescriptorPool,
+    overflow_pools: &mut Vec<vk::DescriptorPool>,
+) {
+    unsafe {
+        let device = &state.device;
+
+        // Destroy overflow pools (these are extra, not worth pooling).
+        for pool in overflow_pools.drain(..) {
+            device.destroy_descriptor_pool(pool, None);
+        }
+
+        // Recycle the primary resources back to the free-list.
+        if let Ok(mut pool) = state.batch_pool.lock() {
+            pool.push(BatchResources {
+                cmd,
+                fence,
+                desc_pool,
+            });
+        } else {
+            // Poisoned mutex — fall back to destruction.
+            if let Ok(cmd_pool) = state.cmd_pool.lock() {
+                device.free_command_buffers(*cmd_pool, &[cmd]);
             }
+            device.destroy_fence(fence, None);
+            device.destroy_descriptor_pool(desc_pool, None);
         }
     }
 }

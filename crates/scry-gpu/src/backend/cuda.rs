@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use cudarc::cublas::sys::cublasOperation_t;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
-    CudaContext, CudaFunction, CudaSlice, CudaStream, DevicePtr, DevicePtrMut, LaunchConfig,
-    PushKernelArg,
+    CudaContext, CudaEvent, CudaFunction, CudaSlice, CudaStream, DevicePtr, DevicePtrMut,
+    LaunchConfig, PushKernelArg,
 };
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 
@@ -396,10 +396,39 @@ impl CudaBatch {
         // CUDA streams serialize operations automatically.
     }
 
-    /// Synchronize the batch stream, waiting for all recorded dispatches.
-    pub fn submit(self) -> Result<()> {
+    /// Submit all recorded dispatches and return a [`CudaTicket`] for
+    /// non-blocking completion tracking.
+    pub fn submit_async(self) -> Result<CudaTicket> {
+        let event = self
+            .stream
+            .record_event(None)
+            .map_err(|e| backend_err(BackendOp::RecordEvent, e))?;
+        Ok(CudaTicket {
+            stream: self.stream,
+            event,
+        })
+    }
+}
+
+/// In-flight GPU submission handle for the CUDA backend.
+///
+/// Records a [`CudaEvent`] at submit time so completion can be polled
+/// without synchronizing the entire stream.
+pub struct CudaTicket {
+    stream: Arc<CudaStream>,
+    event: CudaEvent,
+}
+
+impl CudaTicket {
+    /// Block until all work preceding the recorded event completes.
+    pub(crate) fn wait(self) -> Result<()> {
         self.stream
             .synchronize()
             .map_err(|e| backend_err(BackendOp::StreamSync, e))
+    }
+
+    /// Check whether the recorded event has been reached without blocking.
+    pub(crate) fn is_ready(&self) -> bool {
+        self.event.is_complete()
     }
 }

@@ -49,6 +49,7 @@ mod error;
 mod kernel;
 mod shader;
 pub mod shaders;
+mod ticket;
 
 pub use batch::Batch;
 pub use buffer::{Buffer, GpuBuf};
@@ -56,3 +57,4 @@ pub use device::{BackendKind, Device};
 pub use dispatch::DispatchConfig;
 pub use error::{BackendOp, GpuError, Result};
 pub use kernel::Kernel;
+pub use ticket::Ticket;

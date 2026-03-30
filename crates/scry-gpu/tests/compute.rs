@@ -1328,3 +1328,131 @@ fn alloc_download_is_zeroed_or_deterministic() {
     // We don't assert values — uninitialized GPU memory is undefined.
     // This test verifies the alloc→download path doesn't crash.
 }
+
+// ── Ticket (async dispatch) tests ──
+
+#[test]
+fn ticket_wait() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[1.0f32, 2.0, 3.0, 4.0]).unwrap();
+    let output = gpu.alloc::<f32>(4).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 4).unwrap();
+    let ticket = batch.submit_async().unwrap();
+    ticket.wait().unwrap();
+
+    let result: Vec<f32> = output.download().unwrap();
+    assert_eq!(result, vec![2.0, 4.0, 6.0, 8.0]);
+}
+
+#[test]
+fn ticket_is_ready() {
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[5.0f32, 10.0]).unwrap();
+    let output = gpu.alloc::<f32>(2).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 2).unwrap();
+    let ticket = batch.submit_async().unwrap();
+
+    // Spin until ready (GPU work is tiny, should be near-instant).
+    for _ in 0..1_000_000 {
+        if ticket.is_ready().unwrap() {
+            break;
+        }
+    }
+
+    ticket.wait().unwrap();
+    assert_eq!(output.download().unwrap(), vec![10.0, 20.0]);
+}
+
+#[test]
+fn ticket_drop_without_wait() {
+    // Dropping a ticket without calling wait() must not panic or leak.
+    // The Drop impl blocks until GPU finishes, then recycles resources.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[1.0f32, 2.0]).unwrap();
+    let output = gpu.alloc::<f32>(2).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 2).unwrap();
+    let ticket = batch.submit_async().unwrap();
+    drop(ticket); // intentional: no wait()
+
+    // GPU should still be usable.
+    let out2 = gpu.alloc::<f32>(2).unwrap();
+    gpu.run(&kernel, &[&input, &out2], 2).unwrap();
+    assert_eq!(out2.download().unwrap(), vec![2.0, 4.0]);
+}
+
+#[test]
+fn ticket_chained_with_barrier() {
+    let gpu = gpu();
+    let double = gpu.compile(DOUBLE_SHADER).expect("compile double");
+    let add_one = gpu.compile(ADD_ONE_SHADER).expect("compile add_one");
+
+    let input = gpu.upload(&[1.0f32, 2.0, 3.0]).unwrap();
+    let mid = gpu.alloc::<f32>(3).unwrap();
+    let output = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&double, &[&input, &mid], 3).unwrap();
+    batch.barrier();
+    batch.run(&add_one, &[&mid, &output], 3).unwrap();
+    let ticket = batch.submit_async().unwrap();
+    ticket.wait().unwrap();
+
+    // input * 2 + 1 = [3.0, 5.0, 7.0]
+    assert_eq!(output.download().unwrap(), vec![3.0, 5.0, 7.0]);
+}
+
+#[test]
+fn ticket_multiple_in_flight() {
+    // Two batches submitted async before either is waited.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let in1 = gpu.upload(&[1.0f32, 2.0]).unwrap();
+    let out1 = gpu.alloc::<f32>(2).unwrap();
+    let in2 = gpu.upload(&[10.0f32, 20.0]).unwrap();
+    let out2 = gpu.alloc::<f32>(2).unwrap();
+
+    let mut batch1 = gpu.batch().unwrap();
+    batch1.run(&kernel, &[&in1, &out1], 2).unwrap();
+    let ticket1 = batch1.submit_async().unwrap();
+
+    let mut batch2 = gpu.batch().unwrap();
+    batch2.run(&kernel, &[&in2, &out2], 2).unwrap();
+    let ticket2 = batch2.submit_async().unwrap();
+
+    // Wait in reverse order to test independence.
+    ticket2.wait().unwrap();
+    ticket1.wait().unwrap();
+
+    assert_eq!(out1.download().unwrap(), vec![2.0, 4.0]);
+    assert_eq!(out2.download().unwrap(), vec![20.0, 40.0]);
+}
+
+#[test]
+fn submit_blocking_still_works() {
+    // Verify that the refactored submit() (now delegates to submit_async().wait())
+    // still produces correct results.
+    let gpu = gpu();
+    let kernel = gpu.compile(DOUBLE_SHADER).expect("compile failed");
+
+    let input = gpu.upload(&[3.0f32, 6.0, 9.0]).unwrap();
+    let output = gpu.alloc::<f32>(3).unwrap();
+
+    let mut batch = gpu.batch().unwrap();
+    batch.run(&kernel, &[&input, &output], 3).unwrap();
+    batch.submit().unwrap();
+
+    assert_eq!(output.download().unwrap(), vec![6.0, 12.0, 18.0]);
+}

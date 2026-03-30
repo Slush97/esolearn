@@ -20,6 +20,7 @@ use crate::buffer::GpuBuf;
 use crate::dispatch;
 use crate::error::{GpuError, Result};
 use crate::kernel::Kernel;
+use crate::ticket::Ticket;
 
 /// A batch of dispatches recorded into a single command buffer.
 ///
@@ -156,12 +157,40 @@ impl Batch {
     ///
     /// All dispatches execute in a single command buffer with one fence wait,
     /// eliminating per-dispatch synchronization overhead.
+    ///
+    /// Equivalent to `self.submit_async()?.wait()`.
     pub fn submit(self) -> Result<()> {
+        self.submit_async()?.wait()
+    }
+
+    /// Submit all recorded dispatches and return a [`Ticket`] for
+    /// non-blocking completion tracking.
+    ///
+    /// The GPU work is queued immediately. Use [`Ticket::wait`] to block
+    /// until completion, or [`Ticket::is_ready`] to poll.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut batch = gpu.batch()?;
+    /// batch.run(&kernel, &[&input, &output], n)?;
+    /// let ticket = batch.submit_async()?;
+    ///
+    /// // ... CPU work while GPU runs ...
+    ///
+    /// ticket.wait()?;
+    /// let result: Vec<f32> = output.download()?;
+    /// ```
+    pub fn submit_async(self) -> Result<Ticket> {
         match self.inner {
             #[cfg(feature = "vulkan")]
-            BatchInner::Vulkan(vk_batch) => vk_batch.submit(),
+            BatchInner::Vulkan(vk_batch) => {
+                Ok(Ticket::new_vulkan(vk_batch.submit_async()?))
+            }
             #[cfg(feature = "cuda")]
-            BatchInner::Cuda(cuda_batch) => cuda_batch.submit(),
+            BatchInner::Cuda(cuda_batch) => {
+                Ok(Ticket::new_cuda(cuda_batch.submit_async()?))
+            }
         }
     }
 }
