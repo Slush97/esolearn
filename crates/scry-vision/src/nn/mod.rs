@@ -6,11 +6,15 @@
 
 pub mod batchnorm;
 pub mod conv2d;
+pub mod conv_transpose2d;
+pub mod layernorm2d;
 pub mod patch_embed;
 pub mod pool;
 
 pub use batchnorm::BatchNorm2d;
 pub use conv2d::Conv2d;
+pub use conv_transpose2d::ConvTranspose2d;
+pub use layernorm2d::LayerNorm2d;
 pub use patch_embed::PatchEmbedding;
 pub use pool::{AdaptiveAvgPool2d, MaxPool2d};
 
@@ -20,5 +24,15 @@ use scry_llm::tensor::Tensor;
 /// Element-wise `ReLU`: `max(0, x)`.
 pub fn relu<B: MathBackend>(input: &Tensor<B>) -> Tensor<B> {
     let data: Vec<f32> = input.to_vec().into_iter().map(|x| x.max(0.0)).collect();
+    Tensor::from_vec(data, input.shape.clone())
+}
+
+/// Element-wise sigmoid: `1 / (1 + exp(-x))`.
+pub fn sigmoid<B: MathBackend>(input: &Tensor<B>) -> Tensor<B> {
+    let data: Vec<f32> = input
+        .to_vec()
+        .into_iter()
+        .map(|x| 1.0 / (1.0 + (-x).exp()))
+        .collect();
     Tensor::from_vec(data, input.shape.clone())
 }

@@ -13,6 +13,8 @@ use scry_llm::tensor::Tensor;
 use crate::error::{Result, VisionError};
 use crate::nn::batchnorm::BatchNorm2d;
 use crate::nn::conv2d::Conv2d;
+use crate::nn::conv_transpose2d::ConvTranspose2d;
+use crate::nn::layernorm2d::LayerNorm2d;
 
 /// Load a named tensor from a safetensors file, with dtype auto-detection.
 ///
@@ -136,6 +138,91 @@ pub fn load_batchnorm2d<B: MathBackend>(
         running_mean: load_tensor(tensors, &format!("{prefix}.running_mean"), shape)?,
         running_var: load_tensor(tensors, &format!("{prefix}.running_var"), shape)?,
         num_features,
+        eps,
+    })
+}
+
+/// Load a [`Conv2d`] layer with bias from safetensors.
+///
+/// Unlike [`load_conv2d`] which zeros the bias, this loads `{prefix}.bias`
+/// from the checkpoint. Used by SAM and other models with `bias=True` convolutions.
+pub fn load_conv2d_with_bias<B: MathBackend>(
+    tensors: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    in_channels: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride: usize,
+    padding: usize,
+) -> Result<Conv2d<B>> {
+    let weight = load_tensor(
+        tensors,
+        &format!("{prefix}.weight"),
+        &[out_channels, in_channels, kernel_h, kernel_w],
+    )?;
+    let bias = load_tensor(tensors, &format!("{prefix}.bias"), &[out_channels])?;
+    Ok(Conv2d {
+        weight,
+        bias,
+        in_channels,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride,
+        padding,
+        workspace: RefCell::new(Vec::new()),
+        winograd_weight: RefCell::new(None),
+    })
+}
+
+/// Load a [`ConvTranspose2d`] layer from safetensors.
+///
+/// Weight shape: `[in_ch, out_ch, kH, kW]` (note: transposed relative to Conv2d).
+pub fn load_conv_transpose2d<B: MathBackend>(
+    tensors: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    in_channels: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride: usize,
+    padding: usize,
+    output_padding: usize,
+) -> Result<ConvTranspose2d<B>> {
+    let weight = load_tensor(
+        tensors,
+        &format!("{prefix}.weight"),
+        &[in_channels, out_channels, kernel_h, kernel_w],
+    )?;
+    let bias = load_tensor(tensors, &format!("{prefix}.bias"), &[out_channels])?;
+    Ok(ConvTranspose2d {
+        weight,
+        bias,
+        in_channels,
+        out_channels,
+        kernel_h,
+        kernel_w,
+        stride,
+        padding,
+        output_padding,
+    })
+}
+
+/// Load a [`LayerNorm2d`] layer from safetensors.
+///
+/// Loads `{prefix}.weight` and `{prefix}.bias`, each `[num_channels]`.
+pub fn load_layernorm2d<B: MathBackend>(
+    tensors: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    num_channels: usize,
+    eps: f32,
+) -> Result<LayerNorm2d<B>> {
+    let shape = &[num_channels];
+    Ok(LayerNorm2d {
+        weight: load_tensor(tensors, &format!("{prefix}.weight"), shape)?,
+        bias: load_tensor(tensors, &format!("{prefix}.bias"), shape)?,
+        num_channels,
         eps,
     })
 }

@@ -17,6 +17,7 @@
 pub mod arcface;
 pub mod clip;
 pub mod resnet;
+pub mod sam;
 pub mod scrfd;
 pub mod vit;
 pub mod yolo;
@@ -24,6 +25,7 @@ pub mod yolo;
 pub use arcface::ArcFaceEmbedder;
 pub use clip::{ClipConfig, ClipEmbedder, ClipVisual};
 pub use resnet::{ResNet, ResNetClassifier, ResNetConfig};
+pub use sam::{Sam, SamConfig, SamImageEmbedding, SamOutput, SamSegmenter};
 pub use scrfd::ScrfdDetector;
 pub use vit::{Vit, VitConfig};
 pub use yolo::YoloDetector;

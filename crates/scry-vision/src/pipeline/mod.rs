@@ -19,8 +19,12 @@ pub use crate::postprocess::nms::{BBox, Detection};
 /// Segmentation prompt — how to specify what to segment.
 #[derive(Clone, Debug)]
 pub enum SegmentPrompt {
-    /// Segment at a specific point `(x, y)`.
+    /// Segment at a specific point `(x, y)` (assumed foreground).
     Point { x: f32, y: f32 },
+    /// Segment at a point with an explicit foreground/background label.
+    PointWithLabel { x: f32, y: f32, foreground: bool },
+    /// Multiple labeled points.
+    Points(Vec<(f32, f32, bool)>),
     /// Segment within a bounding box.
     Box(BBox),
 }
