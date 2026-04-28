@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" role="img">
+  <title>Browser Market Share</title>
+  <rect width="420" height="420" fill="white"/>
+  <rect x="0" y="0" width="420" height="420" fill="rgb(255,255,255)"/>
+  <path d="M224.455,66.015 A137.66,137.66 0 1 1 118.38614,291.4228 L224.455,203.675 Z" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M118.38614,291.4228 A137.66,137.66 0 0 1 87.066635,195.03125 L224.455,203.675 Z" fill="rgb(255,127,14)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M87.066635,195.03125 A137.66,137.66 0 0 1 118.386154,115.9272 L224.455,203.675 Z" fill="rgb(44,160,44)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M118.386154,115.9272 A137.66,137.66 0 0 1 173.77902,75.68195 L224.455,203.675 Z" fill="rgb(214,39,40)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M173.77902,75.68195 A137.66,137.66 0 0 1 224.455,66.015 L224.455,203.675 Z" fill="rgb(148,103,189)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <rect x="38.91" y="401.3" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="52.91" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Chrome</text>
+  <rect x="105.765" y="401.3" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="119.765" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Firefox</text>
+  <rect x="172.035" y="401.3" width="10" height="10" fill="rgb(44,160,44)" stroke="rgba(44,160,44,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="186.035" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Safari</text>
+  <rect x="232.455" y="401.3" width="10" height="10" fill="rgb(214,39,40)" stroke="rgba(214,39,40,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="246.455" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Edge</text>
+  <rect x="287.025" y="401.3" width="10" height="10" fill="rgb(148,103,189)" stroke="rgba(148,103,189,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="301.025" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Other</text>
+  <text x="210" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Browser Market Share</text>
+</svg>

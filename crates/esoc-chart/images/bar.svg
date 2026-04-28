@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Developer Satisfaction</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
+  <line x1="57.795" y1="328.15" x2="550" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="57.795" y1="268.84" x2="550" y2="268.84" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="57.795" y1="209.53" x2="550" y2="209.53" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="57.795" y1="150.22" x2="550" y2="150.22" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="57.795" y1="90.909996" x2="550" y2="90.909996" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="57.795" y1="31.6" x2="550" y2="31.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="67.6391" y="55.323997" width="78.75281" height="272.826" fill="rgb(31,119,180)"/>
+  <rect x="166.08011" y="70.15148" width="78.75281" height="257.9985" fill="rgb(255,127,14)"/>
+  <rect x="264.52112" y="93.875496" width="78.75281" height="234.27449" fill="rgb(44,160,44)"/>
+  <rect x="362.9621" y="111.668495" width="78.75281" height="216.48149" fill="rgb(214,39,40)"/>
+  <rect x="461.40308" y="126.495995" width="78.75281" height="201.65399" fill="rgb(148,103,189)"/>
+  <line x1="57.795" y1="31.6" x2="57.795" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="57.795" y1="328.15" x2="550" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="107.0155" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Rust</text>
+  <text x="205.45651" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Python</text>
+  <text x="303.89752" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Go</text>
+  <text x="402.3385" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">TypeScript</text>
+  <text x="500.77948" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Java</text>
+  <text x="53.114998" y="328.15" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="53.114998" y="268.84" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="53.114998" y="209.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">40</text>
+  <text x="53.114998" y="150.22" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">60</text>
+  <text x="53.114998" y="90.909996" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">80</text>
+  <text x="53.114998" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">100</text>
+  <text x="303.89752" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Language</text>
+  <text x="30.82" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,179.875)">Score (%)</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Developer Satisfaction</text>
+</svg>

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Signal + Trend</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
+  <line x1="53.7" y1="298.495" x2="550" y2="298.495" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="239.185" x2="550" y2="239.185" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="179.875" x2="550" y2="179.875" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="120.564995" x2="550" y2="120.564995" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="61.254997" x2="550" y2="61.254997" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="124.600006" y1="31.6" x2="124.600006" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="195.5" y1="31.6" x2="195.5" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="266.4" y1="31.6" x2="266.4" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="337.30002" y1="31.6" x2="337.30002" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="408.2" y1="31.6" x2="408.2" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="479.1" y1="31.6" x2="479.1" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="550" y1="31.6" x2="550" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <polyline points="124.600006,298.495 131.69,281.35574 138.78,264.57858 145.87,248.51631 152.96,233.50351 160.05,219.8479 167.14,207.82263 174.23,197.65906 181.32,189.54112 188.41,183.6004 195.5,179.91293 202.59,178.49715 209.68,179.31345 216.77,182.26523 223.86,187.20134 230.95,193.91992 238.04,202.17358 245.12999,211.67577 252.22,222.10793 259.31,233.12784 266.4,244.37827 273.49,255.496 280.58,266.1213 287.67,275.907 294.76,284.52737 301.85,291.68643 308.94,297.12552 316.03,300.63 323.12003,302.03452 330.21,301.2275 337.30002,298.15378 344.39,292.81613 351.48,285.27512 358.57,275.64767 365.66,264.10397 372.75,250.86313 379.84003,236.18764 386.93,220.37662 394.02002,203.75827 401.11,186.68129 408.2,169.50621 415.29,152.596 422.38,136.30687 429.47,120.97921 436.56,106.92881 443.65,94.438835 450.74002,83.75259 457.83,75.06728 464.92,68.529076 472.00998,64.22921" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="53.7" y1="328.15" x2="550" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="53.7" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">-2</text>
+  <text x="124.600006" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="195.5" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">2</text>
+  <text x="266.4" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">4</text>
+  <text x="337.30002" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">6</text>
+  <text x="408.2" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">8</text>
+  <text x="479.1" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="550" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">12</text>
+  <text x="49.02" y="298.495" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.02" y="239.185" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2</text>
+  <text x="49.02" y="179.875" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">4</text>
+  <text x="49.02" y="120.564995" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">6</text>
+  <text x="49.02" y="61.254997" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">8</text>
+  <text x="301.85" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Time (s)</text>
+  <text x="36.670002" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,36.670002,179.875)">Amplitude</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Signal + Trend</text>
+</svg>

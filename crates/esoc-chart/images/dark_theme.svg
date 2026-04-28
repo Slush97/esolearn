@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Model Training</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(30,30,46)"/>
+  <line x1="0.0000657177" y1="379.99994" x2="559.99994" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="325.71423" x2="559.99994" y2="325.71423" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="271.42853" x2="559.99994" y2="271.42853" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="217.14284" x2="559.99994" y2="217.14284" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="162.85713" x2="559.99994" y2="162.85713" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="108.57144" x2="559.99994" y2="108.57144" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="54.285736" x2="559.99994" y2="54.285736" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="0.000030136109" x2="559.99994" y2="0.000030136109" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="0.0000657177" y1="0.000030136109" x2="0.0000657177" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="80.00005" y1="0.000030136109" x2="80.00005" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="160.00003" y1="0.000030136109" x2="160.00003" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="240.00002" y1="0.000030136109" x2="240.00002" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="320" y1="0.000030136109" x2="320" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="399.99997" y1="0.000030136109" x2="399.99997" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="479.99997" y1="0.000030136109" x2="479.99997" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="559.99994" y1="0.000030136109" x2="559.99994" y2="379.99994" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <polyline points="96.00005,33.717407 112.000046,76.0441 128.00003,111.87286 144.00003,142.20126 160.00003,167.8737 176.00003,189.60498 192.00003,208.00008 208.00002,223.5712 224.00002,236.75186 240.00002,247.90906 256,257.35342 272,265.3479 288,272.11508 304,277.84338 320,282.6923 336,286.79678 352,290.27115 368,293.2122 384,295.7017 399.99997,297.809 415.99997,299.5928 431.99997,301.10278 447.99997,302.38092 463.99997,303.46286 479.99997,304.3787" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <polyline points="96.00005,307.0176 112.000046,291.7101 128.00003,279.1774 144.00003,268.91647 160.00003,260.51553 176.00003,253.63742 192.00003,248.0061 208.00002,243.39558 224.00002,239.6208 240.00002,236.53027 256,233.99997 272,231.92831 288,230.2322 304,228.84354 320,227.70657 336,226.77573 352,226.01363 368,225.38966 384,224.87878 399.99997,224.46053 415.99997,224.11809 431.99997,223.83772 447.99997,223.60818 463.99997,223.42024 479.99997,223.26637" fill="none" stroke="rgb(255,127,14)" stroke-width="2"/>
+  <line x1="0.0000657177" y1="0.000030136109" x2="0.0000657177" y2="379.99994" stroke="rgb(205,214,244)" stroke-width="1"/>
+  <line x1="0.0000657177" y1="379.99994" x2="559.99994" y2="379.99994" stroke="rgb(205,214,244)" stroke-width="1"/>
+  <text x="0.0000657177" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">-5</text>
+  <text x="80.00005" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">0</text>
+  <text x="160.00003" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">5</text>
+  <text x="240.00002" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">10</text>
+  <text x="320" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">15</text>
+  <text x="399.99997" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">20</text>
+  <text x="479.99997" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">25</text>
+  <text x="559.99994" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">30</text>
+  <text x="-4.679934" y="379.99994" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">-0.50</text>
+  <text x="-4.679934" y="325.71423" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0</text>
+  <text x="-4.679934" y="271.42853" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0.50</text>
+  <text x="-4.679934" y="217.14284" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1</text>
+  <text x="-4.679934" y="162.85713" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1.5</text>
+  <text x="-4.679934" y="108.57144" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2</text>
+  <text x="-4.679934" y="54.285736" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2.5</text>
+  <text x="-4.679934" y="0.000030136109" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">3</text>
+  <text x="280" y="420.29993" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle">Epoch</text>
+  <text x="-38.089935" y="189.99998" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle" transform="rotate(-90,-38.089935,189.99998)">Value</text>
+  <rect x="577.99994" y="5.00003" width="12" height="12" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="593.99994" y="15.200031" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Loss</text>
+  <rect x="577.99994" y="22.55003" width="12" height="12" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="593.99994" y="32.75003" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Accuracy</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(205,214,244)" font-weight="bold" text-anchor="middle">Model Training</text>
+</svg>

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Feature Distribution</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
+  <line x1="53.7" y1="328.15" x2="550" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="278.72498" x2="550" y2="278.72498" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="229.29999" x2="550" y2="229.29999" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="179.875" x2="550" y2="179.875" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="130.45" x2="550" y2="130.45" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="81.025" x2="550" y2="81.025" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="550" y2="31.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="84.3441" y="323.2075" width="16.507889" height="4.942505" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="101.18889" y="328.15" width="16.507889" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="118.033676" y="328.15" width="16.507889" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="134.87845" y="323.2075" width="16.507889" height="4.942505" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="151.72324" y="313.32248" width="16.507889" height="14.827515" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="168.56802" y="268.84" width="16.507889" height="59.309998" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="185.4128" y="273.7825" width="16.507889" height="54.367493" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="202.25758" y="224.3575" width="16.507889" height="103.792496" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="219.10237" y="209.53" width="16.507889" height="118.619995" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="235.94716" y="90.909996" width="16.507889" height="237.23999" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="252.79195" y="115.622505" width="16.507889" height="212.52748" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="269.63672" y="41.48501" width="16.507889" height="286.66498" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="286.4815" y="51.369987" width="16.507889" height="276.78" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="303.32632" y="71.14001" width="16.507889" height="257.00998" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="320.17108" y="140.335" width="16.507889" height="187.81499" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="337.01587" y="140.335" width="16.507889" height="187.81499" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="353.86066" y="165.0475" width="16.507889" height="163.1025" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="370.7054" y="209.53" width="16.507889" height="118.619995" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="387.5502" y="229.29999" width="16.507889" height="98.850006" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="404.395" y="283.66748" width="16.507889" height="44.4825" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="421.23978" y="313.32248" width="16.507889" height="14.827515" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="438.08456" y="323.2075" width="16.507889" height="4.942505" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="454.92935" y="313.32248" width="16.507889" height="14.827515" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="471.77414" y="328.15" width="16.507889" height="0" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <rect x="488.61893" y="323.2075" width="16.507889" height="4.942505" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="53.7" y1="328.15" x2="550" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="53.7" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">4</text>
+  <text x="136.41667" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">6</text>
+  <text x="219.13333" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">8</text>
+  <text x="301.85" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="384.56668" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">12</text>
+  <text x="467.28333" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">14</text>
+  <text x="550" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">16</text>
+  <text x="49.02" y="328.15" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.02" y="278.72498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
+  <text x="49.02" y="229.29999" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="49.02" y="179.875" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">30</text>
+  <text x="49.02" y="130.45" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">40</text>
+  <text x="49.02" y="81.025" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">50</text>
+  <text x="49.02" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">60</text>
+  <text x="301.85" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Value</text>
+  <text x="30.82" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,179.875)">Count</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Feature Distribution</text>
+</svg>

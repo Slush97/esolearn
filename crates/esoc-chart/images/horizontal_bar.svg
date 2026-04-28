@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Satisfaction Scores</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
+  <line x1="51.945" y1="298.495" x2="550" y2="298.495" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="51.945" y1="239.185" x2="550" y2="239.185" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="51.945" y1="179.875" x2="550" y2="179.875" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="51.945" y1="120.564995" x2="550" y2="120.564995" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="51.945" y1="61.254997" x2="550" y2="61.254997" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="51.945" y="274.771" width="458.2106" height="47.447998" fill="rgb(31,119,180)"/>
+  <rect x="51.945" y="215.461" width="433.30783" height="47.447998" fill="rgb(255,127,14)"/>
+  <rect x="51.945" y="156.151" width="393.46344" height="47.447998" fill="rgb(44,160,44)"/>
+  <rect x="51.945" y="96.840996" width="363.58014" height="47.447998" fill="rgb(214,39,40)"/>
+  <rect x="51.945" y="37.531" width="338.6774" height="47.447998" fill="rgb(148,103,189)"/>
+  <line x1="51.945" y1="31.6" x2="51.945" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="51.945" y1="328.15" x2="550" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="51.945" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="151.556" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">20</text>
+  <text x="251.16699" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">40</text>
+  <text x="350.778" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">60</text>
+  <text x="450.389" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">80</text>
+  <text x="550" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">100</text>
+  <text x="47.265" y="298.495" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">Rust</text>
+  <text x="47.265" y="239.185" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">Python</text>
+  <text x="47.265" y="179.875" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">Go</text>
+  <text x="47.265" y="120.564995" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">TypeScript</text>
+  <text x="47.265" y="61.254997" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">Java</text>
+  <text x="300.9725" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Language</text>
+  <text x="-21.044998" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,-21.044998,179.875)">Score (%)</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Satisfaction Scores</text>
+</svg>

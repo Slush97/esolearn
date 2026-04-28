@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="380" viewBox="0 0 560 380" role="img">
+  <title>Daily Active Users</title>
+  <rect width="560" height="380" fill="white"/>
+  <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
+  <line x1="53.7" y1="328.15" x2="550" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="285.7857" x2="550" y2="285.7857" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="243.42142" x2="550" y2="243.42142" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="201.05714" x2="550" y2="201.05714" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="158.69286" x2="550" y2="158.69286" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="116.32856" x2="550" y2="116.32856" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="73.96429" x2="550" y2="73.96429" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="550" y2="31.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="115.7375" y1="31.6" x2="115.7375" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="177.775" y1="31.6" x2="177.775" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="239.81248" y1="31.6" x2="239.81248" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="301.85" y1="31.6" x2="301.85" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="363.8875" y1="31.6" x2="363.8875" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="425.925" y1="31.6" x2="425.925" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="487.9625" y1="31.6" x2="487.9625" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="550" y1="31.6" x2="550" y2="328.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <path d="M53.7,252.0613 L66.1075,221.38583 L78.515,170.53967 L90.9225,135.73514 L103.33,140.01527 L115.7375,92.55053 L128.145,81.19027 L140.55249,44.341576 L152.96,62.95498 L165.3675,51.424767 L177.775,58.54299 L190.1825,108.94866 L202.59,101.93482 L214.99748,152.34135 L227.40498,188.30109 L239.81248,232.27884 L252.22,261.61108 L264.6275,220.07489 L277.035,157.83798 L289.4425,126.304634 L301.85,108.63416 L314.2575,66.236046 L326.665,64.44845 L339.0725,54.254906 L351.48,56.043877 L363.8875,66.016594 L376.29498,80.77752 L388.7025,101.25913 L401.11,128.75475 L413.51752,182.71628 L425.925,201.99562 L438.3325,227.16742 L450.74002,224.15349 L463.1475,193.15932 L475.55502,144.05434 L487.9625,108.849724 L500.37,77.30938 L512.77747,67.80724 L525.185,44.82052 L537.59247,54.356834 L537.59247,328.15 L525.185,328.15 L512.77747,328.15 L500.37,328.15 L487.9625,328.15 L475.55502,328.15 L463.1475,328.15 L450.74002,328.15 L438.3325,328.15 L425.925,328.15 L413.51752,328.15 L401.11,328.15 L388.7025,328.15 L376.29498,328.15 L363.8875,328.15 L351.48,328.15 L339.0725,328.15 L326.665,328.15 L314.2575,328.15 L301.85,328.15 L289.4425,328.15 L277.035,328.15 L264.6275,328.15 L252.22,328.15 L239.81248,328.15 L227.40498,328.15 L214.99748,328.15 L202.59,328.15 L190.1825,328.15 L177.775,328.15 L165.3675,328.15 L152.96,328.15 L140.55249,328.15 L128.145,328.15 L115.7375,328.15 L103.33,328.15 L90.9225,328.15 L78.515,328.15 L66.1075,328.15 L53.7,328.15Z" fill="rgba(31,119,180,0.500)"/>
+  <polyline points="53.7,252.0613 66.1075,221.38583 78.515,170.53967 90.9225,135.73514 103.33,140.01527 115.7375,92.55053 128.145,81.19027 140.55249,44.341576 152.96,62.95498 165.3675,51.424767 177.775,58.54299 190.1825,108.94866 202.59,101.93482 214.99748,152.34135 227.40498,188.30109 239.81248,232.27884 252.22,261.61108 264.6275,220.07489 277.035,157.83798 289.4425,126.304634 301.85,108.63416 314.2575,66.236046 326.665,64.44845 339.0725,54.254906 351.48,56.043877 363.8875,66.016594 376.29498,80.77752 388.7025,101.25913 401.11,128.75475 413.51752,182.71628 425.925,201.99562 438.3325,227.16742 450.74002,224.15349 463.1475,193.15932 475.55502,144.05434 487.9625,108.849724 500.37,77.30938 512.77747,67.80724 525.185,44.82052 537.59247,54.356834" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="53.7" y1="328.15" x2="550" y2="328.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="53.7" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="115.7375" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">5</text>
+  <text x="177.775" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="239.81248" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">15</text>
+  <text x="301.85" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">20</text>
+  <text x="363.8875" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">25</text>
+  <text x="425.925" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">30</text>
+  <text x="487.9625" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">35</text>
+  <text x="550" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">40</text>
+  <text x="49.02" y="328.15" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.02" y="285.7857" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">5</text>
+  <text x="49.02" y="243.42142" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
+  <text x="49.02" y="201.05714" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">15</text>
+  <text x="49.02" y="158.69286" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="49.02" y="116.32856" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">25</text>
+  <text x="49.02" y="73.96429" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">30</text>
+  <text x="49.02" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">35</text>
+  <text x="301.85" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Day</text>
+  <text x="30.82" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,179.875)">Users (k)</text>
+  <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Daily Active Users</text>
+</svg>

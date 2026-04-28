@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="420" viewBox="0 0 420 420" role="img">
+  <title>Test Suite Results</title>
+  <rect width="420" height="420" fill="white"/>
+  <rect x="0" y="0" width="420" height="420" fill="rgb(255,255,255)"/>
+  <path d="M224.455,66.015 A137.66,137.66 0 1 1 89.23334,229.46994 L156.84418,216.57248 A68.83,68.83 0 1 0 224.455,134.845 Z" fill="rgb(31,119,180)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M89.23334,229.46994 A137.66,137.66 0 0 1 143.54047,92.30574 L183.99773,147.99037 A68.83,68.83 0 0 0 156.84418,216.57248 Z" fill="rgb(255,127,14)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <path d="M143.54047,92.30574 A137.66,137.66 0 0 1 224.455,66.015 L224.455,134.845 A68.83,68.83 0 0 0 183.99773,147.99037 Z" fill="rgb(44,160,44)" stroke="rgb(255,255,255)" stroke-width="1.5"/>
+  <rect x="38.91" y="401.3" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="52.91" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Pass</text>
+  <rect x="93.479996" y="401.3" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="107.479996" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Warn</text>
+  <rect x="147.465" y="401.3" width="10" height="10" fill="rgb(44,160,44)" stroke="rgba(44,160,44,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="161.465" y="409.8" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Fail</text>
+  <text x="210" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Test Suite Results</text>
+</svg>
