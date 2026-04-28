@@ -124,18 +124,38 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     };
 
     // ── Left margin — measure actual Y tick labels ──
-    let preliminary_plot_h = chart.height - top - 50.0; // rough bottom estimate
-    let y_tick_count = target_tick_count(preliminary_plot_h.max(100.0), 40.0);
-    let y_scale = Scale::Linear {
-        domain: (data_bounds.y_min, data_bounds.y_max),
-        range: (preliminary_plot_h.max(100.0), 0.0),
-    }
-    .nice(y_tick_count);
-    let y_ticks = y_scale.ticks(y_tick_count);
-    let max_y_label_width = y_ticks
+    // For horizontal bar charts (CoordSystem::Flipped + Bar with categories),
+    // the y-axis renders the category strings rather than numeric ticks, so
+    // measure those instead to size the left margin correctly.
+    let is_flipped_bar_with_cats = matches!(
+        chart.coord,
+        crate::grammar::coord::CoordSystem::Flipped
+    ) && chart
+        .layers
         .iter()
-        .map(|&t| estimate_text_width(&y_scale.format_tick(t), chart.theme.tick_font_size))
-        .fold(0.0_f32, f32::max);
+        .any(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar) && l.categories.is_some());
+    let max_y_label_width = if is_flipped_bar_with_cats {
+        chart
+            .layers
+            .iter()
+            .filter_map(|l| l.categories.as_ref())
+            .flat_map(|cats| cats.iter())
+            .map(|c| estimate_text_width(c, chart.theme.tick_font_size))
+            .fold(0.0_f32, f32::max)
+    } else {
+        let preliminary_plot_h = chart.height - top - 50.0; // rough bottom estimate
+        let y_tick_count = target_tick_count(preliminary_plot_h.max(100.0), 40.0);
+        let y_scale = Scale::Linear {
+            domain: (data_bounds.y_min, data_bounds.y_max),
+            range: (preliminary_plot_h.max(100.0), 0.0),
+        }
+        .nice(y_tick_count);
+        let y_ticks = y_scale.ticks(y_tick_count);
+        y_ticks
+            .iter()
+            .map(|&t| estimate_text_width(&y_scale.format_tick(t), chart.theme.tick_font_size))
+            .fold(0.0_f32, f32::max)
+    };
 
     let tick_mark_size = 5.0;
     let tick_label_pad = 2.0;
@@ -189,19 +209,38 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         LegendPlacement::Right
     };
 
+    // Reserve right-margin space for HLine annotation labels (rendered at
+    // `plot_edge + 3` with anchor=start) so they don't overflow the canvas.
+    let annotation_label_extra = chart
+        .annotations
+        .iter()
+        .filter_map(|a| match a {
+            crate::grammar::annotation::Annotation::HLine {
+                label: Some(t), ..
+            } => Some(3.0 + estimate_text_width(t, chart.theme.tick_font_size) + 4.0),
+            _ => None,
+        })
+        .fold(0.0_f32, f32::max);
+
     let (right, bottom_legend_extra) = if is_heatmap {
         // Colorbar: gap (10px) + bar (20px) + tick marks (4px) + gap (6px) + label width (~40px)
-        (80.0, 0.0)
+        (80.0_f32.max(annotation_label_extra), 0.0)
     } else if has_legend && legend_placement == LegendPlacement::Right {
-        // Collect unique legend labels from categories and layer labels
+        // Collect unique legend labels from categories and layer labels.
+        // Must match legend_gen: legend_x = plot_edge + 18, then swatch (12),
+        // then 4px gap, then label. Add ~6px buffer for text-width estimation
+        // error so labels never clip on the right edge.
         let all_labels = collect_legend_labels(chart);
         let max_label_width = all_labels
             .iter()
             .map(|c| estimate_text_width(c, chart.theme.legend_font_size))
             .fold(0.0_f32, f32::max);
+        let legend_offset = 18.0;
         let swatch = 12.0;
-        let gaps = 20.0;
-        ((swatch + gaps + max_label_width).max(80.0), 0.0)
+        let swatch_text_gap = 4.0;
+        let buffer = 6.0;
+        let needed = legend_offset + swatch + swatch_text_gap + max_label_width + buffer;
+        (needed.max(80.0).max(annotation_label_extra), 0.0)
     } else if has_legend && legend_placement == LegendPlacement::Bottom {
         // Bottom legend: minimal right margin, add to bottom
         let all_labels = collect_legend_labels(chart);
@@ -226,9 +265,9 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
             }
         }
         let legend_h = rows as f32 * line_height + 8.0; // 8px gap above legend
-        (10.0, legend_h)
+        (10.0_f32.max(annotation_label_extra), legend_h)
     } else {
-        (10.0, 0.0)
+        (10.0_f32.max(annotation_label_extra), 0.0)
     };
 
     Margins {
@@ -276,43 +315,6 @@ fn collect_legend_entry_count(chart: &Chart) -> usize {
 }
 
 /// Validate that the plot area occupies a reasonable fraction of the chart.
-/// Clamps margins if the plot area would be squeezed below 65% of chart area.
-pub fn validate_plot_ratio(margins: &mut super::Margins, chart_width: f32, chart_height: f32) {
-    let plot_w = chart_width - margins.left - margins.right;
-    let plot_h = chart_height - margins.top - margins.bottom;
-    let plot_area = plot_w * plot_h;
-    let chart_area = chart_width * chart_height;
-
-    if chart_area > 0.0 && plot_area / chart_area < 0.65 {
-        // Proportionally shrink all margins to bring plot area to ~65%
-        let target_ratio = 0.65_f32;
-        let total_h_margin = margins.left + margins.right;
-        let total_v_margin = margins.top + margins.bottom;
-        // Scale margins down uniformly: find the largest s in [0,1] such that
-        // (W - h*s)(H - v*s) / (W*H) >= target. Ratio decreases monotonically as
-        // s grows, so lo always satisfies the constraint and hi may violate it.
-        let scale = {
-            let mut lo = 0.0_f32;
-            let mut hi = 1.0_f32;
-            for _ in 0..20 {
-                let mid = (lo + hi) * 0.5;
-                let pw = chart_width - total_h_margin * mid;
-                let ph = chart_height - total_v_margin * mid;
-                if pw * ph / chart_area >= target_ratio {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            lo
-        };
-        margins.left *= scale;
-        margins.right *= scale;
-        margins.top *= scale;
-        margins.bottom *= scale;
-    }
-}
-
 /// Wrap text at word boundaries, returning at most `max_lines` lines.
 /// Adds ellipsis if text would require more lines than allowed.
 pub fn wrap_text(text: &str, max_chars: usize, max_lines: usize) -> Vec<String> {

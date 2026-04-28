@@ -2,40 +2,40 @@
   <title>Treatment Comparison</title>
   <rect width="560" height="380" fill="white"/>
   <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
-  <line x1="36.72865" y1="289.45102" x2="553.1604" y2="289.45102" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="36.72865" y1="229.93149" x2="553.1604" y2="229.93149" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="36.72865" y1="170.41196" x2="553.1604" y2="170.41196" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="36.72865" y1="110.89243" x2="553.1604" y2="110.89243" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="36.72865" y1="51.372902" x2="553.1604" y2="51.372902" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <rect x="71.15743" y="105.93807" width="103.286354" height="37.80681" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
-  <line x1="122.80061" y1="143.74487" x2="122.80061" y2="193.72629" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="96.97902" y1="193.72629" x2="148.6222" y2="193.72629" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="122.80061" y1="105.93807" x2="122.80061" y2="73.44779" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="96.97902" y1="73.44779" x2="148.6222" y2="73.44779" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <rect x="243.30136" y="84.68684" width="103.286354" height="45.709015" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
-  <line x1="294.94452" y1="130.39584" x2="294.94452" y2="161.81625" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="269.12292" y1="161.81625" x2="320.7661" y2="161.81625" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="294.94452" y1="84.68684" x2="294.94452" y2="34.632835" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="269.12292" y1="34.632835" x2="320.7661" y2="34.632835" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <rect x="415.44525" y="58.8675" width="103.286354" height="30.176392" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
-  <line x1="467.08844" y1="89.04389" x2="467.08844" y2="121.49" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="441.26685" y1="121.49" x2="492.91003" y2="121.49" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="467.08844" y1="58.8675" x2="467.08844" y2="28.522833" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="441.26685" y1="28.522833" x2="492.91003" y2="28.522833" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="71.15743" y1="119.76661" x2="174.44379" y2="119.76661" stroke="rgb(51,51,51)" stroke-width="1.5"/>
-  <line x1="243.30136" y1="107.60613" x2="346.5877" y2="107.60613" stroke="rgb(51,51,51)" stroke-width="1.5"/>
-  <line x1="415.44525" y1="75.23681" x2="518.7316" y2="75.23681" stroke="rgb(51,51,51)" stroke-width="1.5"/>
-  <line x1="36.72865" y1="21.613134" x2="36.72865" y2="289.45102" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="36.72865" y1="289.45102" x2="553.1604" y2="289.45102" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <text x="122.80061" y="305.83102" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Control</text>
-  <text x="294.94452" y="305.83102" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Treatment A</text>
-  <text x="467.08844" y="305.83102" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Treatment B</text>
-  <text x="32.04865" y="289.45102" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
-  <text x="32.04865" y="229.93149" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
-  <text x="32.04865" y="170.41196" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">40</text>
-  <text x="32.04865" y="110.89243" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">60</text>
-  <text x="32.04865" y="51.372902" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">80</text>
-  <text x="294.94452" y="329.75104" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Group</text>
-  <text x="13.848648" y="155.53207" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,13.848648,155.53207)">Response</text>
+  <line x1="53.7" y1="247.6107" x2="550" y2="247.6107" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="199.60832" x2="550" y2="199.60832" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="151.60594" x2="550" y2="151.60594" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="103.60355" x2="550" y2="103.60355" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="55.60119" x2="550" y2="55.60119" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="86.78667" y="99.60789" width="99.26" height="30.491104" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
+  <line x1="136.41667" y1="130.099" x2="136.41667" y2="170.4089" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="111.60167" y1="170.4089" x2="161.23167" y2="170.4089" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="136.41667" y1="99.60789" x2="136.41667" y2="73.40453" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="111.60167" y1="73.40453" x2="161.23167" y2="73.40453" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <rect x="252.21999" y="82.4688" width="99.26" height="36.864227" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
+  <line x1="301.85" y1="119.33303" x2="301.85" y2="144.67354" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="277.035" y1="144.67354" x2="326.665" y2="144.67354" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="301.85" y1="82.4688" x2="301.85" y2="42.100365" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="277.035" y1="42.100365" x2="326.665" y2="42.100365" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <rect x="417.65332" y="61.645576" width="99.26" height="24.337189" fill="rgba(31,119,180,0.600)" stroke="rgb(31,119,180)" stroke-width="1.5"/>
+  <line x1="467.28333" y1="85.982765" x2="467.28333" y2="112.150475" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="442.46832" y1="112.150475" x2="492.09833" y2="112.150475" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="467.28333" y1="61.645576" x2="467.28333" y2="37.172646" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="442.46832" y1="37.172646" x2="492.09833" y2="37.172646" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="86.78667" y1="110.76057" x2="186.04666" y2="110.76057" stroke="rgb(51,51,51)" stroke-width="1.5"/>
+  <line x1="252.21999" y1="100.95316" x2="351.48" y2="100.95316" stroke="rgb(51,51,51)" stroke-width="1.5"/>
+  <line x1="417.65332" y1="74.847374" x2="516.9133" y2="74.847374" stroke="rgb(51,51,51)" stroke-width="1.5"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="247.6107" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="53.7" y1="247.6107" x2="550" y2="247.6107" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="136.41667" y="263.9907" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Control</text>
+  <text x="301.85" y="263.9907" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Treatment A</text>
+  <text x="467.28333" y="263.9907" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Treatment B</text>
+  <text x="49.02" y="247.6107" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.02" y="199.60832" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="49.02" y="151.60594" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">40</text>
+  <text x="49.02" y="103.60355" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">60</text>
+  <text x="49.02" y="55.60119" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">80</text>
+  <text x="301.85" y="287.9107" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Group</text>
+  <text x="30.82" y="139.60535" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,139.60535)">Response</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Treatment Comparison</text>
 </svg>

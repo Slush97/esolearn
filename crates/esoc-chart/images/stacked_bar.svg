@@ -2,41 +2,41 @@
   <title>Revenue by Segment</title>
   <rect width="560" height="380" fill="white"/>
   <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
-  <line x1="50.838104" y1="306.72498" x2="550.53296" y2="306.72498" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="267.18082" x2="550.53296" y2="267.18082" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="227.63667" x2="550.53296" y2="227.63667" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="188.09253" x2="550.53296" y2="188.09253" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="148.54837" x2="550.53296" y2="148.54837" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="109.00421" x2="550.53296" y2="109.00421" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="69.46007" x2="550.53296" y2="69.46007" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="50.838104" y1="29.915905" x2="550.53296" y2="29.915905" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <rect x="63.330475" y="227.63667" width="99.938965" height="79.08832" fill="rgb(31,119,180)"/>
-  <rect x="188.25418" y="188.09253" width="99.938965" height="118.63246" fill="rgb(31,119,180)"/>
-  <rect x="313.1779" y="148.54837" width="99.938965" height="158.17662" fill="rgb(31,119,180)"/>
-  <rect x="438.1016" y="164.36603" width="99.938965" height="142.35896" fill="rgb(31,119,180)"/>
-  <rect x="63.330475" y="188.09253" width="99.938965" height="39.544144" fill="rgb(255,127,14)"/>
-  <rect x="188.25418" y="124.82187" width="99.938965" height="63.27066" fill="rgb(255,127,14)"/>
-  <rect x="313.1779" y="53.64239" width="99.938965" height="94.905975" fill="rgb(255,127,14)"/>
-  <rect x="438.1016" y="85.277725" width="99.938965" height="79.0883" fill="rgb(255,127,14)"/>
-  <line x1="50.838104" y1="29.915905" x2="50.838104" y2="306.72498" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="50.838104" y1="306.72498" x2="550.53296" y2="306.72498" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <text x="113.29996" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q1</text>
-  <text x="238.22366" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q2</text>
-  <text x="363.14737" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q3</text>
-  <text x="488.07108" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q4</text>
-  <text x="46.158104" y="306.72498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
-  <text x="46.158104" y="267.18082" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">5</text>
-  <text x="46.158104" y="227.63667" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
-  <text x="46.158104" y="188.09253" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">15</text>
-  <text x="46.158104" y="148.54837" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
-  <text x="46.158104" y="109.00421" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">25</text>
-  <text x="46.158104" y="69.46007" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">30</text>
-  <text x="46.158104" y="29.915905" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">35</text>
-  <text x="300.68552" y="347.02496" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Quarter</text>
-  <text x="27.958103" y="168.32045" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,27.958103,168.32045)">Revenue ($M)</text>
-  <rect x="50.838104" y="332.27496" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="64.838104" y="340.77496" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Product</text>
-  <rect x="119.448105" y="332.27496" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="133.4481" y="340.77496" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Service</text>
+  <line x1="53.7" y1="302.6" x2="550" y2="302.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="263.8857" x2="550" y2="263.8857" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="225.17143" x2="550" y2="225.17143" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="186.45715" x2="550" y2="186.45715" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="147.74286" x2="550" y2="147.74286" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="109.02857" x2="550" y2="109.02857" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="70.31428" x2="550" y2="70.31428" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="53.7" y1="31.6" x2="550" y2="31.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="66.1075" y="225.17143" width="99.259995" height="77.42857" fill="rgb(31,119,180)"/>
+  <rect x="190.18248" y="186.45715" width="99.259995" height="116.14285" fill="rgb(31,119,180)"/>
+  <rect x="314.2575" y="147.74286" width="99.259995" height="154.85715" fill="rgb(31,119,180)"/>
+  <rect x="438.3325" y="163.22858" width="99.259995" height="139.37143" fill="rgb(31,119,180)"/>
+  <rect x="66.1075" y="186.45715" width="99.259995" height="38.71428" fill="rgb(255,127,14)"/>
+  <rect x="190.18248" y="124.514275" width="99.259995" height="61.94287" fill="rgb(255,127,14)"/>
+  <rect x="314.2575" y="54.828575" width="99.259995" height="92.914276" fill="rgb(255,127,14)"/>
+  <rect x="438.3325" y="85.799995" width="99.259995" height="77.42857" fill="rgb(255,127,14)"/>
+  <line x1="53.7" y1="31.6" x2="53.7" y2="302.6" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="53.7" y1="302.6" x2="550" y2="302.6" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="115.7375" y="318.98" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q1</text>
+  <text x="239.81248" y="318.98" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q2</text>
+  <text x="363.8875" y="318.98" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q3</text>
+  <text x="487.9625" y="318.98" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q4</text>
+  <text x="49.02" y="302.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.02" y="263.8857" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">5</text>
+  <text x="49.02" y="225.17143" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
+  <text x="49.02" y="186.45715" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">15</text>
+  <text x="49.02" y="147.74286" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="49.02" y="109.02857" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">25</text>
+  <text x="49.02" y="70.31428" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">30</text>
+  <text x="49.02" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">35</text>
+  <text x="301.85" y="342.90002" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Quarter</text>
+  <text x="30.82" y="167.1" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,167.1)">Revenue ($M)</text>
+  <rect x="53.7" y="328.15" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="67.7" y="336.65" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Product</text>
+  <rect x="122.31" y="328.15" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="136.31" y="336.65" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Service</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Revenue by Segment</text>
 </svg>

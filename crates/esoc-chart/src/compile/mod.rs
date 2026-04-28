@@ -286,9 +286,7 @@ pub fn compile_chart(chart: &Chart) -> Result<SceneGraph> {
     }
 
     // Compute margins for axes/title (needs data_bounds for tick label measurement)
-    let mut margins = layout::compute_margins(chart, &data_bounds);
-    // Validate plot area ratio: clamp margins if plot area is squeezed below 65%
-    layout::validate_plot_ratio(&mut margins, chart.width, chart.height);
+    let margins = layout::compute_margins(chart, &data_bounds);
 
     let plot_x = margins.left;
     let plot_y = margins.top;

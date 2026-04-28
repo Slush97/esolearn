@@ -2,47 +2,47 @@
   <title>Model Training</title>
   <rect width="560" height="380" fill="white"/>
   <rect x="0" y="0" width="560" height="380" fill="rgb(30,30,46)"/>
-  <line x1="54.94532" y1="338.65747" x2="496.2121" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="293.8773" x2="496.2121" y2="293.8773" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="249.0971" x2="496.2121" y2="249.0971" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="204.31694" x2="496.2121" y2="204.31694" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="159.53676" x2="496.2121" y2="159.53676" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="114.75658" x2="496.2121" y2="114.75658" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="69.97641" x2="496.2121" y2="69.97641" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="25.196228" x2="496.2121" y2="25.196228" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="54.94532" y1="25.196228" x2="54.94532" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="117.98344" y1="25.196228" x2="117.98344" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="181.02155" y1="25.196228" x2="181.02155" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="244.05966" y1="25.196228" x2="244.05966" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="307.09778" y1="25.196228" x2="307.09778" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="370.1359" y1="25.196228" x2="370.1359" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="433.17398" y1="25.196228" x2="433.17398" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <line x1="496.2121" y1="25.196228" x2="496.2121" y2="338.65747" stroke="rgb(58,58,74)" stroke-width="0.5"/>
-  <polyline points="130.59106,53.009644 143.19867,87.92485 155.8063,117.479935 168.41393,142.49777 181.02155,163.67493 193.62918,181.601 206.23679,196.7751 218.84442,209.61969 231.45203,220.4924 244.05966,229.69594 256.66727,237.48657 269.2749,244.0812 281.88254,249.66345 294.49017,254.3887 307.09778,258.38855 319.70538,261.77435 332.31302,264.64038 344.92062,267.0664 357.52826,269.12 370.1359,270.8583 382.7435,272.32977 395.35114,273.57535 407.95874,274.6297 420.56638,275.52216 433.17398,276.27765" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
-  <polyline points="130.59106,278.45447 143.19867,265.82733 155.8063,255.48914 168.41393,247.02492 181.02155,240.095 193.62918,234.42126 206.23679,229.776 218.84442,225.97278 231.45203,222.85898 244.05966,220.3096 256.66727,218.22235 269.2749,216.51346 281.88254,215.11432 294.49017,213.96881 307.09778,213.03094 319.70538,212.26309 332.31302,211.63443 344.92062,211.11972 357.52826,210.6983 370.1359,210.35329 382.7435,210.07082 395.35114,209.83954 407.95874,209.65019 420.56638,209.49516 433.17398,209.36824" fill="none" stroke="rgb(255,127,14)" stroke-width="2"/>
-  <line x1="54.94532" y1="25.196228" x2="54.94532" y2="338.65747" stroke="rgb(205,214,244)" stroke-width="1"/>
-  <line x1="54.94532" y1="338.65747" x2="496.2121" y2="338.65747" stroke="rgb(205,214,244)" stroke-width="1"/>
-  <text x="54.94532" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">-5</text>
-  <text x="117.98344" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">0</text>
-  <text x="181.02155" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">5</text>
-  <text x="244.05966" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">10</text>
-  <text x="307.09778" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">15</text>
-  <text x="370.1359" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">20</text>
-  <text x="433.17398" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">25</text>
-  <text x="496.2121" y="355.03748" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">30</text>
-  <text x="50.26532" y="338.65747" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">-0.50</text>
-  <text x="50.26532" y="293.8773" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0</text>
-  <text x="50.26532" y="249.0971" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0.50</text>
-  <text x="50.26532" y="204.31694" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1</text>
-  <text x="50.26532" y="159.53676" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1.5</text>
-  <text x="50.26532" y="114.75658" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2</text>
-  <text x="50.26532" y="69.97641" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2.5</text>
-  <text x="50.26532" y="25.196228" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">3</text>
-  <text x="275.5787" y="378.95746" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle">Epoch</text>
-  <text x="16.85532" y="181.92685" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle" transform="rotate(-90,16.85532,181.92685)">Value</text>
-  <rect x="514.2121" y="30.196228" width="12" height="12" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="530.2121" y="40.39623" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Loss</text>
-  <rect x="514.2121" y="47.746227" width="12" height="12" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="530.2121" y="57.946228" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Accuracy</text>
+  <line x1="68.91" y1="328.15" x2="473.785" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="285.7857" x2="473.785" y2="285.7857" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="243.42142" x2="473.785" y2="243.42142" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="201.05714" x2="473.785" y2="201.05714" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="158.69286" x2="473.785" y2="158.69286" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="116.32856" x2="473.785" y2="116.32856" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="73.96429" x2="473.785" y2="73.96429" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="31.6" x2="473.785" y2="31.6" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="68.91" y1="31.6" x2="68.91" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="126.74929" y1="31.6" x2="126.74929" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="184.58858" y1="31.6" x2="184.58858" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="242.42786" y1="31.6" x2="242.42786" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="300.26715" y1="31.6" x2="300.26715" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="358.10645" y1="31.6" x2="358.10645" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="415.9457" y1="31.6" x2="415.9457" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <line x1="473.785" y1="31.6" x2="473.785" y2="328.15" stroke="rgb(58,58,74)" stroke-width="0.5"/>
+  <polyline points="138.31714,57.912865 149.88501,90.944405 161.45285,118.90499 173.02072,142.57312 184.58858,162.60777 196.15643,179.56674 207.72429,193.92218 219.29214,206.0738 230.86,216.35992 242.42786,225.06694 253.99571,232.43729 265.56357,238.67612 277.13144,243.9572 288.69928,248.42755 300.26715,252.2116 311.83502,255.41473 323.40286,258.12613 334.97073,260.42126 346.53857,262.36404 358.10645,264.0086 369.6743,265.40067 381.24216,266.57904 392.81,267.5765 404.37787,268.42084 415.9457,269.13556" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <polyline points="138.31714,271.19495 149.88501,259.24905 161.45285,249.4686 173.02072,241.46103 184.58858,234.90497 196.15643,229.53734 207.72429,225.14268 219.29214,221.54465 230.86,218.59885 242.42786,216.187 253.99571,214.21236 265.56357,212.59566 277.13144,211.272 288.69928,210.1883 300.26715,209.30103 311.83502,208.57462 323.40286,207.97986 334.97073,207.49292 346.53857,207.09424 358.10645,206.76782 369.6743,206.5006 381.24216,206.2818 392.81,206.10266 404.37787,205.956 415.9457,205.83592" fill="none" stroke="rgb(255,127,14)" stroke-width="2"/>
+  <line x1="68.91" y1="31.6" x2="68.91" y2="328.15" stroke="rgb(205,214,244)" stroke-width="1"/>
+  <line x1="68.91" y1="328.15" x2="473.785" y2="328.15" stroke="rgb(205,214,244)" stroke-width="1"/>
+  <text x="68.91" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">-5</text>
+  <text x="126.74929" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">0</text>
+  <text x="184.58858" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">5</text>
+  <text x="242.42786" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">10</text>
+  <text x="300.26715" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">15</text>
+  <text x="358.10645" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">20</text>
+  <text x="415.9457" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">25</text>
+  <text x="473.785" y="344.53" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="middle">30</text>
+  <text x="64.23" y="328.15" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">-0.50</text>
+  <text x="64.23" y="285.7857" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0</text>
+  <text x="64.23" y="243.42142" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">0.50</text>
+  <text x="64.23" y="201.05714" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1</text>
+  <text x="64.23" y="158.69286" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">1.5</text>
+  <text x="64.23" y="116.32856" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2</text>
+  <text x="64.23" y="73.96429" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">2.5</text>
+  <text x="64.23" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)" text-anchor="end">3</text>
+  <text x="271.3475" y="368.45" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle">Epoch</text>
+  <text x="30.820004" y="179.875" font-family="sans-serif" font-size="13" fill="rgb(205,214,244)" text-anchor="middle" transform="rotate(-90,30.820004,179.875)">Value</text>
+  <rect x="491.785" y="36.6" width="12" height="12" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="507.785" y="46.8" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Loss</text>
+  <rect x="491.785" y="54.149998" width="12" height="12" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="507.785" y="64.35" font-family="sans-serif" font-size="11.7" fill="rgb(205,214,244)">Accuracy</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(205,214,244)" font-weight="bold" text-anchor="middle">Model Training</text>
 </svg>
