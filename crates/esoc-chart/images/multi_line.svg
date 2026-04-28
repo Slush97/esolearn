@@ -2,45 +2,35 @@
   <title>Training Curves</title>
   <rect width="560" height="380" fill="white"/>
   <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
-  <line x1="0.0000657177" y1="354.6666" x2="559.99994" y2="354.6666" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="291.33328" x2="559.99994" y2="291.33328" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="227.99997" x2="559.99994" y2="227.99997" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="164.66666" x2="559.99994" y2="164.66666" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="101.33334" x2="559.99994" y2="101.33334" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="38.00003" x2="559.99994" y2="38.00003" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.0000657177" y1="0.000030136109" x2="0.0000657177" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="70.00005" y1="0.000030136109" x2="70.00005" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="140.00003" y1="0.000030136109" x2="140.00003" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="210.00002" y1="0.000030136109" x2="210.00002" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="280" y1="0.000030136109" x2="280" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="350" y1="0.000030136109" x2="350" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="419.99997" y1="0.000030136109" x2="419.99997" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="489.99994" y1="0.000030136109" x2="489.99994" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="559.99994" y1="0.000030136109" x2="559.99994" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <polyline points="84.00005,62.542664 98.000046,95.37976 112.000046,124.3584 126.00004,149.93195 140.00003,172.50053 154.00003,192.41725 168.00003,209.99367 182.00002,225.50482 196.00002,239.19336 210.00002,251.27345 224.00002,261.93408 238.00002,271.34207 252,279.6446 266,286.97153 280,293.43756 293.99997,299.14377 308,304.17953 321.99997,308.62354 336,312.54538 350,316.00638 363.99997,319.0607 378,321.75613 391.99997,324.13483 406,326.23404 419.99997,328.08658 433.99994,329.72147 447.99997,331.1642 461.99994,332.43744 475.99997,333.56107 489.99994,334.55267" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
-  <polyline points="84.00005,29.923706 98.000046,63.81433 112.000046,98.84329 126.00004,105.58499 140.00003,122.921875 154.00003,139.6881 168.00003,167.79625 182.00002,183.26682 196.00002,200.76286 210.00002,211.85521 224.00002,218.51482 238.00002,225.23918 252,234.6514 266,252.95062 280,250.18861 293.99997,256.46817 308,260.68985 321.99997,272.07816 336,282.06625 350,273.1955 363.99997,285.28494 378,291.8818 391.99997,291.48343 406,299.84772 419.99997,298.6592 433.99994,308.72684 447.99997,310.06638 461.99994,310.33038 475.99997,302.15738 489.99994,315.4045" fill="none" stroke="rgb(255,127,14)" stroke-width="2"/>
-  <line x1="0.0000657177" y1="0.000030136109" x2="0.0000657177" y2="379.99994" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="0.0000657177" y1="379.99994" x2="559.99994" y2="379.99994" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <text x="0.0000657177" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">-5</text>
-  <text x="70.00005" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
-  <text x="140.00003" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">5</text>
-  <text x="210.00002" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
-  <text x="280" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">15</text>
-  <text x="350" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">20</text>
-  <text x="419.99997" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">25</text>
-  <text x="489.99994" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">30</text>
-  <text x="559.99994" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">35</text>
-  <text x="-4.679934" y="354.6666" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
-  <text x="-4.679934" y="291.33328" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.50</text>
-  <text x="-4.679934" y="227.99997" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">1</text>
-  <text x="-4.679934" y="164.66666" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">1.5</text>
-  <text x="-4.679934" y="101.33334" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2</text>
-  <text x="-4.679934" y="38.00003" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2.5</text>
-  <text x="280" y="420.29993" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Epoch</text>
-  <text x="-32.239933" y="189.99998" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,-32.239933,189.99998)">Loss</text>
-  <rect x="577.99994" y="5.00003" width="12" height="12" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="593.99994" y="15.200031" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Train</text>
-  <rect x="577.99994" y="22.55003" width="12" height="12" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="593.99994" y="32.75003" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Validation</text>
+  <line x1="54.353992" y1="318.15723" x2="494.6151" y2="318.15723" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="54.353992" y1="265.79437" x2="494.6151" y2="265.79437" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="54.353992" y1="213.43147" x2="494.6151" y2="213.43147" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="54.353992" y1="161.06857" x2="494.6151" y2="161.06857" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="54.353992" y1="108.70569" x2="494.6151" y2="108.70569" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="54.353992" y1="56.34282" x2="494.6151" y2="56.34282" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="109.38663" y1="24.925064" x2="109.38663" y2="339.10242" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="219.4519" y1="24.925064" x2="219.4519" y2="339.10242" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="329.5172" y1="24.925064" x2="329.5172" y2="339.10242" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="439.58246" y1="24.925064" x2="439.58246" y2="339.10242" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <polyline points="120.39316,76.63423 131.39969,103.78337 142.40622,127.7424 153.41273,148.88617 164.41927,167.54549 175.4258,184.01228 186.43233,198.54417 197.43884,211.36852 208.44537,222.68596 219.4519,232.67357 230.45844,241.48761 241.46497,249.26598 252.47148,256.13034 263.47803,262.18814 274.48456,267.53412 285.49106,272.25195 296.49762,276.4154 307.50412,280.08963 318.51068,283.33215 329.5172,286.1936 340.5237,288.71887 351.53024,290.94745 362.53677,292.91412 373.5433,294.64972 384.54984,296.18134 395.55637,297.53302 406.5629,298.7259 417.56943,299.77856 428.57596,300.70752 439.58246,301.5274" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <polyline points="120.39316,49.66542 131.39969,77.68562 142.40622,106.64696 153.41273,112.22087 164.41927,126.5547 175.4258,140.41673 186.43233,163.65607 197.43884,176.44687 208.44537,190.9123 219.4519,200.08325 230.45844,205.5893 241.46497,211.14888 252.47148,218.93076 263.47803,234.06023 274.48456,231.77664 285.49106,236.96846 296.49762,240.45888 307.50412,249.87456 318.51068,258.1325 329.5172,250.79834 340.5237,260.7937 351.53024,266.24786 362.53677,265.9185 373.5433,272.83392 384.54984,271.85132 395.55637,280.17505 406.5629,281.28253 417.56943,281.5008 428.57596,274.74353 439.58246,285.69604" fill="none" stroke="rgb(255,127,14)" stroke-width="2"/>
+  <line x1="54.353992" y1="24.925064" x2="54.353992" y2="339.10242" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="54.353992" y1="339.10242" x2="494.6151" y2="339.10242" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="109.38663" y="355.48242" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="219.4519" y="355.48242" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="329.5172" y="355.48242" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">20</text>
+  <text x="439.58246" y="355.48242" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">30</text>
+  <text x="49.673992" y="318.15723" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="49.673992" y="265.79437" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.50</text>
+  <text x="49.673992" y="213.43147" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">1</text>
+  <text x="49.673992" y="161.06857" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">1.5</text>
+  <text x="49.673992" y="108.70569" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2</text>
+  <text x="49.673992" y="56.34282" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2.5</text>
+  <text x="274.48456" y="379.4024" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Epoch</text>
+  <text x="22.11399" y="182.01373" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,22.11399,182.01373)">Loss</text>
+  <rect x="512.6151" y="29.925064" width="12" height="12" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="528.6151" y="40.125065" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Train</text>
+  <rect x="512.6151" y="47.475063" width="12" height="12" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="528.6151" y="57.675064" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">Validation</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Training Curves</text>
 </svg>

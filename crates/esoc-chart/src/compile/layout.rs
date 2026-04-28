@@ -288,10 +288,10 @@ pub fn validate_plot_ratio(margins: &mut super::Margins, chart_width: f32, chart
         let target_ratio = 0.65_f32;
         let total_h_margin = margins.left + margins.right;
         let total_v_margin = margins.top + margins.bottom;
-        // Scale margins down uniformly
+        // Scale margins down uniformly: find the largest s in [0,1] such that
+        // (W - h*s)(H - v*s) / (W*H) >= target. Ratio decreases monotonically as
+        // s grows, so lo always satisfies the constraint and hi may violate it.
         let scale = {
-            // We need: (W - h*s)(H - v*s) / (W*H) >= target
-            // Binary search for the right scale factor
             let mut lo = 0.0_f32;
             let mut hi = 1.0_f32;
             for _ in 0..20 {
@@ -299,12 +299,12 @@ pub fn validate_plot_ratio(margins: &mut super::Margins, chart_width: f32, chart
                 let pw = chart_width - total_h_margin * mid;
                 let ph = chart_height - total_v_margin * mid;
                 if pw * ph / chart_area >= target_ratio {
-                    hi = mid;
-                } else {
                     lo = mid;
+                } else {
+                    hi = mid;
                 }
             }
-            hi
+            lo
         };
         margins.left *= scale;
         margins.right *= scale;

@@ -2,55 +2,37 @@
   <title>Quarterly Revenue</title>
   <rect width="560" height="380" fill="white"/>
   <rect x="0" y="0" width="560" height="380" fill="rgb(255,255,255)"/>
-  <line x1="0.00005121231" y1="379.99994" x2="560" y2="379.99994" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="352.8571" x2="560" y2="352.8571" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="325.71423" x2="560" y2="325.71423" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="298.57138" x2="560" y2="298.57138" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="271.42853" x2="560" y2="271.42853" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="244.28569" x2="560" y2="244.28569" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="217.14284" x2="560" y2="217.14284" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="189.99998" x2="560" y2="189.99998" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="162.85713" x2="560" y2="162.85713" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="135.71428" x2="560" y2="135.71428" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="108.57144" x2="560" y2="108.57144" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="81.42859" x2="560" y2="81.42859" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="54.285736" x2="560" y2="54.285736" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="27.142883" x2="560" y2="27.142883" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <line x1="0.00005121231" y1="0.000030136109" x2="560" y2="0.000030136109" stroke="rgb(224,224,224)" stroke-width="0.5"/>
-  <rect x="67.20005" y="217.14284" width="44.799995" height="162.8571" fill="rgb(31,119,180)"/>
-  <rect x="179.20004" y="135.71428" width="44.799995" height="244.28566" fill="rgb(31,119,180)"/>
-  <rect x="291.20004" y="81.42859" width="44.799995" height="298.57135" fill="rgb(31,119,180)"/>
-  <rect x="403.2" y="176.42856" width="44.799995" height="203.57138" fill="rgb(31,119,180)"/>
-  <rect x="112.00004" y="189.99998" width="44.799995" height="189.99995" fill="rgb(255,127,14)"/>
-  <rect x="224.00003" y="108.57144" width="44.799995" height="271.4285" fill="rgb(255,127,14)"/>
-  <rect x="336.00003" y="0.000030136109" width="44.799995" height="379.9999" fill="rgb(255,127,14)"/>
-  <rect x="448" y="122.14285" width="44.799995" height="257.8571" fill="rgb(255,127,14)"/>
-  <line x1="0.00005121231" y1="0.000030136109" x2="0.00005121231" y2="379.99994" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <line x1="0.00005121231" y1="379.99994" x2="560" y2="379.99994" stroke="rgb(51,51,51)" stroke-width="1"/>
-  <text x="112.000046" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q1</text>
-  <text x="224.00003" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q2</text>
-  <text x="336.00003" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q3</text>
-  <text x="448.00003" y="396.37994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q4</text>
-  <text x="-4.679949" y="379.99994" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
-  <text x="-4.679949" y="352.8571" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">2</text>
-  <text x="-4.679949" y="325.71423" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">4</text>
-  <text x="-4.679949" y="298.57138" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">6</text>
-  <text x="-4.679949" y="271.42853" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">8</text>
-  <text x="-4.679949" y="244.28569" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
-  <text x="-4.679949" y="217.14284" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">12</text>
-  <text x="-4.679949" y="189.99998" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">14</text>
-  <text x="-4.679949" y="162.85713" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">16</text>
-  <text x="-4.679949" y="135.71428" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">18</text>
-  <text x="-4.679949" y="108.57144" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
-  <text x="-4.679949" y="81.42859" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">22</text>
-  <text x="-4.679949" y="54.285736" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">24</text>
-  <text x="-4.679949" y="27.142883" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">26</text>
-  <text x="-4.679949" y="0.000030136109" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">28</text>
-  <text x="280.00003" y="420.29993" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Quarter</text>
-  <text x="-22.879948" y="189.99998" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,-22.879948,189.99998)">Revenue ($M)</text>
-  <rect x="0.00005121231" y="405.54993" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="14.0000515" y="414.04993" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2024</text>
-  <rect x="53.40005" y="405.54993" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="67.400055" y="414.04993" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2025</text>
+  <line x1="50.838104" y1="306.72498" x2="550.53296" y2="306.72498" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="50.838104" y1="257.2948" x2="550.53296" y2="257.2948" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="50.838104" y1="207.86461" x2="550.53296" y2="207.86461" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="50.838104" y1="158.43442" x2="550.53296" y2="158.43442" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="50.838104" y1="109.00421" x2="550.53296" y2="109.00421" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="50.838104" y1="59.574017" x2="550.53296" y2="59.574017" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <rect x="110.80148" y="188.09253" width="39.975586" height="118.63246" fill="rgb(31,119,180)"/>
+  <rect x="210.74045" y="128.77629" width="39.975586" height="177.9487" fill="rgb(31,119,180)"/>
+  <rect x="310.6794" y="89.23215" width="39.975586" height="217.49284" fill="rgb(31,119,180)"/>
+  <rect x="410.61838" y="158.43442" width="39.975586" height="148.29057" fill="rgb(31,119,180)"/>
+  <rect x="150.77707" y="168.32045" width="39.975586" height="138.40454" fill="rgb(255,127,14)"/>
+  <rect x="250.71603" y="109.00421" width="39.975586" height="197.72078" fill="rgb(255,127,14)"/>
+  <rect x="350.655" y="29.915905" width="39.975586" height="276.80908" fill="rgb(255,127,14)"/>
+  <rect x="450.59396" y="118.89026" width="39.975586" height="187.83473" fill="rgb(255,127,14)"/>
+  <line x1="50.838104" y1="29.915905" x2="50.838104" y2="306.72498" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="50.838104" y1="306.72498" x2="550.53296" y2="306.72498" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="150.77707" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q1</text>
+  <text x="250.71603" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q2</text>
+  <text x="350.655" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q3</text>
+  <text x="450.59396" y="323.10498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">Q4</text>
+  <text x="46.158104" y="306.72498" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="46.158104" y="257.2948" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">5</text>
+  <text x="46.158104" y="207.86461" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">10</text>
+  <text x="46.158104" y="158.43442" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">15</text>
+  <text x="46.158104" y="109.00421" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">20</text>
+  <text x="46.158104" y="59.574017" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">25</text>
+  <text x="300.68552" y="347.02496" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Quarter</text>
+  <text x="27.958103" y="168.32045" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,27.958103,168.32045)">Revenue ($M)</text>
+  <rect x="50.838104" y="332.27496" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="64.838104" y="340.77496" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2024</text>
+  <rect x="104.238106" y="332.27496" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="118.238106" y="340.77496" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2025</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Quarterly Revenue</text>
 </svg>
