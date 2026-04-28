@@ -327,6 +327,11 @@ pub fn generate_legends(
 }
 
 /// Render legends horizontally below the plot area.
+///
+/// `axis_skirt_offset` is the vertical distance from `plot_y + plot_h` to the
+/// bottom of any x-axis tick labels and axis title that already render below
+/// the plot — the legend starts a small gap beyond that to avoid overlapping
+/// with the axis label.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_legends_bottom(
     scene: &mut SceneGraph,
@@ -336,6 +341,7 @@ pub fn generate_legends_bottom(
     plot_y: f32,
     plot_w: f32,
     plot_h: f32,
+    axis_skirt_offset: f32,
     theme: &NewTheme,
 ) {
     let swatch_size = 10.0_f32;
@@ -343,8 +349,8 @@ pub fn generate_legends_bottom(
     let entry_gap = 16.0_f32;
     let available_w = plot_w;
 
-    // Start below the plot area with a gap
-    let legend_y_start = plot_y + plot_h + line_height + 8.0;
+    // Start below the x-axis label area with a small gap.
+    let legend_y_start = plot_y + plot_h + axis_skirt_offset + 8.0;
     let mut y = legend_y_start;
     let mut x = plot_x;
 

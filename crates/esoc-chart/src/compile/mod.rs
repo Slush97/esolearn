@@ -535,11 +535,12 @@ fn compile_single_panel(
             chart, scene, root, plot_id, resolved, plot_x, plot_y, plot_w, plot_h,
         );
     } else if !is_pie && !is_treemap {
-        let (x_label, y_label) = if is_flipped {
-            (chart.y_label.as_deref(), chart.x_label.as_deref())
-        } else {
-            (chart.x_label.as_deref(), chart.y_label.as_deref())
-        };
+        // x_label always labels the bottom (horizontal) axis and y_label the
+        // left (vertical) axis, regardless of coord flip — matches matplotlib
+        // / plotly convention so .x_label("Score") / .y_label("Language") on
+        // a flipped (horizontal) bar chart still places "Score" on the bottom.
+        let x_label = chart.x_label.as_deref();
+        let y_label = chart.y_label.as_deref();
 
         // Determine grid axes based on mark types
         let all_bar = resolved
@@ -616,8 +617,25 @@ fn compile_single_panel(
     if !legends.is_empty() {
         match legend_placement {
             layout::LegendPlacement::Bottom => {
+                // Mirror axis_gen's x-label vertical placement so the legend
+                // starts below any rendered x-axis title rather than inside it.
+                let title_gap = theme.label_font_size * 1.2;
+                let descender = theme.label_font_size * 0.35;
+                let axis_skirt_offset = if chart.x_label.is_some() {
+                    theme.tick_font_size + theme.label_font_size + title_gap + descender
+                } else {
+                    theme.tick_font_size + 4.0
+                };
                 legend_gen::generate_legends_bottom(
-                    scene, root, &legends, plot_x, plot_y, plot_w, plot_h, theme,
+                    scene,
+                    root,
+                    &legends,
+                    plot_x,
+                    plot_y,
+                    plot_w,
+                    plot_h,
+                    axis_skirt_offset,
+                    theme,
                 );
             }
             _ => {

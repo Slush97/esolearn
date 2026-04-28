@@ -30,9 +30,9 @@
   <text x="49.02" y="60.63572" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">25</text>
   <text x="301.85" y="342.90002" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">Quarter</text>
   <text x="30.82" y="167.1" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,167.1)">Revenue ($M)</text>
-  <rect x="53.7" y="328.15" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="67.7" y="336.65" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2024</text>
-  <rect x="107.100006" y="328.15" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
-  <text x="121.100006" y="336.65" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2025</text>
+  <rect x="53.7" y="355.45" width="10" height="10" fill="rgb(31,119,180)" stroke="rgba(31,119,180,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="67.7" y="363.95" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2024</text>
+  <rect x="107.100006" y="355.45" width="10" height="10" fill="rgb(255,127,14)" stroke="rgba(255,127,14,0.600)" stroke-width="1.5" rx="2"/>
+  <text x="121.100006" y="363.95" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)">2025</text>
   <text x="280" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Quarterly Revenue</text>
 </svg>

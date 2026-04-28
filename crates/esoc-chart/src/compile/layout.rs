@@ -77,16 +77,24 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         .any(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar));
     let rotated_label_extra = if has_bar {
         if let Some(cats) = chart.layers.iter().find_map(|l| l.categories.as_ref()) {
-            // Estimate whether labels will need rotation by checking if they
-            // fit horizontally in the available plot width
+            // Categories may repeat (per-point labels for boxplot, group repeats
+            // for grouped/stacked bars). The x-axis only renders unique values,
+            // so dedup before estimating fit — otherwise we falsely conclude
+            // labels need rotation and inflate the bottom margin.
+            let mut unique: Vec<&String> = Vec::new();
+            for c in cats {
+                if !unique.iter().any(|u| u.as_str() == c.as_str()) {
+                    unique.push(c);
+                }
+            }
             let plot_w_approx = chart.width * 0.7; // rough estimate after margins
-            let total_label_w: f32 = cats
+            let total_label_w: f32 = unique
                 .iter()
                 .map(|c| estimate_text_width(c, chart.theme.tick_font_size) + 4.0)
                 .sum();
             if total_label_w > plot_w_approx {
                 // Labels will be rotated — add extra bottom space
-                let max_label_len = cats.iter().map(|c| c.len()).max().unwrap_or(0);
+                let max_label_len = unique.iter().map(|c| c.len()).max().unwrap_or(0);
                 let max_w = max_label_len as f32 * chart.theme.tick_font_size * 0.6;
                 let rotated_h = max_w * 0.71 * 1.5; // 1.5× for descenders + baseline
                 (rotated_h - chart.theme.tick_font_size).max(0.0) + 10.0

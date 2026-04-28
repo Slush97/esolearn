@@ -875,6 +875,19 @@ fn generate_heatmap(
     // Cell value annotations
     if layer.annotate_cells {
         let font_size = (cell_h * 0.35).min(cell_w * 0.35).max(8.0);
+        // Pick a decimal precision wide enough to distinguish small values.
+        // Confusion-matrix style data lives in [0, 1] with values like 0.02
+        // or 0.08 that round to "0.0" at one decimal — show enough digits
+        // to keep them legible.
+        let cell_decimals = if v_max.abs().max(v_min.abs()) < 0.1 {
+            3
+        } else if v_max.abs().max(v_min.abs()) < 10.0 {
+            2
+        } else if v_max.abs().max(v_min.abs()) < 100.0 {
+            1
+        } else {
+            0
+        };
         for (r, row) in data.iter().enumerate() {
             for (c, &val) in row.iter().enumerate() {
                 let t = ((val - v_min) / v_range) as f32;
@@ -884,11 +897,10 @@ fn generate_heatmap(
                 let cx = (c as f32 + 0.5) * cell_w;
                 let cy = (r as f32 + 0.5) * cell_h;
 
-                // Format: integer if whole number, else 1 decimal
                 let text = if (val - val.round()).abs() < 1e-9 {
                     format!("{}", val as i64)
                 } else {
-                    format!("{val:.1}")
+                    format!("{val:.*}", cell_decimals)
                 };
 
                 let text_node = Node::with_mark(Mark::Text(TextMark {
