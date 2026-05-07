@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "examples/chart_audit"]
+members = ["crates/*", "examples/chart_audit", "examples/sklearn_intro"]
 exclude = ["crates/scry-app", "crates/scry-stt"]
 
 [workspace.package]

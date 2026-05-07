@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" role="img">
+  <title>KNN validation accuracy — digits (best k = 1)</title>
+  <rect width="800" height="600" fill="white"/>
+  <rect x="0" y="0" width="800" height="600" fill="rgb(255,255,255)"/>
+  <line x1="63.059998" y1="522.3225" x2="790" y2="522.3225" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="470.66754" x2="790" y2="470.66754" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="419.01254" x2="790" y2="419.01254" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="367.35754" x2="790" y2="367.35754" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="315.70255" x2="790" y2="315.70255" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="264.04752" x2="790" y2="264.04752" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="212.39255" x2="790" y2="212.39255" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="160.73752" x2="790" y2="160.73752" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="109.08248" x2="790" y2="109.08248" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="57.427513" x2="790" y2="57.427513" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="63.059998" y1="31.6" x2="63.059998" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="129.14545" y1="31.6" x2="129.14545" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="195.23091" y1="31.6" x2="195.23091" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="261.31635" y1="31.6" x2="261.31635" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="327.40182" y1="31.6" x2="327.40182" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="393.48727" y1="31.6" x2="393.48727" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="459.57272" y1="31.6" x2="459.57272" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="525.6582" y1="31.6" x2="525.6582" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="591.74365" y1="31.6" x2="591.74365" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="657.8291" y1="31.6" x2="657.8291" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="723.91455" y1="31.6" x2="723.91455" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="790" y1="31.6" x2="790" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <polyline points="129.14545,59.728386 195.23091,404.86206 261.31635,174.77295 327.40182,519.9066 393.48727,174.77295 459.57272,404.86206 525.6582,289.8175 591.74365,519.9066 657.8291,404.86206 723.91455,519.9066" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <line x1="63.059998" y1="31.6" x2="63.059998" y2="548.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="63.059998" y1="548.15" x2="790" y2="548.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="63.059998" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="129.14545" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">1</text>
+  <text x="195.23091" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">2</text>
+  <text x="261.31635" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">3</text>
+  <text x="327.40182" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">4</text>
+  <text x="393.48727" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">5</text>
+  <text x="459.57272" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">6</text>
+  <text x="525.6582" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">7</text>
+  <text x="591.74365" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">8</text>
+  <text x="657.8291" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">9</text>
+  <text x="723.91455" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="790" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">11</text>
+  <text x="58.379997" y="522.3225" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.97</text>
+  <text x="58.379997" y="470.66754" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.97</text>
+  <text x="58.379997" y="419.01254" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.97</text>
+  <text x="58.379997" y="367.35754" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.97</text>
+  <text x="58.379997" y="315.70255" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.97</text>
+  <text x="58.379997" y="264.04752" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.98</text>
+  <text x="58.379997" y="212.39255" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.98</text>
+  <text x="58.379997" y="160.73752" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.98</text>
+  <text x="58.379997" y="109.08248" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.98</text>
+  <text x="58.379997" y="57.427513" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0.98</text>
+  <text x="426.53" y="588.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">n_neighbors</text>
+  <text x="30.82" y="289.87503" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,289.87503)">accuracy</text>
+  <text x="400" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">KNN validation accuracy — digits (best k = 1)</text>
+</svg>

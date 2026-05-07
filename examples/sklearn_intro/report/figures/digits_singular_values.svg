@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" role="img">
+  <title>Singular values — digits dataset</title>
+  <rect width="800" height="600" fill="white"/>
+  <rect x="0" y="0" width="800" height="600" fill="rgb(255,255,255)"/>
+  <line x1="59.55" y1="548.15" x2="790" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="508.41544" x2="790" y2="508.41544" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="468.68082" x2="790" y2="468.68082" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="428.9462" x2="790" y2="428.9462" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="389.21158" x2="790" y2="389.21158" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="349.47696" x2="790" y2="349.47696" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="309.74234" x2="790" y2="309.74234" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="270.00772" x2="790" y2="270.00772" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="230.2731" x2="790" y2="230.2731" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="190.53848" x2="790" y2="190.53848" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="150.80386" x2="790" y2="150.80386" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="111.06924" x2="790" y2="111.06924" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="71.33462" x2="790" y2="71.33462" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="59.55" y1="31.6" x2="790" y2="31.6" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="108.24667" y1="31.6" x2="108.24667" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="205.64001" y1="31.6" x2="205.64001" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="303.03333" y1="31.6" x2="303.03333" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="400.42667" y1="31.6" x2="400.42667" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="497.82" y1="31.6" x2="497.82" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="595.2133" y1="31.6" x2="595.2133" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="692.6067" y1="31.6" x2="692.6067" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <line x1="790" y1="31.6" x2="790" y2="548.15" stroke="rgb(224,224,224)" stroke-width="0.5"/>
+  <polyline points="108.24667,57.819633 117.986,77.492 127.72533,107.389336 137.46468,169.78296 147.204,227.6228 156.94334,249.48846 166.68266,265.8264 176.422,284.97946 186.16133,294.58774 195.90067,303.5247 205.64001,328.5616 215.37935,332.3793 225.11868,350.80353 234.858,352.894 244.59734,366.97903 254.33669,369.77277 264.076,374.32867 273.81534,377.95993 283.55466,390.61557 293.294,397.29257 303.03333,398.28345 312.77267,404.16116 322.512,406.11716 332.2513,409.13327 341.99066,411.006 351.73,418.26166 361.46933,419.8229 371.20868,424.6044 380.948,426.71487 390.68735,431.94333 400.42667,437.04175 410.166,439.01102 419.90533,440.66028 429.64465,441.53674 439.38397,443.577 449.12335,445.12454 458.86267,449.2661 468.602,452.69003 478.3413,453.36264 488.08066,454.72278 497.82,457.52878 507.55933,461.9045 517.2987,463.01608 527.038,464.63388 536.77734,468.53848 546.51666,470.13116 556.25604,472.1593 565.99536,475.9158 575.7347,480.8515 585.474,484.93536 595.2133,491.49722 604.95264,497.81058 614.692,499.95343 624.43134,500.11536 634.17065,501.70792 643.91003,504.2975 653.64935,505.31537 663.3887,506.3881 673.128,507.2119 682.8674,507.54938 692.6067,507.73166 702.346,508.41544 712.0853,508.41544 721.8247,508.41544" fill="none" stroke="rgb(31,119,180)" stroke-width="2"/>
+  <line x1="59.55" y1="31.6" x2="59.55" y2="548.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <line x1="59.55" y1="548.15" x2="790" y2="548.15" stroke="rgb(51,51,51)" stroke-width="1"/>
+  <text x="108.24667" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">0</text>
+  <text x="205.64001" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">10</text>
+  <text x="303.03333" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">20</text>
+  <text x="400.42667" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">30</text>
+  <text x="497.82" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">40</text>
+  <text x="595.2133" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">50</text>
+  <text x="692.6067" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">60</text>
+  <text x="790" y="564.53" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="middle">70</text>
+  <text x="54.87" y="548.15" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">-50</text>
+  <text x="54.87" y="508.41544" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">0</text>
+  <text x="54.87" y="468.68082" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">50</text>
+  <text x="54.87" y="428.9462" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">100</text>
+  <text x="54.87" y="389.21158" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">150</text>
+  <text x="54.87" y="349.47696" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">200</text>
+  <text x="54.87" y="309.74234" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">250</text>
+  <text x="54.87" y="270.00772" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">300</text>
+  <text x="54.87" y="230.2731" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">350</text>
+  <text x="54.87" y="190.53848" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">400</text>
+  <text x="54.87" y="150.80386" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">450</text>
+  <text x="54.87" y="111.06924" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">500</text>
+  <text x="54.87" y="71.33462" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">550</text>
+  <text x="54.87" y="31.6" font-family="sans-serif" font-size="11.7" fill="rgb(51,51,51)" text-anchor="end">600</text>
+  <text x="424.775" y="588.45" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle">component index</text>
+  <text x="30.82" y="289.87503" font-family="sans-serif" font-size="13" fill="rgb(51,51,51)" text-anchor="middle" transform="rotate(-90,30.82,289.87503)">singular value</text>
+  <text x="400" y="19.6" font-family="sans-serif" font-size="15.6" fill="rgb(51,51,51)" font-weight="bold" text-anchor="middle">Singular values — digits dataset</text>
+</svg>
