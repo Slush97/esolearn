@@ -24,3 +24,7 @@
 # Generated chart outputs in repo root
 /*.svg
 /*.html
+
+# Local-only example workspaces
+/examples/bank_bi/
+/examples/bank_report/
