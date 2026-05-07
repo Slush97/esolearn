@@ -1,15 +1,19 @@
 [package]
 name = "esoc-scene"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "Arena scene graph with typed visual marks — shared IR between chart logic and rendering backends"
 license.workspace = true
+repository = "https://github.com/Slush97/esolearn"
+documentation = "https://docs.rs/esoc-scene"
+keywords = ["scene-graph", "visualization", "graphics", "charting", "arena"]
+categories = ["graphics", "visualization"]
+readme = "README.md"
 
 [dependencies]
-esoc-color = { path = "../esoc-color" }
+esoc-color = { version = "0.1.0", path = "../esoc-color" }
 
 [lints.rust]
 missing_docs = "warn"
