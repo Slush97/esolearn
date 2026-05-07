@@ -1115,7 +1115,7 @@ fn pairwise_euclidean_basic() {
     let expected = [0.0, 2.0, 2.0, 2.0, 0.0, 2.0];
 
     for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
-        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}",);
+        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}");
     }
 }
 
@@ -1159,7 +1159,7 @@ fn pairwise_euclidean_scaled() {
     ];
 
     for (i, (&g, &e)) in result.iter().zip(expected.iter()).enumerate() {
-        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}",);
+        assert!((g - e).abs() < 0.001, "dist[{i}] = {g}, expected {e}");
     }
 }
 

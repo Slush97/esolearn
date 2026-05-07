@@ -119,7 +119,7 @@ pub fn hough_circles(
             }
         }
     }
-    candidates.sort_by(|a, b| b.2.cmp(&a.2));
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.2));
 
     // Stage 2: For each candidate center, find the best radius
     let mut circles: Vec<HoughCircle> = Vec::new();
@@ -172,7 +172,7 @@ pub fn hough_circles(
         }
     }
 
-    circles.sort_by(|a, b| b.votes.cmp(&a.votes));
+    circles.sort_by_key(|c| std::cmp::Reverse(c.votes));
     Ok(circles)
 }
 

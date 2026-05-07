@@ -110,7 +110,7 @@ pub fn hough_lines(
     }
 
     // Sort by votes descending
-    lines.sort_by(|a, b| b.votes.cmp(&a.votes));
+    lines.sort_by_key(|l| std::cmp::Reverse(l.votes));
     Ok(lines)
 }
 

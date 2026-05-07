@@ -1112,7 +1112,7 @@ fn audit_dbscan_fairness() {
         }
 
         let avg_ms = total_ms / n_iters as f64;
-        println!("  {n:>8} {avg_ms:>12.2}ms {n_clusters:>14}",);
+        println!("  {n:>8} {avg_ms:>12.2}ms {n_clusters:>14}");
     }
 
     println!("\n  Note: DBSCAN uses KD-tree for Euclidean distance with ≤ 20 features.");
