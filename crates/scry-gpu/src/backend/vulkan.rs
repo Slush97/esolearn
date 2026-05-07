@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Vulkan compute backend via `ash`.
 //!
 //! Compute-only subset of Vulkan:

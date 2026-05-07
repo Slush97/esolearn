@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Backend abstraction layer.
 //!
 //! Each backend (Vulkan, Metal, ...) implements the [`Backend`] trait,

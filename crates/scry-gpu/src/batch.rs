@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Batched dispatch — multiple dispatches in a single GPU submission.
 //!
 //! A [`Batch`] records multiple kernel dispatches into one command buffer,
@@ -184,13 +185,9 @@ impl Batch {
     pub fn submit_async(self) -> Result<Ticket> {
         match self.inner {
             #[cfg(feature = "vulkan")]
-            BatchInner::Vulkan(vk_batch) => {
-                Ok(Ticket::new_vulkan(vk_batch.submit_async()?))
-            }
+            BatchInner::Vulkan(vk_batch) => Ok(Ticket::new_vulkan(vk_batch.submit_async()?)),
             #[cfg(feature = "cuda")]
-            BatchInner::Cuda(cuda_batch) => {
-                Ok(Ticket::new_cuda(cuda_batch.submit_async()?))
-            }
+            BatchInner::Cuda(cuda_batch) => Ok(Ticket::new_cuda(cuda_batch.submit_async()?)),
         }
     }
 }

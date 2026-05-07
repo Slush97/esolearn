@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! WGSL → SPIR-V compilation via naga.
 
 use crate::error::{GpuError, Result};

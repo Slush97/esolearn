@@ -1,14 +1,16 @@
 [package]
 name = "scry-gpu"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "Lightweight GPU compute — dispatch shaders without the graphics baggage"
 license.workspace = true
+repository = "https://github.com/Slush97/esolearn/tree/main/crates/scry-gpu"
+documentation = "https://docs.rs/scry-gpu"
 keywords = ["gpu", "compute", "vulkan", "gpgpu"]
 categories = ["graphics", "science", "concurrency"]
+readme = "README.md"
 
 [features]
 default = ["vulkan"]

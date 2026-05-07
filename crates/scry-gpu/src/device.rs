@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Device acquisition and the primary user-facing API.
 
 use crate::backend::{Backend, BackendBuffer, BackendKernel};

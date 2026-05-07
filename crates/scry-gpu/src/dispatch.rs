@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Shader dispatch configuration and execution.
 
 /// Configuration for a compute dispatch.

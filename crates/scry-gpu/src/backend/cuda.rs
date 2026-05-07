@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! CUDA compute backend via `cudarc`.
 //!
 //! Compute-only CUDA path:

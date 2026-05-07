@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! # scry-gpu
 //!
 //! Lightweight GPU compute for Rust — dispatch shaders without the graphics baggage.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Shared WGSL shader sources for reuse across crates.
 //!
 //! Each constant is a complete WGSL shader string ready to pass to
