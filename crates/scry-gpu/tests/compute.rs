@@ -689,8 +689,16 @@ fn subgroup_size_is_nonzero() {
 
 #[test]
 fn subgroup_reduction_sum() {
-    // Single-pass reduction using subgroupAdd.
-    // Each workgroup: subgroupAdd within warps → shared memory collect → subgroupAdd again.
+    // Workgroup reduction. Stage 1: subgroupAdd within each subgroup writes
+    // a partial sum to shared memory. Stage 2: thread 0 of the workgroup
+    // serially sums the partials.
+    //
+    // The actual subgroup width is derived from `subgroupAdd(1.0)` rather
+    // than the `subgroup_size` builtin. On Intel Arc / Mesa-ANV the builtin
+    // reports the maximum SIMD width (e.g. 32) while the driver may execute
+    // at a narrower width (SIMD16). RDNA wave32/wave64 switching has a
+    // similar pattern. Self-discovering the width keeps the kernel correct
+    // regardless of how the driver dispatches.
     let gpu = gpu();
 
     let shader = "\
@@ -702,32 +710,29 @@ var<workgroup> partials: array<f32, 32>;
 @compute @workgroup_size(256)
 fn main(
     @builtin(global_invocation_id) gid: vec3<u32>,
-    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(local_invocation_index) lidx: u32,
     @builtin(workgroup_id) wid: vec3<u32>,
-    @builtin(subgroup_invocation_id) lane: u32,
-    @builtin(subgroup_id) sg_id: u32,
-    @builtin(subgroup_size) sg_size: u32,
 ) {
-    // Load (0 for out-of-bounds threads)
-    let val = select(0.0, input[gid.x], gid.x < arrayLength(&input));
+    let actual_sg_size = u32(subgroupAdd(1.0));
 
-    // Warp-level reduction
+    let val = select(0.0, input[gid.x], gid.x < arrayLength(&input));
     let warp_sum = subgroupAdd(val);
 
-    // Lane 0 of each subgroup writes its partial sum to shared memory
+    let lane = lidx % actual_sg_size;
+    let sg_id = lidx / actual_sg_size;
+
     if lane == 0u {
         partials[sg_id] = warp_sum;
     }
     workgroupBarrier();
 
-    // First subgroup reduces the partial sums
-    let num_subgroups = 256u / sg_size;
-    if sg_id == 0u {
-        let p = select(0.0, partials[lane], lane < num_subgroups);
-        let total = subgroupAdd(p);
-        if lane == 0u {
-            output[wid.x] = total;
+    if lidx == 0u {
+        let num_subgroups = 256u / actual_sg_size;
+        var total = 0.0;
+        for (var i = 0u; i < num_subgroups; i = i + 1u) {
+            total = total + partials[i];
         }
+        output[wid.x] = total;
     }
 }";
 
