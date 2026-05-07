@@ -5,9 +5,7 @@
 [![License](https://img.shields.io/crates/l/scry-learn.svg)](https://github.com/Slush97/esolearn/blob/main/LICENSE-MIT)
 [![CI](https://img.shields.io/github/actions/workflow/status/Slush97/esolearn/ci.yml?label=tests)](https://github.com/Slush97/esolearn)
 
-**Production-grade machine learning in pure Rust.**
-
-scry-learn is a scikit-learn-inspired ML toolkit with 23+ models, built-in explainability (TreeSHAP), and optional GPU acceleration — no Python, no BLAS, no LAPACK. Single binary, `cargo add`, done.
+A scikit-learn-style ML toolkit in pure Rust. No Python runtime, no BLAS, no LAPACK — `cargo add scry-learn` and build.
 
 ```rust
 use scry_learn::prelude::*;
@@ -24,15 +22,17 @@ let preds = rf.predict(&test)?;
 println!("{}", classification_report(&test.target, &preds));
 ```
 
+> **Status:** 0.x, pre-1.0 — breaking changes are possible between minor versions. This started as a learning project (implement each algorithm from scratch to understand it) and grew into something usable, but it isn't a drop-in replacement for an established stack. If you need a settled Rust ML library today, [linfa](https://github.com/rust-ml/linfa) is the safer pick. The benchmarks below let you decide whether scry-learn fits your use case.
+
 ---
 
-## Why scry-learn?
+## What's in the box
 
-- **No native dependencies.** Pure Rust — no Python runtime, no BLAS/LAPACK, no system libraries. `cargo build` just works.
-- **Explainability built in.** TreeSHAP and permutation importance ship with the crate, not as a separate package.
-- **Honest benchmarks.** We benchmark against linfa and smartcore with counting allocators, single-thread enforcement, and accuracy parity gates. [Run them yourself.](#benchmarks)
-- **Column-major layout.** Data is stored column-first internally, giving tree-based models a genuine algorithmic advantage on feature scans.
-- **`deny(unsafe_code)`.** The entire crate compiles with zero `unsafe` blocks.
+- Pure-Rust dependencies. No Python, no BLAS/LAPACK, no system libraries.
+- TreeSHAP and permutation importance built in.
+- Cross-library benchmarks vs linfa and smartcore, with a counting allocator, single-thread enforcement, and accuracy parity gates. [Run them yourself.](#benchmarks)
+- Column-major data layout — tree models scan features without a transpose.
+- `#![deny(unsafe_code)]`.
 
 ---
 
@@ -134,7 +134,7 @@ let importance = permutation_importance(&rf, &test, accuracy, 5);
 
 ## sklearn → scry-learn
 
-If you know scikit-learn, you already know scry-learn.
+The API closely tracks scikit-learn.
 
 | scikit-learn (Python) | scry-learn (Rust) |
 |---|---|
@@ -151,13 +151,13 @@ If you know scikit-learn, you already know scry-learn.
 
 ## Benchmarks
 
-scry-learn ships with rigorous cross-library benchmarks against [linfa](https://github.com/rust-ml/linfa) and [smartcore](https://github.com/smartcorelib/smartcore). Our benchmarking infrastructure enforces:
+Cross-library benchmarks against [linfa](https://github.com/rust-ml/linfa) and [smartcore](https://github.com/smartcorelib/smartcore). The harness enforces:
 
-- **Real UCI datasets only** — no synthetic data with RNG bias
-- **Counting allocator** — actual heap bytes, not RSS estimates
-- **Single-thread enforcement** — asserted programmatically, not assumed via env var
-- **Accuracy parity gates** — timing only reported when all libraries converge within ε=3%
-- **Identical preprocessing** — matched standardization across libraries
+- Real UCI datasets only — no synthetic data with RNG bias
+- Counting allocator — actual heap bytes, not RSS estimates
+- Single-thread execution, asserted programmatically (not assumed via env var)
+- Accuracy parity gates — timing only reported when all libraries converge within ε=3%
+- Identical preprocessing across libraries
 
 Run them yourself:
 
@@ -175,7 +175,7 @@ cargo bench --bench fair_bench -p scry-learn --features extended-bench
 
 ```toml
 [dependencies]
-scry-learn = "0.7"
+scry-learn = "0.1"
 ```
 
 ### Optional features
@@ -184,13 +184,12 @@ scry-learn = "0.7"
 |---------|----------------|
 | `csv` | `Dataset::from_csv()` file loading |
 | `serde` | Serialize / deserialize models |
-| `gpu` | GPU-accelerated operations via wgpu compute shaders |
 | `polars` | Polars DataFrame interop |
-| `mmap` | Memory-mapped dataset loading for large-scale data |
+| `mmap` | Memory-mapped dataset loading |
 | `experimental` | Kernel SVM (RBF, polynomial kernels) |
 
 ```toml
-scry-learn = { version = "0.7", features = ["csv", "serde"] }
+scry-learn = { version = "0.1", features = ["csv", "serde"] }
 ```
 
 ---
@@ -209,7 +208,7 @@ cargo run --example crosslib_comparison -p scry-learn --release
 
 ## Test suite
 
-905+ tests covering correctness, convergence, numerical stability, and cross-library parity.
+843 tests across 24 test files cover correctness, convergence, numerical stability, and cross-library parity.
 
 ```bash
 cargo test -p scry-learn
@@ -231,7 +230,7 @@ cargo test -p scry-learn
 
 ## Contributing
 
-Contributions welcome. Please open an issue before large PRs.
+Issues and PRs welcome. Please open an issue before large changes.
 
 ## License
 
