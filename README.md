@@ -73,7 +73,6 @@ crates/
   esoc-color/        Color system
   esoc-geo/          Geographic utilities
 datasets/            Sample CSV datasets
-research/            Design docs and roadmaps
 ```
 
 ## License
