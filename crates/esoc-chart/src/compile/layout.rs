@@ -135,13 +135,11 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
     // For horizontal bar charts (CoordSystem::Flipped + Bar with categories),
     // the y-axis renders the category strings rather than numeric ticks, so
     // measure those instead to size the left margin correctly.
-    let is_flipped_bar_with_cats = matches!(
-        chart.coord,
-        crate::grammar::coord::CoordSystem::Flipped
-    ) && chart
-        .layers
-        .iter()
-        .any(|l| matches!(l.mark, crate::grammar::layer::MarkType::Bar) && l.categories.is_some());
+    let is_flipped_bar_with_cats =
+        matches!(chart.coord, crate::grammar::coord::CoordSystem::Flipped)
+            && chart.layers.iter().any(|l| {
+                matches!(l.mark, crate::grammar::layer::MarkType::Bar) && l.categories.is_some()
+            });
     let max_y_label_width = if is_flipped_bar_with_cats {
         chart
             .layers
@@ -223,9 +221,9 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         .annotations
         .iter()
         .filter_map(|a| match a {
-            crate::grammar::annotation::Annotation::HLine {
-                label: Some(t), ..
-            } => Some(3.0 + estimate_text_width(t, chart.theme.tick_font_size) + 4.0),
+            crate::grammar::annotation::Annotation::HLine { label: Some(t), .. } => {
+                Some(3.0 + estimate_text_width(t, chart.theme.tick_font_size) + 4.0)
+            }
             _ => None,
         })
         .fold(0.0_f32, f32::max);

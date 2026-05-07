@@ -154,9 +154,9 @@ fn decode_single_output(output: &[f32], conf_threshold: f32) -> Result<Vec<Detec
 /// - `[3,4,5]`: bboxes  `[N, 4]` per stride 8/16/32 (distance offsets from anchor center)
 /// - `[6,7,8]`: kps     `[N, 10]` per stride 8/16/32 (5 landmarks × 2 coords, offsets)
 ///
-/// **Important**: this assumes the standard InsightFace ONNX export ordering where
+/// **Important**: this assumes the standard `InsightFace` ONNX export ordering where
 /// all score tensors come first, then all bbox tensors, then all keypoint tensors.
-/// If the model outputs are interleaved per-stride (score_8, bbox_8, kps_8, ...),
+/// If the model outputs are interleaved per-stride (`score_8`, `bbox_8`, `kps_8`, ...),
 /// the caller must reorder before passing to this function.
 #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
 fn decode_multi_output(
@@ -239,6 +239,12 @@ fn decode_multi_output(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    clippy::needless_range_loop
+)]
 mod tests {
     use super::*;
     use crate::model::mock::MockModel;
@@ -333,9 +339,9 @@ mod tests {
 
     // ── decode_multi_output tests ───────────────────────────────────────
 
-    /// Helper: build synthetic 9-tensor SCRFD outputs for a given input_size.
+    /// Helper: build synthetic 9-tensor SCRFD outputs for a given `input_size`.
     ///
-    /// Places a single high-confidence anchor at grid cell (target_gx, target_gy)
+    /// Places a single high-confidence anchor at grid cell (`target_gx`, `target_gy`)
     /// on the specified stride, with known bbox offsets and keypoint offsets.
     /// All other anchors have score 0.
     fn build_multi_output(
@@ -345,7 +351,7 @@ mod tests {
         target_gy: u32,
         anchor_idx_in_cell: usize, // 0 or 1
         score: f32,
-        bbox_offsets: [f32; 4],  // [left, top, right, bottom] in stride units
+        bbox_offsets: [f32; 4], // [left, top, right, bottom] in stride units
         kp_offsets: Option<[f32; 10]>, // 5 landmarks × 2 coords, in stride units
     ) -> Vec<Vec<f32>> {
         let strides = [8u32, 16, 32];
@@ -385,15 +391,15 @@ mod tests {
         // Reorder from [s8, b8, k8, s16, b16, k16, s32, b32, k32]
         //            to [s8, s16, s32, b8, b16, b32, k8, k16, k32]
         let reordered = vec![
-            outputs[0].clone(),  // scores stride 8
-            outputs[3].clone(),  // scores stride 16
-            outputs[6].clone(),  // scores stride 32
-            outputs[1].clone(),  // bboxes stride 8
-            outputs[4].clone(),  // bboxes stride 16
-            outputs[7].clone(),  // bboxes stride 32
-            outputs[2].clone(),  // kps stride 8
-            outputs[5].clone(),  // kps stride 16
-            outputs[8].clone(),  // kps stride 32
+            outputs[0].clone(), // scores stride 8
+            outputs[3].clone(), // scores stride 16
+            outputs[6].clone(), // scores stride 32
+            outputs[1].clone(), // bboxes stride 8
+            outputs[4].clone(), // bboxes stride 16
+            outputs[7].clone(), // bboxes stride 32
+            outputs[2].clone(), // kps stride 8
+            outputs[5].clone(), // kps stride 16
+            outputs[8].clone(), // kps stride 32
         ];
         reordered
     }
@@ -404,10 +410,11 @@ mod tests {
         // Anchor center: cx = (10 + 0.5) * 8 = 84, cy = (5 + 0.5) * 8 = 44
         let outputs = build_multi_output(
             640,
-            8,             // stride
-            10, 5,         // grid cell
-            0,             // first anchor
-            0.92,          // confidence
+            8, // stride
+            10,
+            5,                    // grid cell
+            0,                    // first anchor
+            0.92,                 // confidence
             [3.0, 2.0, 4.0, 5.0], // left, top, right, bottom in stride units
             None,
         );
@@ -439,7 +446,8 @@ mod tests {
         let outputs = build_multi_output(
             640,
             32,
-            3, 7,
+            3,
+            7,
             1, // second anchor in cell
             0.88,
             [2.0, 1.5, 2.5, 3.0],
@@ -473,7 +481,12 @@ mod tests {
         ];
 
         let outputs = build_multi_output(
-            640, 16, 0, 0, 0, 0.95,
+            640,
+            16,
+            0,
+            0,
+            0,
+            0.95,
             [0.5, 0.5, 0.5, 0.5],
             Some(kp_offsets),
         );
@@ -559,9 +572,12 @@ mod tests {
         // Verify grid position calculation for stride 16.
         // Grid size = 640/16 = 40. Place anchor at last cell (39, 39).
         let outputs = build_multi_output(
-            640, 16,
-            39, 39, // last grid cell
-            0, 0.99,
+            640,
+            16,
+            39,
+            39, // last grid cell
+            0,
+            0.99,
             [1.0, 1.0, 1.0, 1.0], // symmetric box
             None,
         );
@@ -571,8 +587,8 @@ mod tests {
 
         // cx = (39 + 0.5) * 16 = 632, cy = (39 + 0.5) * 16 = 632
         let d = &dets[0];
-        let cx = (d.bbox.x1 + d.bbox.x2) / 2.0;
-        let cy = (d.bbox.y1 + d.bbox.y2) / 2.0;
+        let cx = f32::midpoint(d.bbox.x1, d.bbox.x2);
+        let cy = f32::midpoint(d.bbox.y1, d.bbox.y2);
         assert!((cx - 632.0).abs() < 1e-3, "cx={cx}");
         assert!((cy - 632.0).abs() < 1e-3, "cy={cy}");
     }
@@ -622,8 +638,8 @@ mod tests {
         assert_eq!(dets.len(), 2, "both anchors should produce detections");
 
         // Both should have the same center
-        let cx0 = (dets[0].bbox.x1 + dets[0].bbox.x2) / 2.0;
-        let cx1 = (dets[1].bbox.x1 + dets[1].bbox.x2) / 2.0;
+        let cx0 = f32::midpoint(dets[0].bbox.x1, dets[0].bbox.x2);
+        let cx1 = f32::midpoint(dets[1].bbox.x1, dets[1].bbox.x2);
         assert!((cx0 - cx1).abs() < 1e-3, "same cell → same center");
 
         // But different sizes
@@ -717,7 +733,7 @@ mod tests {
         // stride 32: cx = 0.5 * 32 = 16
         let mut centers: Vec<f32> = dets
             .iter()
-            .map(|d| (d.bbox.x1 + d.bbox.x2) / 2.0)
+            .map(|d| f32::midpoint(d.bbox.x1, d.bbox.x2))
             .collect();
         centers.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert!((centers[0] - 4.0).abs() < 1e-3);

@@ -4,6 +4,8 @@
 //! Trains Logistic Regression, Random Forest, and KNN on a synthetic dataset,
 //! then overlays their ROC curves for visual comparison.
 
+#![allow(deprecated)]
+
 use esoc_chart::prelude::*;
 use scry_learn::prelude::*;
 

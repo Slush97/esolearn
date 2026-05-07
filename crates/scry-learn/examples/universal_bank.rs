@@ -1,6 +1,6 @@
 //! Universal Bank personal loan analysis with scry-learn.
 //!
-//! Loads the UniversalBank CSV, cleans the data, normalizes features,
+//! Loads the `UniversalBank` CSV, cleans the data, normalizes features,
 //! and runs classification models to predict personal loan acceptance.
 //!
 //! Run: `cargo run --example universal_bank -p scry-learn --features csv --release`
@@ -74,7 +74,7 @@ fn main() -> scry_learn::error::Result<()> {
         &data.target_name,
     );
 
-    println!("Dropped: {:?}", drop_cols);
+    println!("Dropped: {drop_cols:?}");
     println!(
         "Remaining features ({}): {:?}\n",
         data.n_features(),
@@ -126,7 +126,9 @@ fn main() -> scry_learn::error::Result<()> {
     println!();
 
     // ── 7. Class distribution ───────────────────────────────────────
+    #[allow(clippy::float_cmp)]
     let positive = data.target.iter().filter(|&&v| v == 1.0).count();
+    #[allow(clippy::float_cmp)]
     let negative = data.target.iter().filter(|&&v| v == 0.0).count();
     println!("── Class Distribution ──");
     println!(
@@ -261,7 +263,7 @@ fn main() -> scry_learn::error::Result<()> {
     Ok(())
 }
 
-/// Convert column-major Dataset features to row-major Vec<Vec<f64>> for predict().
+/// Convert column-major Dataset features to row-major Vec<Vec<f64>> for `predict()`.
 fn to_row_major(data: &Dataset) -> Vec<Vec<f64>> {
     let n = data.n_samples();
     let m = data.n_features();

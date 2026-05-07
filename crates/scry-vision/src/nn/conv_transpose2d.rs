@@ -161,7 +161,7 @@ mod tests {
         // SAM's exact config: kernel=2, stride=2, padding=0
         // Input: [1, 4, 4] -> Output: [1, 8, 8]
         let conv = ConvTranspose2d::<CpuBackend>::square(1, 1, 2, 2, 0);
-        let input = Tensor::from_vec(vec![0.0f32; 1 * 4 * 4], Shape::new(&[1, 4, 4]));
+        let input = Tensor::from_vec(vec![0.0f32; 4 * 4], Shape::new(&[1, 4, 4]));
         let output = conv.forward(&input);
         // H_out = (4-1)*2 - 0 + 2 = 8
         assert_eq!(output.shape.dims(), &[1, 8, 8]);

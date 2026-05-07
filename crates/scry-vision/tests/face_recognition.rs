@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
+#![allow(
+    clippy::cast_sign_loss,
+    clippy::items_after_statements,
+    clippy::needless_range_loop,
+    clippy::same_item_push
+)]
 //! Comprehensive face recognition pipeline tests.
 //!
 //! These tests validate the algorithmic correctness of each stage in the
@@ -26,7 +32,7 @@ use scry_llm::backend::cpu::CpuBackend;
 
 struct CaptureMock {
     output: Vec<f32>,
-    /// Stores the input tensor that was passed to forward().
+    /// Stores the input tensor that was passed to `forward()`.
     captured: std::sync::Mutex<Option<Vec<f32>>>,
 }
 
@@ -162,7 +168,7 @@ fn scrfd_preprocessing_produces_correct_tensor_shape() {
     // All pixels are 128, so all channels have same value
     let expected = (128.0 / 255.0 - 0.5) / std_val;
     assert!((data[0] - expected).abs() < 1e-4);
-    assert!((data[640 * 640] - expected).abs() < 1e-4);     // G channel start
+    assert!((data[640 * 640] - expected).abs() < 1e-4); // G channel start
     assert!((data[2 * 640 * 640] - expected).abs() < 1e-4); // B channel start
 }
 
@@ -251,13 +257,11 @@ fn letterbox_rescale_roundtrip_wide_image() {
 
     assert!(
         (recovered_x - 960.0).abs() < 1.0,
-        "x roundtrip: {}",
-        recovered_x
+        "x roundtrip: {recovered_x}"
     );
     assert!(
         (recovered_y - 540.0).abs() < 1.0,
-        "y roundtrip: {}",
-        recovered_y
+        "y roundtrip: {recovered_y}"
     );
 }
 
@@ -277,14 +281,14 @@ fn letterbox_rescale_roundtrip_tall_image() {
 
 // ── Face alignment tests ────────────────────────────────────────────────────
 
-/// Standard ArcFace 5-point canonical template landmarks (112×112 output).
+/// Standard `ArcFace` 5-point canonical template landmarks (112×112 output).
 /// These are the reference positions that aligned faces should conform to.
 const ARCFACE_TEMPLATE: [[f32; 2]; 5] = [
-    [38.2946, 51.6963],  // left eye
-    [73.5318, 51.5014],  // right eye
-    [56.0252, 71.7366],  // nose tip
-    [41.5493, 92.3655],  // left mouth corner
-    [70.7299, 92.2041],  // right mouth corner
+    [38.2946, 51.6963], // left eye
+    [73.5318, 51.5014], // right eye
+    [56.0252, 71.7366], // nose tip
+    [41.5493, 92.3655], // left mouth corner
+    [70.7299, 92.2041], // right mouth corner
 ];
 
 #[test]
@@ -297,12 +301,36 @@ fn alignment_identity_when_landmarks_match_template() {
     let transform = AffineTransform::estimate_similarity(&src, &dst, 112, 112);
 
     // Matrix should be close to identity: [[1, 0, 0], [0, 1, 0]]
-    assert!((transform.matrix[0][0] - 1.0).abs() < 1e-3, "a={}", transform.matrix[0][0]);
-    assert!((transform.matrix[0][1]).abs() < 1e-3, "b={}", transform.matrix[0][1]);
-    assert!((transform.matrix[0][2]).abs() < 1e-3, "tx={}", transform.matrix[0][2]);
-    assert!((transform.matrix[1][0]).abs() < 1e-3, "c={}", transform.matrix[1][0]);
-    assert!((transform.matrix[1][1] - 1.0).abs() < 1e-3, "d={}", transform.matrix[1][1]);
-    assert!((transform.matrix[1][2]).abs() < 1e-3, "ty={}", transform.matrix[1][2]);
+    assert!(
+        (transform.matrix[0][0] - 1.0).abs() < 1e-3,
+        "a={}",
+        transform.matrix[0][0]
+    );
+    assert!(
+        (transform.matrix[0][1]).abs() < 1e-3,
+        "b={}",
+        transform.matrix[0][1]
+    );
+    assert!(
+        (transform.matrix[0][2]).abs() < 1e-3,
+        "tx={}",
+        transform.matrix[0][2]
+    );
+    assert!(
+        (transform.matrix[1][0]).abs() < 1e-3,
+        "c={}",
+        transform.matrix[1][0]
+    );
+    assert!(
+        (transform.matrix[1][1] - 1.0).abs() < 1e-3,
+        "d={}",
+        transform.matrix[1][1]
+    );
+    assert!(
+        (transform.matrix[1][2]).abs() < 1e-3,
+        "ty={}",
+        transform.matrix[1][2]
+    );
 }
 
 #[test]
@@ -346,8 +374,16 @@ fn alignment_handles_translated_landmarks() {
 
     // Should have unit scale, no rotation, and translation ≈ (-100, -50)
     assert!((transform.matrix[0][0] - 1.0).abs() < 0.05);
-    assert!((transform.matrix[0][2] - (-100.0)).abs() < 1.0, "tx={}", transform.matrix[0][2]);
-    assert!((transform.matrix[1][2] - (-50.0)).abs() < 1.0, "ty={}", transform.matrix[1][2]);
+    assert!(
+        (transform.matrix[0][2] - (-100.0)).abs() < 1.0,
+        "tx={}",
+        transform.matrix[0][2]
+    );
+    assert!(
+        (transform.matrix[1][2] - (-50.0)).abs() < 1.0,
+        "ty={}",
+        transform.matrix[1][2]
+    );
 }
 
 #[test]
@@ -374,7 +410,10 @@ fn alignment_warp_preserves_face_content() {
     let img = ImageBuffer::from_raw(data, w, h, 3).unwrap();
 
     // Source landmarks = template * 2, destination = template
-    let src: Vec<[f32; 2]> = ARCFACE_TEMPLATE.iter().map(|&[x, y]| [x * 2.0, y * 2.0]).collect();
+    let src: Vec<[f32; 2]> = ARCFACE_TEMPLATE
+        .iter()
+        .map(|&[x, y]| [x * 2.0, y * 2.0])
+        .collect();
     let transform = AffineTransform::estimate_similarity(&src, &ARCFACE_TEMPLATE, 112, 112);
     let aligned = transform.apply(&img).unwrap();
 
@@ -387,8 +426,7 @@ fn alignment_warp_preserves_face_content() {
     let pixel = aligned.pixel(aligned_nose_x, aligned_nose_y, 0).unwrap();
     assert!(
         pixel > 100,
-        "nose region should be bright after alignment, got {}",
-        pixel
+        "nose region should be bright after alignment, got {pixel}"
     );
 }
 
@@ -445,8 +483,8 @@ fn detect_tiny_image() {
     assert_eq!(dets.len(), 1);
     // Letterbox: 32×32 → 640×640, scale = 20.0
     // Detection at (320, 320) in model space → (320/20, 320/20) = (16, 16) in original
-    let cx = (dets[0].bbox.x1 + dets[0].bbox.x2) / 2.0;
-    let cy = (dets[0].bbox.y1 + dets[0].bbox.y2) / 2.0;
+    let cx = f32::midpoint(dets[0].bbox.x1, dets[0].bbox.x2);
+    let cy = f32::midpoint(dets[0].bbox.y1, dets[0].bbox.y2);
     assert!((cx - 16.0).abs() < 1.0, "cx={cx}");
     assert!((cy - 16.0).abs() < 1.0, "cy={cy}");
 }
@@ -496,7 +534,13 @@ fn embedding_consistency_same_crop() {
     emb_vec[0] = 1.0;
     emb_vec[1] = 0.5;
 
-    let embedder = ArcFaceEmbedder::new(Box::new(MockModel { output: emb_vec.clone() }), 112, 512);
+    let embedder = ArcFaceEmbedder::new(
+        Box::new(MockModel {
+            output: emb_vec.clone(),
+        }),
+        112,
+        512,
+    );
     let emb1 = embedder.embed(&face, 112, 112).unwrap();
     let emb2 = embedder.embed(&face, 112, 112).unwrap();
 
@@ -513,19 +557,18 @@ fn embedding_resize_from_different_crop_sizes() {
     for (w, h) in sizes {
         let face = vec![128u8; (w * h * 3) as usize];
         let embedder = ArcFaceEmbedder::new(
-            Box::new(MockModel { output: emb_vec.clone() }),
+            Box::new(MockModel {
+                output: emb_vec.clone(),
+            }),
             112,
             512,
         );
         let emb = embedder.embed(&face, w, h).unwrap();
-        assert_eq!(emb.len(), 512, "embed dim should be 512 for {}x{}", w, h);
+        assert_eq!(emb.len(), 512, "embed dim should be 512 for {w}x{h}");
         let norm = l2_norm(&emb);
         assert!(
             (norm - 1.0).abs() < 1e-4,
-            "embedding should be unit norm for {}x{}, got {}",
-            w,
-            h,
-            norm
+            "embedding should be unit norm for {w}x{h}, got {norm}"
         );
     }
 }
@@ -550,8 +593,7 @@ fn cosine_similarity_near_identical_embeddings() {
     let sim = cosine_similarity(&a, &b);
     assert!(
         sim > 0.99,
-        "near-identical embeddings should have very high similarity, got {}",
-        sim
+        "near-identical embeddings should have very high similarity, got {sim}"
     );
 }
 
@@ -576,8 +618,7 @@ fn cosine_similarity_different_people() {
     let sim = cosine_similarity(&a, &b);
     assert!(
         sim < 0.01,
-        "different people should have low similarity, got {}",
-        sim
+        "different people should have low similarity, got {sim}"
     );
 }
 
@@ -613,8 +654,7 @@ fn cosine_similarity_realistic_thresholds() {
     // Should be around 100/sqrt(200*200) = 100/200 = 0.5
     assert!(
         (sim - 0.5).abs() < 0.1,
-        "controlled similarity should be ~0.5, got {}",
-        sim
+        "controlled similarity should be ~0.5, got {sim}"
     );
 }
 
@@ -642,7 +682,12 @@ fn full_pipeline_detect_align_embed() {
           0.95, // conf
     ];
 
-    let detector = ScrfdDetector::new(Box::new(MockModel { output: scrfd_output }), 640);
+    let detector = ScrfdDetector::new(
+        Box::new(MockModel {
+            output: scrfd_output,
+        }),
+        640,
+    );
     let dets = detector.detect(&image_data, w, h, 0.5).unwrap();
     assert_eq!(dets.len(), 1);
 
@@ -657,12 +702,8 @@ fn full_pipeline_detect_align_embed() {
     ];
 
     // Compute alignment transform
-    let align_transform = AffineTransform::estimate_similarity(
-        &detected_landmarks,
-        &ARCFACE_TEMPLATE,
-        112,
-        112,
-    );
+    let align_transform =
+        AffineTransform::estimate_similarity(&detected_landmarks, &ARCFACE_TEMPLATE, 112, 112);
 
     // Step 3: Apply alignment
     let img = ImageBuffer::from_raw(image_data.clone(), w, h, 3).unwrap();
@@ -675,7 +716,9 @@ fn full_pipeline_detect_align_embed() {
     emb_output[0] = 1.0;
     emb_output[1] = 0.5;
     let embedder = ArcFaceEmbedder::new(Box::new(MockModel { output: emb_output }), 112, 512);
-    let embedding = embedder.embed(&aligned.data, aligned.width, aligned.height).unwrap();
+    let embedding = embedder
+        .embed(&aligned.data, aligned.width, aligned.height)
+        .unwrap();
 
     assert_eq!(embedding.len(), 512);
     let norm = l2_norm(&embedding);
@@ -694,7 +737,7 @@ fn pipeline_alignment_vs_naive_crop_produces_different_tensors() {
     for y in 0..h {
         for x in 0..w {
             let idx = ((y * w + x) * 3) as usize;
-            data[idx] = (x * 255 / w) as u8;     // R: horizontal gradient
+            data[idx] = (x * 255 / w) as u8; // R: horizontal gradient
             data[idx + 1] = (y * 255 / h) as u8; // G: vertical gradient
             data[idx + 2] = 128;
         }
@@ -727,14 +770,13 @@ fn pipeline_alignment_vs_naive_crop_produces_different_tensors() {
         .data
         .iter()
         .zip(aligned.data.iter())
-        .map(|(&a, &b)| (i32::from(a) - i32::from(b)).unsigned_abs() as u64)
+        .map(|(&a, &b)| u64::from((i32::from(a) - i32::from(b)).unsigned_abs()))
         .sum();
 
     let avg_diff = diff as f64 / naive.data.len() as f64;
     assert!(
         avg_diff > 1.0,
-        "aligned and naive crop should differ significantly, avg_diff={}",
-        avg_diff
+        "aligned and naive crop should differ significantly, avg_diff={avg_diff}"
     );
 }
 
@@ -747,11 +789,11 @@ fn detection_coordinates_match_expected_after_letterbox() {
     // image sizes.
 
     let test_cases: Vec<(u32, u32, f32, f32)> = vec![
-        (640, 640, 320.0, 320.0),    // square, no padding
-        (1280, 720, 640.0, 360.0),   // wide 16:9
-        (720, 1280, 360.0, 640.0),   // tall 9:16
-        (1920, 1080, 960.0, 540.0),  // full HD
-        (100, 100, 50.0, 50.0),      // tiny
+        (640, 640, 320.0, 320.0),   // square, no padding
+        (1280, 720, 640.0, 360.0),  // wide 16:9
+        (720, 1280, 360.0, 640.0),  // tall 9:16
+        (1920, 1080, 960.0, 540.0), // full HD
+        (100, 100, 50.0, 50.0),     // tiny
     ];
 
     for (img_w, img_h, expected_cx, expected_cy) in test_cases {
@@ -763,25 +805,21 @@ fn detection_coordinates_match_expected_after_letterbox() {
         let image = vec![128u8; (img_w * img_h * 3) as usize];
         let dets = detector.detect(&image, img_w, img_h, 0.5).unwrap();
 
-        assert_eq!(dets.len(), 1, "{}x{}", img_w, img_h);
+        assert_eq!(dets.len(), 1, "{img_w}x{img_h}");
 
         let d = &dets[0];
-        let cx = (d.bbox.x1 + d.bbox.x2) / 2.0;
-        let cy = (d.bbox.y1 + d.bbox.y2) / 2.0;
+        let cx = f32::midpoint(d.bbox.x1, d.bbox.x2);
+        let cy = f32::midpoint(d.bbox.y1, d.bbox.y2);
 
         // The center of the model input (320, 320) should map to the center
         // of the original image, with tolerance for rounding
         assert!(
             (cx - expected_cx).abs() < 5.0,
-            "{}x{}: cx={cx}, expected {expected_cx}",
-            img_w,
-            img_h,
+            "{img_w}x{img_h}: cx={cx}, expected {expected_cx}",
         );
         assert!(
             (cy - expected_cy).abs() < 5.0,
-            "{}x{}: cy={cy}, expected {expected_cy}",
-            img_w,
-            img_h,
+            "{img_w}x{img_h}: cy={cy}, expected {expected_cy}",
         );
     }
 }
@@ -805,13 +843,11 @@ fn detection_box_size_scales_correctly() {
     // 100 model pixels / 0.5 = 200 original pixels
     assert!(
         (det_w - 200.0).abs() < 3.0,
-        "width should scale: got {}",
-        det_w
+        "width should scale: got {det_w}"
     );
     assert!(
         (det_h - 200.0).abs() < 3.0,
-        "height should scale: got {}",
-        det_h
+        "height should scale: got {det_h}"
     );
 }
 
@@ -850,7 +886,11 @@ fn many_overlapping_detections_nms() {
 
     // All boxes overlap heavily (shifted by only 1-10px on 100px box)
     // NMS should suppress most, keeping 1-2
-    assert!(dets.len() <= 3, "NMS should suppress overlaps, got {}", dets.len());
+    assert!(
+        dets.len() <= 3,
+        "NMS should suppress overlaps, got {}",
+        dets.len()
+    );
     assert!(!dets.is_empty(), "at least one detection should survive");
     // The highest-confidence one should be kept
     assert!(dets[0].confidence > 0.9);

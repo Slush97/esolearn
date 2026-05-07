@@ -883,10 +883,8 @@ fn generate_heatmap(
             3
         } else if v_max.abs().max(v_min.abs()) < 10.0 {
             2
-        } else if v_max.abs().max(v_min.abs()) < 100.0 {
-            1
         } else {
-            0
+            usize::from(v_max.abs().max(v_min.abs()) < 100.0)
         };
         for (r, row) in data.iter().enumerate() {
             for (c, &val) in row.iter().enumerate() {
@@ -900,7 +898,7 @@ fn generate_heatmap(
                 let text = if (val - val.round()).abs() < 1e-9 {
                     format!("{}", val as i64)
                 } else {
-                    format!("{val:.*}", cell_decimals)
+                    format!("{val:.cell_decimals$}")
                 };
 
                 let text_node = Node::with_mark(Mark::Text(TextMark {

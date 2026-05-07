@@ -516,6 +516,7 @@ impl<B: MathBackend> MaskDecoder<B> {
     /// - `image_pe`: `[embed_dim, grid_h, grid_w]` positional encoding
     /// - `sparse_prompt`: `[num_points, embed_dim]` from prompt encoder
     /// - `dense_prompt`: `[embed_dim, grid_h, grid_w]` from prompt encoder
+    #[allow(clippy::too_many_lines)]
     pub fn forward(
         &self,
         image_embeddings: &Tensor<B>,
@@ -972,7 +973,7 @@ mod tests {
         let image_emb =
             Tensor::from_vec(vec![0.0; ed * grid * grid], Shape::new(&[ed, grid, grid]));
         let image_pe = Tensor::from_vec(vec![0.0; ed * grid * grid], Shape::new(&[ed, grid, grid]));
-        let sparse = Tensor::from_vec(vec![0.0; 1 * ed], Shape::new(&[1, ed]));
+        let sparse = Tensor::from_vec(vec![0.0; ed], Shape::new(&[1, ed]));
         let dense = Tensor::from_vec(vec![0.0; ed * grid * grid], Shape::new(&[ed, grid, grid]));
 
         let output = decoder.forward(&image_emb, &image_pe, &sparse, &dense);

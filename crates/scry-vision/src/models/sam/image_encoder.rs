@@ -209,6 +209,7 @@ impl<B: MathBackend> SamAttention<B> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn forward_global(&self, input: &Tensor<B>, grid_h: usize, grid_w: usize) -> Tensor<B> {
         let seq = input.shape.dims()[0];
         let dm = self.d_model;

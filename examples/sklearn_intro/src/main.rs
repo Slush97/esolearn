@@ -38,6 +38,7 @@ fn figures_dir() -> PathBuf {
 }
 
 /// Read a CSV (header + numeric body) as column-major f64 columns.
+#[allow(clippy::type_complexity)]
 fn read_csv_f64(path: &PathBuf) -> Result<(Vec<String>, Vec<Vec<f64>>), Box<dyn Error>> {
     let text = fs::read_to_string(path)?;
     let mut lines = text.lines();
@@ -70,9 +71,7 @@ fn load_digits() -> Result<Dataset, Box<dyn Error>> {
     let dir = fixtures_dir();
     let (feat_names, feat_cols) = read_csv_f64(&dir.join("digits_features.csv"))?;
     let (_, mut tgt_cols) = read_csv_f64(&dir.join("digits_target.csv"))?;
-    let target = tgt_cols
-        .pop()
-        .ok_or("digits_target.csv has no columns")?;
+    let target = tgt_cols.pop().ok_or("digits_target.csv has no columns")?;
     Ok(Dataset::new(feat_cols, target, feat_names, "digit"))
 }
 
@@ -104,7 +103,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let iris_sv = singular_values(&pca, iris.n_samples());
 
     println!("=== iris PCA ===");
-    println!("  n_samples={}, n_features={}", iris.n_samples(), iris.n_features());
+    println!(
+        "  n_samples={}, n_features={}",
+        iris.n_samples(),
+        iris.n_features()
+    );
     for (i, s) in iris_sv.iter().enumerate() {
         println!("  sv[{i}] = {s:.6}");
     }
@@ -127,7 +130,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .save_svg(screegram_path.to_str().unwrap())?;
 
     println!("\n=== digits PCA ===");
-    println!("  n_samples={}, n_features={}", digits.n_samples(), digits.n_features());
+    println!(
+        "  n_samples={}, n_features={}",
+        digits.n_samples(),
+        digits.n_features()
+    );
     println!("  largest singular value = {:.4}", dsv[0]);
     println!("  wrote {}", screegram_path.display());
 
@@ -163,7 +170,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let knn_path = figs.join("knn_validation_accuracy.svg");
     v2::line(&ks, &accs)
-        .title(&format!("KNN validation accuracy — digits (best k = {best_k})"))
+        .title(format!(
+            "KNN validation accuracy — digits (best k = {best_k})"
+        ))
         .x_label("n_neighbors")
         .y_label("accuracy")
         .theme(theme)

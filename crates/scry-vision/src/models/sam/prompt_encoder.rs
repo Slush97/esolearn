@@ -414,7 +414,10 @@ mod tests {
         let enc = pe.encode_point(0.5, 0.5);
         assert_eq!(enc.len(), 256);
         for &v in &enc {
-            assert!(v >= -1.0 && v <= 1.0, "Fourier feature out of bounds: {v}");
+            assert!(
+                (-1.0..=1.0).contains(&v),
+                "Fourier feature out of bounds: {v}"
+            );
         }
     }
 

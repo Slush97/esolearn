@@ -55,20 +55,20 @@ fn main() -> Result<()> {
     // ── 1. ROC Curve ─────────────────────────────────────────────────
     let roc = roc_curve(&test.target, &y_scores);
     let roc_fig = roc.roc_figure();
-    roc_fig.save_svg("logistic_roc.svg")?;
+    roc_fig.save_svg_to("logistic_roc.svg")?;
     println!("Saved logistic_roc.svg (AUC = {:.3})", roc.auc);
 
     // ── 2. Confusion Matrix ──────────────────────────────────────────
     let cm = confusion_matrix(&test.target, &y_pred);
     let cm_fig = cm.figure();
-    cm_fig.save_svg("logistic_confusion.svg")?;
+    cm_fig.save_svg_to("logistic_confusion.svg")?;
     println!("Saved logistic_confusion.svg");
 
     // ── 3. Classification Report ─────────────────────────────────────
     let report = classification_report(&test.target, &y_pred);
     println!("{report}");
     let report_fig = report.figure();
-    report_fig.save_svg("logistic_report.svg")?;
+    report_fig.save_svg_to("logistic_report.svg")?;
     println!("Saved logistic_report.svg");
 
     Ok(())

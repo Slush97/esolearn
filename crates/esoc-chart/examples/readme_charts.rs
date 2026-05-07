@@ -55,7 +55,11 @@ fn main() -> esoc_chart::error::Result<()> {
         let mut x = Vec::new();
         let mut y = Vec::new();
         let mut cats = Vec::new();
-        for (label, cx, cy) in [("Setosa", 5.0, 3.4), ("Versicolor", 5.9, 2.8), ("Virginica", 6.6, 3.0)] {
+        for (label, cx, cy) in [
+            ("Setosa", 5.0, 3.4),
+            ("Versicolor", 5.9, 2.8),
+            ("Virginica", 6.6, 3.0),
+        ] {
             for _ in 0..40 {
                 x.push(cx + rng.normal() * 0.4);
                 y.push(cy + rng.normal() * 0.3);
@@ -86,7 +90,10 @@ fn main() -> esoc_chart::error::Result<()> {
     // ── 4. Multi-line (grammar API) ─────────────────────────────────
     {
         let epochs: Vec<f64> = (1..=30).map(f64::from).collect();
-        let train_loss: Vec<f64> = epochs.iter().map(|&e| 2.5 * (-e / 8.0).exp() + 0.1).collect();
+        let train_loss: Vec<f64> = epochs
+            .iter()
+            .map(|&e| 2.5 * (-e / 8.0).exp() + 0.1)
+            .collect();
         let val_loss: Vec<f64> = epochs
             .iter()
             .map(|&e| 2.5 * (-e / 10.0).exp() + 0.25 + rng.normal() * 0.05)
@@ -127,7 +134,9 @@ fn main() -> esoc_chart::error::Result<()> {
     // ── 6. Grouped bar ──────────────────────────────────────────────
     {
         let cats = ["Q1", "Q2", "Q3", "Q4", "Q1", "Q2", "Q3", "Q4"];
-        let groups = ["2024", "2024", "2024", "2024", "2025", "2025", "2025", "2025"];
+        let groups = [
+            "2024", "2024", "2024", "2024", "2025", "2025", "2025", "2025",
+        ];
         let vals = [12.0, 18.0, 22.0, 15.0, 14.0, 20.0, 28.0, 19.0];
         grouped_bar(&cats, &groups, &vals)
             .title("Quarterly Revenue")
@@ -141,8 +150,7 @@ fn main() -> esoc_chart::error::Result<()> {
     {
         let cats = ["Q1", "Q2", "Q3", "Q4", "Q1", "Q2", "Q3", "Q4"];
         let groups = [
-            "Product", "Product", "Product", "Product",
-            "Service", "Service", "Service", "Service",
+            "Product", "Product", "Product", "Product", "Service", "Service", "Service", "Service",
         ];
         let vals = [10.0, 15.0, 20.0, 18.0, 5.0, 8.0, 12.0, 10.0];
         stacked_bar(&cats, &groups, &vals)
@@ -300,7 +308,10 @@ fn main() -> esoc_chart::error::Result<()> {
     // ── 17. Dark theme ──────────────────────────────────────────────
     {
         let epochs: Vec<f64> = (1..=25).map(f64::from).collect();
-        let loss: Vec<f64> = epochs.iter().map(|&e| 3.0 * (-e / 6.0).exp() + 0.15).collect();
+        let loss: Vec<f64> = epochs
+            .iter()
+            .map(|&e| 3.0 * (-e / 6.0).exp() + 0.15)
+            .collect();
         let acc: Vec<f64> = epochs
             .iter()
             .map(|&e| 0.95 * (1.0 - (-e / 5.0).exp()))
