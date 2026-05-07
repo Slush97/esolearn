@@ -1,12 +1,16 @@
 [package]
 name = "esoc-color"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "OKLab/OKLCH color system — perceptual color math, CVD simulation, palettes, gamut clipping"
 license.workspace = true
+repository = "https://github.com/Slush97/esolearn"
+documentation = "https://docs.rs/esoc-color"
+keywords = ["color", "oklab", "oklch", "palette", "perceptual"]
+categories = ["graphics", "visualization"]
+readme = "README.md"
 
 [dependencies]
 
