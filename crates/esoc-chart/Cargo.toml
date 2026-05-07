@@ -1,12 +1,17 @@
 [package]
 name = "esoc-chart"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "High-level charting API built on esoc-gfx — matplotlib-equivalent for Rust"
 license.workspace = true
+repository = "https://github.com/Slush97/esolearn"
+documentation = "https://docs.rs/esoc-chart"
+keywords = ["chart", "plot", "visualization", "matplotlib", "svg"]
+categories = ["graphics", "visualization", "science"]
+readme = "README.md"
+exclude = ["AUDIT*.md"]
 
 [features]
 default = []
@@ -14,10 +19,10 @@ png = ["esoc-gfx/png"]
 scry-learn = ["dep:scry-learn"]
 
 [dependencies]
-esoc-gfx = { path = "../esoc-gfx" }
-esoc-scene = { path = "../esoc-scene" }
-esoc-color = { path = "../esoc-color" }
-scry-learn = { path = "../scry-learn", optional = true }
+esoc-gfx = { version = "0.1.0", path = "../esoc-gfx" }
+esoc-scene = { version = "0.1.0", path = "../esoc-scene" }
+esoc-color = { version = "0.1.0", path = "../esoc-color" }
+scry-learn = { version = "0.1", optional = true }
 
 [[example]]
 name = "feature_histograms"

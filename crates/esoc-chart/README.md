@@ -1,6 +1,6 @@
 # esoc-chart
 
-High-level charting library for Rust. Built on [esoc-gfx](../esoc-gfx/) and designed as a matplotlib-equivalent for ML workflows.
+High-level charting library for Rust. Built on [esoc-gfx](https://crates.io/crates/esoc-gfx) and designed as a matplotlib-equivalent for ML workflows.
 
 ## Gallery
 
@@ -35,7 +35,7 @@ High-level charting library for Rust. Built on [esoc-gfx](../esoc-gfx/) and desi
 
 ```toml
 [dependencies]
-esoc-chart = { path = "crates/esoc-chart" }
+esoc-chart = "0.1"
 ```
 
 ```rust
