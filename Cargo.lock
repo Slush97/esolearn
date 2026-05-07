@@ -821,7 +821,7 @@ dependencies = [
  "esoc-color",
  "esoc-gfx",
  "esoc-scene",
- "scry-learn",
+ "scry-learn 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3627,7 +3627,7 @@ dependencies = [
 
 [[package]]
 name = "scry-learn"
-version = "0.7.0"
+version = "0.1.0"
 dependencies = [
  "bytemuck",
  "criterion",
@@ -3650,10 +3650,18 @@ dependencies = [
  "pretty_assertions",
  "rand 0.8.5",
  "rayon",
- "scry-gpu",
  "serde",
  "serde_json",
  "smartcore",
+]
+
+[[package]]
+name = "scry-learn"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a05addf9624f7e7b6fad53e24d66b03d82e593ebe25ef8801e6176816753cee9"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -3685,7 +3693,7 @@ dependencies = [
  "rayon",
  "safetensors",
  "scry-gpu",
- "scry-learn",
+ "scry-learn 0.1.0",
  "scry-llm",
  "thiserror 2.0.18",
 ]
@@ -3836,7 +3844,7 @@ name = "sklearn-intro"
 version = "0.1.0"
 dependencies = [
  "esoc-chart",
- "scry-learn",
+ "scry-learn 0.1.0",
 ]
 
 [[package]]
