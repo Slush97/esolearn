@@ -1,20 +1,24 @@
 [package]
 name = "esoc-gfx"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "Low-level 2D vector graphics engine — SVG-first, zero deps by default"
 license.workspace = true
+repository = "https://github.com/Slush97/esolearn"
+documentation = "https://docs.rs/esoc-gfx"
+keywords = ["svg", "graphics", "vector", "2d", "rendering"]
+categories = ["graphics", "visualization", "rendering"]
+readme = "README.md"
 
 [features]
 default = []
 png = ["dep:resvg", "dep:tiny-skia"]
 
 [dependencies]
-esoc-scene = { path = "../esoc-scene" }
-esoc-color = { path = "../esoc-color" }
+esoc-scene = { version = "0.1.0", path = "../esoc-scene" }
+esoc-color = { version = "0.1.0", path = "../esoc-color" }
 resvg = { version = "0.44", optional = true, default-features = false, features = ["text", "system-fonts"] }
 tiny-skia = { version = "0.11", optional = true }
 
