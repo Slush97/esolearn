@@ -157,21 +157,24 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         }
         .nice(y_tick_count);
         let y_ticks = y_scale.ticks(y_tick_count);
-        y_ticks
+        y_scale
+            .format_ticks(&y_ticks)
             .iter()
-            .map(|&t| estimate_text_width(&y_scale.format_tick(t), chart.theme.tick_font_size))
+            .map(|s| estimate_text_width(s, chart.theme.tick_font_size))
             .fold(0.0_f32, f32::max)
     };
 
     let tick_mark_size = 5.0;
     let tick_label_pad = 2.0;
-    let axis_title_pad = if has_y_label { 4.0 } else { 0.0 };
-    let axis_title_height = if has_y_label {
-        chart.theme.label_font_size
+    // Padding between the inner edge of the Y tick labels and the rotated Y
+    // axis title — matches the title_gap used by the X-axis label so both
+    // axes share the same visual breathing room.
+    let axis_title_pad = if has_y_label {
+        chart.theme.label_font_size * 1.2
     } else {
         0.0
     };
-    let label_extra = if has_y_label {
+    let axis_title_height = if has_y_label {
         chart.theme.label_font_size
     } else {
         0.0
@@ -181,7 +184,6 @@ pub fn compute_margins(chart: &Chart, data_bounds: &DataBounds) -> Margins {
         + max_y_label_width
         + axis_title_pad
         + axis_title_height
-        + label_extra
         + 5.0;
 
     // ── Right margin — measure legend labels ──
@@ -387,7 +389,10 @@ fn compute_treemap_margins(chart: &Chart) -> Margins {
         10.0
     };
 
-    // Right margin for legend (treemap always has categories → legend)
+    // Right margin for legend (treemap always has categories → legend).
+    // Match the non-treemap calc in compute_margins so labels never clip:
+    // legend_x = plot_edge + 18, then swatch (12), then 4px gap, then label,
+    // plus a small text-width estimation buffer.
     let has_legend = chart.layers.iter().any(|l| l.categories.is_some());
     let right = if has_legend {
         let mut all_labels: Vec<String> = Vec::new();
@@ -407,9 +412,12 @@ fn compute_treemap_margins(chart: &Chart) -> Margins {
                 .iter()
                 .map(|c| estimate_text_width(c, chart.theme.legend_font_size))
                 .fold(0.0_f32, f32::max);
+            let legend_offset = 18.0;
             let swatch = 12.0;
-            let gaps = 20.0;
-            (swatch + gaps + max_label_width).max(80.0)
+            let swatch_text_gap = 4.0;
+            let buffer = 6.0;
+            let needed = legend_offset + swatch + swatch_text_gap + max_label_width + buffer;
+            needed.max(80.0)
         }
     } else {
         15.0

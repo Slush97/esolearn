@@ -816,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "esoc-chart"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "esoc-color",
  "esoc-gfx",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "esoc-gfx"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "esoc-color",
  "esoc-scene",

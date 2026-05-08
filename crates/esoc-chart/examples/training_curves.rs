@@ -4,21 +4,17 @@
 //! This is a common visualization in ML: watching loss and accuracy
 //! converge over training epochs.
 
-use esoc_chart::prelude::{Figure, Result};
-use esoc_color::Color;
+use esoc_chart::express::line;
 
-fn main() -> Result<()> {
-    // ── Simulate training curves ─────────────────────────────────────
+fn main() -> esoc_chart::error::Result<()> {
     let epochs: Vec<f64> = (1..=50).map(f64::from).collect();
 
-    // Training loss: exponential decay + noise
     let mut rng = SimpleRng::new(42);
     let train_loss: Vec<f64> = epochs
         .iter()
         .map(|&e| 2.0 * (-e / 15.0).exp() + 0.05 + rng.normal() * 0.02)
         .collect();
 
-    // Validation loss: decays slower, starts overfitting around epoch 30
     let val_loss: Vec<f64> = epochs
         .iter()
         .map(|&e| {
@@ -28,13 +24,11 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    // Training accuracy: rises from ~50% to ~98%
     let train_acc: Vec<f64> = epochs
         .iter()
         .map(|&e| (0.98 - 0.48 * (-e / 12.0).exp()).min(1.0) + rng.normal() * 0.01)
         .collect();
 
-    // Validation accuracy: rises but plateaus earlier
     let val_acc: Vec<f64> = epochs
         .iter()
         .map(|&e| {
@@ -44,51 +38,52 @@ fn main() -> Result<()> {
         })
         .collect();
 
-    // ── Plot 1: Loss curves ──────────────────────────────────────────
-    let mut fig = Figure::new()
+    let (loss_x, loss_y, loss_series) = stack_series(
+        &epochs,
+        &[("Train Loss", &train_loss), ("Val Loss", &val_loss)],
+    );
+    line(&loss_x, &loss_y)
+        .color_by(&loss_series)
+        .title("Training & Validation Loss")
+        .x_label("Epoch")
+        .y_label("Loss")
         .size(750.0, 500.0)
-        .title("Training & Validation Loss");
-
-    let ax = fig.add_axes();
-    ax.x_label("Epoch").y_label("Loss");
-    ax.line(&epochs, &train_loss)
-        .label("Train Loss")
-        .color(Color::from_hex("#1f77b4").unwrap().into())
-        .width(2.0)
-        .done();
-    ax.line(&epochs, &val_loss)
-        .label("Val Loss")
-        .color(Color::from_hex("#ff7f0e").unwrap().into())
-        .width(2.0)
-        .dash(&[8.0, 4.0])
-        .done();
-
-    fig.save_svg("training_loss.svg")?;
+        .save_svg("training_loss.svg")?;
     println!("Saved training_loss.svg");
 
-    // ── Plot 2: Accuracy curves ──────────────────────────────────────
-    let mut fig2 = Figure::new()
+    let (acc_x, acc_y, acc_series) = stack_series(
+        &epochs,
+        &[("Train Accuracy", &train_acc), ("Val Accuracy", &val_acc)],
+    );
+    line(&acc_x, &acc_y)
+        .color_by(&acc_series)
+        .title("Training & Validation Accuracy")
+        .x_label("Epoch")
+        .y_label("Accuracy")
+        .y_domain(0.4, 1.05)
         .size(750.0, 500.0)
-        .title("Training & Validation Accuracy");
-
-    let ax2 = fig2.add_axes();
-    ax2.x_label("Epoch").y_label("Accuracy").y_range(0.4, 1.05);
-    ax2.line(&epochs, &train_acc)
-        .label("Train Accuracy")
-        .color(Color::from_hex("#2ca02c").unwrap().into())
-        .width(2.0)
-        .done();
-    ax2.line(&epochs, &val_acc)
-        .label("Val Accuracy")
-        .color(Color::from_hex("#d62728").unwrap().into())
-        .width(2.0)
-        .dash(&[8.0, 4.0])
-        .done();
-
-    fig2.save_svg("training_accuracy.svg")?;
+        .save_svg("training_accuracy.svg")?;
     println!("Saved training_accuracy.svg");
 
     Ok(())
+}
+
+fn stack_series(
+    x: &[f64],
+    series: &[(&str, &Vec<f64>)],
+) -> (Vec<f64>, Vec<f64>, Vec<String>) {
+    let cap = x.len() * series.len();
+    let mut xs = Vec::with_capacity(cap);
+    let mut ys = Vec::with_capacity(cap);
+    let mut labels = Vec::with_capacity(cap);
+    for (name, ys_in) in series {
+        for (&xi, &yi) in x.iter().zip(ys_in.iter()) {
+            xs.push(xi);
+            ys.push(yi);
+            labels.push((*name).to_string());
+        }
+    }
+    (xs, ys, labels)
 }
 
 struct SimpleRng(u64);

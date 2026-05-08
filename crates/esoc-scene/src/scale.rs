@@ -340,6 +340,21 @@ impl Scale {
             _ => format_number(value),
         }
     }
+
+    /// Format an entire set of tick values with a single consistent style.
+    ///
+    /// Per-tick `format_tick` decides SI suffix vs comma-grouping per value,
+    /// which produces inconsistent labels on a single axis (e.g. `1.2M` next
+    /// to `900,000`). This picks one style for the whole set based on the
+    /// largest absolute magnitude so all labels share units.
+    pub fn format_ticks(&self, values: &[f64]) -> Vec<String> {
+        match self {
+            Self::Band { .. } | Self::Ordinal { .. } => {
+                values.iter().map(|&v| self.format_tick(v)).collect()
+            }
+            _ => format_numbers_uniform(values),
+        }
+    }
 }
 
 /// Generate nice linear tick positions using D3-style tick step.
@@ -357,7 +372,9 @@ fn nice_ticks_linear(min: f64, max: f64, target_count: usize) -> Vec<f64> {
     let mut v = graph_min;
     let max_ticks = (target_count + 5) * 2;
     while v <= graph_max + step * 0.5 && positions.len() < max_ticks {
-        positions.push(v);
+        // Snap accumulator drift around zero (e.g. -2.78e-16) to exact 0.0.
+        let snapped = if v.abs() < step * 1e-9 { 0.0 } else { v };
+        positions.push(snapped);
         v += step;
     }
     positions
@@ -471,6 +488,95 @@ fn format_si(v: f64, sign: &str, suffix: &str) -> String {
         format!("{sign}{}{suffix}", v.abs().round() as i64)
     } else {
         format!("{sign}{:.1}{suffix}", v.abs())
+    }
+}
+
+/// Format a set of tick values with a single consistent unit style.
+///
+/// The unit choice (B / M / k / commas / decimal / sub-decimal) is driven
+/// by the largest absolute value in the set so every label on the axis
+/// uses the same magnitude scale. Zero is always rendered as `"0"`.
+fn format_numbers_uniform(values: &[f64]) -> Vec<String> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    let max_abs = values
+        .iter()
+        .map(|v| v.abs())
+        .fold(0.0_f64, f64::max);
+
+    if max_abs >= 1e9 {
+        return values.iter().map(|&v| format_si_unit(v, 1e9, "B")).collect();
+    }
+    if max_abs >= 1e6 {
+        return values.iter().map(|&v| format_si_unit(v, 1e6, "M")).collect();
+    }
+    if max_abs >= 1e4 {
+        return values
+            .iter()
+            .map(|&v| {
+                if v == 0.0 {
+                    "0".to_string()
+                } else {
+                    format_with_commas(v.round() as i64)
+                }
+            })
+            .collect();
+    }
+
+    // Sub-1e4 range: pick one decimal precision for the whole axis so labels
+    // share a format (e.g. all "0.2 / 0.4 / ... / 1.0 / 1.2" rather than
+    // mixing "0.20" with "1" and "1.2"). Tiny values (<1e-6) fall back to
+    // per-value formatting which uses scientific notation for them.
+    if max_abs < 1e-6 {
+        return values.iter().map(|&v| format_number(v)).collect();
+    }
+    let decimals = decimals_needed_for(values);
+    values
+        .iter()
+        .map(|&v| {
+            if v == 0.0 {
+                "0".to_string()
+            } else if decimals == 0 {
+                format!("{}", v.round() as i64)
+            } else {
+                format!("{v:.decimals$}")
+            }
+        })
+        .collect()
+}
+
+/// Decimal precision (0..=6) needed to render all non-zero values cleanly.
+fn decimals_needed_for(values: &[f64]) -> usize {
+    let mut max_dec = 0_usize;
+    for &v in values {
+        if v == 0.0 {
+            continue;
+        }
+        for n in 0..=6_usize {
+            let scaled = v * 10f64.powi(i32::try_from(n).unwrap_or(0));
+            if (scaled - scaled.round()).abs() < 1e-6 {
+                max_dec = max_dec.max(n);
+                break;
+            }
+        }
+    }
+    max_dec
+}
+
+/// Render a value scaled by `unit` with `suffix`, trimming trailing zeros.
+/// `0.0` always renders as `"0"` (no suffix) so the origin tick stays clean.
+fn format_si_unit(value: f64, unit: f64, suffix: &str) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let v = value / unit;
+    let abs_v = v.abs();
+    let sign = if v < 0.0 { "-" } else { "" };
+    if (abs_v - abs_v.round()).abs() < 0.05 {
+        format!("{sign}{}{suffix}", abs_v.round() as i64)
+    } else {
+        format!("{sign}{abs_v:.1}{suffix}")
     }
 }
 
@@ -607,6 +713,82 @@ mod tests {
         assert!(!ticks.is_empty());
         assert!(ticks[0] <= 0.0);
         assert!(*ticks.last().unwrap() >= 100.0);
+    }
+
+    #[test]
+    fn nice_ticks_snap_near_zero() {
+        // Domain straddling zero — accumulator drift previously produced
+        // values like -2.78e-16 that bypass the `value == 0.0` short-circuit.
+        let s = Scale::Linear {
+            domain: (-1.0, 1.0),
+            range: (0.0, 500.0),
+        };
+        let ticks = s.ticks(5);
+        let near_zero = ticks
+            .iter()
+            .copied()
+            .find(|v| v.abs() < 1e-9)
+            .expect("expected a tick near zero");
+        assert_eq!(near_zero, 0.0);
+    }
+
+    #[test]
+    fn format_ticks_uniform_units_for_mixed_magnitudes() {
+        // bar_large_values regression: max ~1.2M produced "1.2M" mixed with
+        // "900,000" on the same axis. Whole-axis formatting picks one unit.
+        let s = Scale::Linear {
+            domain: (0.0, 1_200_000.0),
+            range: (0.0, 500.0),
+        };
+        let ticks = vec![
+            0.0, 200_000.0, 400_000.0, 600_000.0, 800_000.0, 1_000_000.0, 1_200_000.0,
+        ];
+        let labels = s.format_ticks(&ticks);
+        // All non-zero labels share the M suffix.
+        for (v, l) in ticks.iter().zip(labels.iter()) {
+            if *v == 0.0 {
+                assert_eq!(l, "0");
+            } else {
+                assert!(
+                    l.ends_with('M'),
+                    "expected M suffix on axis dominated by 1.2M, got {l:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn format_ticks_uniform_decimal_precision_below_1e4() {
+        // basic_line regression: same axis mixed "0.20" / "1" / "1.2".
+        // After fix, all non-zero ticks should share decimal precision.
+        let s = Scale::Linear {
+            domain: (-1.2, 1.2),
+            range: (0.0, 500.0),
+        };
+        let ticks = vec![
+            -1.2, -1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2,
+        ];
+        let labels = s.format_ticks(&ticks);
+        // 0.2 needs 1 decimal; everything (except 0) should match.
+        assert_eq!(labels[0], "-1.2");
+        assert_eq!(labels[1], "-1.0");
+        assert_eq!(labels[6], "0");
+        assert_eq!(labels[7], "0.2");
+        assert_eq!(labels[11], "1.0");
+        assert_eq!(labels[12], "1.2");
+    }
+
+    #[test]
+    fn format_ticks_uses_commas_in_5_to_6_digit_range() {
+        let s = Scale::Linear {
+            domain: (0.0, 50_000.0),
+            range: (0.0, 500.0),
+        };
+        let ticks = vec![0.0, 10_000.0, 20_000.0, 30_000.0, 40_000.0, 50_000.0];
+        let labels = s.format_ticks(&ticks);
+        assert_eq!(labels[0], "0");
+        assert_eq!(labels[1], "10,000");
+        assert_eq!(labels[5], "50,000");
     }
 
     #[test]

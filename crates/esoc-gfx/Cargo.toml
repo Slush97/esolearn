@@ -1,10 +1,10 @@
 [package]
 name = "esoc-gfx"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "Low-level 2D vector graphics engine — SVG-first, zero deps by default"
+description = "Renders esoc-scene scene graphs to SVG (and optionally PNG)"
 license.workspace = true
 repository = "https://github.com/Slush97/esolearn"
 documentation = "https://docs.rs/esoc-gfx"

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Standalone line chart — no feature flags needed.
 
-use esoc_chart::v2::{line, Chart, Layer, MarkType};
+use esoc_chart::express::line;
+use esoc_chart::grammar::chart::Chart;
+use esoc_chart::grammar::layer::{Layer, MarkType};
 
 fn main() -> esoc_chart::error::Result<()> {
     // Sine and cosine waves

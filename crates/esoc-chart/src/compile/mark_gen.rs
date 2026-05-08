@@ -284,14 +284,58 @@ fn generate_line(
         return Ok(());
     }
 
-    // Reduce line width when many series overlap to keep the chart readable
-    let line_w = if total_layers > 10 {
+    // When color_by is used, treat each category as an effective extra series
+    // so per-series width tapering kicks in for crowded multi-line plots.
+    let series_count = layer.categories.as_ref().map_or(total_layers, |cats| {
+        let mut seen: Vec<&String> = Vec::new();
+        for c in cats {
+            if !seen.contains(&c) {
+                seen.push(c);
+            }
+        }
+        total_layers.saturating_sub(1) + seen.len()
+    });
+    let line_w = if series_count > 10 {
         theme.line_width * 0.5
-    } else if total_layers > 5 {
+    } else if series_count > 5 {
         theme.line_width * 0.75
     } else {
         theme.line_width
     };
+
+    if let Some(cats) = &layer.categories {
+        let unique_cats: Vec<String> = {
+            let mut seen = Vec::new();
+            for c in cats {
+                if !seen.contains(c) {
+                    seen.push(c.clone());
+                }
+            }
+            seen
+        };
+
+        for (cat_idx, cat) in unique_cats.iter().enumerate() {
+            let cat_color = theme.palette.get(cat_idx);
+            let points: Vec<[f32; 2]> = cats
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| *c == cat)
+                .map(|(i, _)| [x_scale.map(layer.x_data[i]), y_scale.map(layer.y_data[i])])
+                .collect();
+
+            if points.len() < 2 {
+                continue;
+            }
+
+            let mark = Mark::Line(LineMark {
+                points,
+                stroke: StrokeStyle::solid(cat_color, line_w),
+                interpolation: Interpolation::Linear,
+            });
+            scene.insert_child(plot_id, Node::with_mark(mark).z_order(2));
+        }
+        return Ok(());
+    }
 
     let points: Vec<[f32; 2]> = layer
         .x_data
@@ -1146,6 +1190,64 @@ mod tests {
         )
         .unwrap();
         assert!(count_non_container(&scene) >= 1);
+    }
+
+    #[test]
+    fn line_color_by_emits_one_mark_per_category() {
+        let mut scene = SceneGraph::with_root();
+        let root = scene.root().unwrap();
+        let plot_id = scene.insert_child(root, Node::container());
+
+        // Two interleaved series, A and B, sharing the same layer.
+        let mut layer = make_resolved(
+            MarkType::Line,
+            vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+            vec![1.0, 2.0, 3.0, 5.0, 4.0, 3.0],
+            0,
+        );
+        layer.categories = Some(vec![
+            "A".into(),
+            "A".into(),
+            "A".into(),
+            "B".into(),
+            "B".into(),
+            "B".into(),
+        ]);
+
+        let bounds = DataBounds::new(0.0, 2.0, 0.0, 5.0);
+        let theme = NewTheme::default();
+        generate_layer_marks(
+            &mut scene, plot_id, &layer, &bounds, 400.0, 300.0, &theme, 1,
+        )
+        .unwrap();
+
+        let line_marks: Vec<_> = scene
+            .iter()
+            .filter_map(|(_, n)| match &n.content {
+                esoc_scene::node::NodeContent::Mark(m) => match m {
+                    Mark::Line(lm) => Some(lm),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(line_marks.len(), 2, "expected one line per category");
+
+        // Each per-category polyline holds 3 points; the buggy single-mark
+        // path would have produced one polyline of 6 points instead.
+        for lm in &line_marks {
+            assert_eq!(lm.points.len(), 3);
+        }
+
+        // Distinct strokes per category — palette colors must differ.
+        let c0 = line_marks[0].stroke.color;
+        let c1 = line_marks[1].stroke.color;
+        assert!(
+            (c0.r - c1.r).abs() > f32::EPSILON
+                || (c0.g - c1.g).abs() > f32::EPSILON
+                || (c0.b - c1.b).abs() > f32::EPSILON,
+            "expected distinct palette colors per category"
+        );
     }
 
     #[test]

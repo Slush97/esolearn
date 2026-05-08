@@ -63,7 +63,8 @@ impl ClassificationReportExt for scry_learn::metrics::ClassificationReport {
             .y_label("Score")
             .theme(theme)
             .size(800.0, 500.0)
-            .build()
+            .try_build()
+            .expect("classification report inputs are well-formed by construction")
     }
 }
 

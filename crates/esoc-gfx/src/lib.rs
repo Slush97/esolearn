@@ -1,32 +1,26 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! # esoc-gfx
 //!
-//! Low-level 2D vector graphics engine for esoc-chart.
-//! SVG output with zero dependencies; optional PNG via resvg.
+//! Renders an [`esoc_scene::SceneGraph`] to SVG (and optionally PNG via the
+//! `png` feature). Designed as the rendering backend for `esoc-chart`.
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use esoc_gfx::scene_svg::{render_scene_svg, save_scene_svg};
+//! # let scene = esoc_scene::SceneGraph::new();
+//! let svg: String = render_scene_svg(&scene, 800.0, 600.0)?;
+//! save_scene_svg(&scene, 800.0, 600.0, "out.svg")?;
+//! # Ok::<_, esoc_gfx::error::GfxError>(())
+//! ```
 
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 #![allow(clippy::format_push_string)]
 
-#[allow(deprecated)]
-pub mod backend;
-pub mod canvas;
-pub mod color;
-#[allow(deprecated)]
-pub mod element;
 pub mod error;
-pub mod geom;
-pub mod layer;
-#[allow(deprecated)]
-pub mod palette;
-pub mod path;
 pub mod scene_svg;
-#[allow(deprecated)]
-pub mod style;
-pub mod text;
-pub mod transform;
 
-/// Build resvg/usvg options with system fonts loaded.
 #[cfg(feature = "png")]
 pub(crate) fn usvg_options_with_fonts() -> resvg::usvg::Options<'static> {
     let mut opt = resvg::usvg::Options::default();
@@ -35,23 +29,8 @@ pub(crate) fn usvg_options_with_fonts() -> resvg::usvg::Options<'static> {
     opt
 }
 
-/// Convenience re-exports.
-pub mod prelude {
-    pub use crate::backend::svg::{render_svg, save_svg, SvgBackend};
-    pub use crate::backend::RenderBackend;
-    pub use crate::canvas::Canvas;
-    #[allow(deprecated)]
-    pub use crate::color::Color;
-    pub use crate::element::{DrawElement, Element};
-    pub use crate::error::{GfxError, Result};
-    pub use crate::geom::{Point, Rect, Size};
-    pub use crate::layer::Layer;
-    pub use crate::palette::Palette;
-    pub use crate::path::PathBuilder;
-    pub use crate::style::{DashPattern, Fill, FontStyle, Stroke, TextAnchor};
-    pub use crate::text::{HeuristicTextMeasurer, TextMeasurer};
-    pub use crate::transform::{AxisTransform, CoordinateTransform, ViewportTransform};
+pub use error::{GfxError, Result};
+pub use scene_svg::{render_scene_svg, render_scene_svg_with_metadata, save_scene_svg};
 
-    #[cfg(feature = "png")]
-    pub use crate::backend::png::{save_png, PngBackend};
-}
+#[cfg(feature = "png")]
+pub use scene_svg::{render_scene_png, save_scene_png};

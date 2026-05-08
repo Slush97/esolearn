@@ -55,7 +55,7 @@ fn choose_x_label_strategy(
         return LabelStrategy::Horizontal;
     }
 
-    let labels: Vec<String> = ticks.iter().map(|&t| scale.format_tick(t)).collect();
+    let labels: Vec<String> = scale.format_ticks(ticks);
     let positions: Vec<f32> = ticks.iter().map(|&t| scale.map(t)).collect();
 
     // Try horizontal
@@ -267,7 +267,8 @@ pub fn generate_axes(
             LabelStrategy::SkipN { n, angle } => (-angle, *n, TextAnchor::End),
         };
 
-        for (i, &tick) in x_ticks.iter().enumerate() {
+        let x_labels = x_scale.format_ticks(&x_ticks);
+        for (i, (&tick, label)) in x_ticks.iter().zip(x_labels.iter()).enumerate() {
             // Skip labels based on strategy (but always show first and last)
             if x_skip > 1 && i % x_skip != 0 && i != x_ticks.len() - 1 {
                 continue;
@@ -280,7 +281,7 @@ pub fn generate_axes(
                 theme.tick_font_size + tick_gap
             };
             let y = plot_y + plot_h + y_offset;
-            let label = x_scale.format_tick(tick);
+            let label = label.clone();
             let text = Node::with_mark(Mark::Text(TextMark {
                 position: [x, y],
                 text: label,
@@ -323,10 +324,11 @@ pub fn generate_axes(
             scene.insert_child(root_id, text);
         }
     } else {
-        for &tick in &y_ticks {
+        let y_labels = y_scale.format_ticks(&y_ticks);
+        for (&tick, label) in y_ticks.iter().zip(y_labels.iter()) {
             let x = plot_x - y_tick_gap;
             let y = y_scale.map(tick) + plot_y;
-            let label = y_scale.format_tick(tick);
+            let label = label.clone();
             let text = Node::with_mark(Mark::Text(TextMark {
                 position: [x, y],
                 text: label,
@@ -389,23 +391,24 @@ pub fn generate_axes(
         scene.insert_child(root_id, text);
     }
 
-    // Y axis label (rotated)
+    // Y axis label (rotated). Use the same `title_gap` padding the X-label
+    // uses below its tick labels, so the two axes look visually symmetric.
     if let Some(label) = y_label {
+        let title_gap = theme.label_font_size * 1.2;
         let y_label_x = if let Some(cats) = y_categories {
             let max_cat_w = cats
                 .iter()
                 .map(|c| layout::estimate_text_width(c, theme.tick_font_size))
                 .fold(0.0_f32, f32::max);
-            plot_x - max_cat_w - theme.label_font_size - 5.0
+            plot_x - max_cat_w - y_tick_gap - title_gap - theme.label_font_size * 0.5
         } else {
             // Compute label offset from actual tick label widths to avoid overlap
-            let max_tick_w = y_ticks
+            let max_tick_w = y_scale
+                .format_ticks(&y_ticks)
                 .iter()
-                .map(|&t| {
-                    layout::estimate_text_width(&y_scale.format_tick(t), theme.tick_font_size)
-                })
+                .map(|s| layout::estimate_text_width(s, theme.tick_font_size))
                 .fold(0.0_f32, f32::max);
-            plot_x - max_tick_w - theme.label_font_size * 0.5 - y_tick_gap
+            plot_x - max_tick_w - y_tick_gap - title_gap - theme.label_font_size * 0.5
         };
         let text = Node::with_mark(Mark::Text(TextMark {
             position: [y_label_x, plot_y + plot_h * 0.5],

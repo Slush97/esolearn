@@ -28,8 +28,8 @@ impl ConfusionMatrixExt for scry_learn::metrics::ConfusionMatrix {
 
         heatmap(data)
             .annotate()
-            .row_labels(self.labels.clone())
-            .col_labels(self.labels.clone())
+            .with_row_labels(&self.labels)
+            .with_col_labels(&self.labels)
             .title("Confusion Matrix")
             .x_label("Predicted")
             .y_label("True")

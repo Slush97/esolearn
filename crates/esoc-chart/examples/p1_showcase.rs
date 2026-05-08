@@ -10,10 +10,12 @@
 //! - Improved number formatting (SI/commas)
 //! - Area chart, pie chart, donut chart, stacked bar, grouped bar
 
-use esoc_chart::v2::{
-    area, bar, boxplot, grouped_bar, histogram, pie_labeled, scatter, stacked_bar, Chart, Layer,
-    MarkType, NewTheme,
+use esoc_chart::express::{
+    area, bar, boxplot, grouped_bar, histogram, pie_labeled, scatter, stacked_bar,
 };
+use esoc_chart::grammar::chart::Chart;
+use esoc_chart::grammar::layer::{Layer, MarkType};
+use esoc_chart::new_theme::NewTheme;
 
 fn main() -> esoc_chart::error::Result<()> {
     // ── Simple LCG for reproducibility ────────────────────────────────
