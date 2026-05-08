@@ -460,6 +460,47 @@ extern \"C\" __global__ void sigmoid(
     if (i >= N) return;
     out[i] = 1.0f / (1.0f + expf(-input[i]));
 }";
+
+    /// GELU activation (tanh approximation):
+    /// `out[i] = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
+    pub const GELU: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+const SQRT_2_OVER_PI: f32 = 0.7978845608028654;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    let x = input[i];
+    let inner = SQRT_2_OVER_PI * (x + 0.044715 * x * x * x);
+    out[i] = 0.5 * x * (1.0 + tanh(inner));
+}";
+
+    /// CUDA C equivalent of [`GELU`].
+    #[cfg(feature = "cuda")]
+    pub const GELU_CUDA: &str = "\
+extern \"C\" __global__ void gelu(
+    const float* input, float* out,
+    unsigned int N
+) {
+    const float SQRT_2_OVER_PI = 0.7978845608028654f;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    float inner = SQRT_2_OVER_PI * (x + 0.044715f * x * x * x);
+    out[i] = 0.5f * x * (1.0f + tanhf(inner));
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.

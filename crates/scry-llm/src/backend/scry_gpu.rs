@@ -1,14 +1,17 @@
-//! scry-gpu compute backend — GPU-accelerated matmul via scry-gpu.
+//! scry-gpu compute backend — GPU-accelerated matmul and elementwise ops
+//! via scry-gpu.
 //!
 //! Storage is an enum [`ScryGpuStorage`] that can hold either CPU or
-//! GPU-resident data. Today, every `MathBackend` op materializes inputs
-//! to CPU before computing and returns a CPU variant — this commit only
-//! introduces the type and explicit transfer helpers. Subsequent commits
-//! will keep results on-device when inputs already are.
+//! GPU-resident data. Ops with on-device kernels (matmul, GELU) keep
+//! results on the GPU when the workload clears their size threshold;
+//! ops without a kernel yet materialize inputs to CPU and return a
+//! CPU variant. Use [`ScryGpuBackend::to_gpu`] / [`ScryGpuBackend::to_cpu`]
+//! for explicit transfers.
 //!
 //! With the `scry-gpu-cuda` feature, matmul uses cuBLAS SGEMM (~2x faster
-//! than the best Vulkan compute shader). Without it, dispatches go through
-//! Vulkan WGSL shaders.
+//! than the best Vulkan compute shader). The cuBLAS path keeps the legacy
+//! materialize-and-download behavior until CUDA versions of the helper
+//! kernels (transpose, GELU, etc.) are wired in.
 //!
 //! Because `MathBackend` trait methods are static (no `&self`), we store
 //! the GPU context in a `OnceLock` initialized on first use.
@@ -121,6 +124,8 @@ struct ScryCtx {
     /// cuBLAS dispatch transposes on CPU until a CUDA transpose kernel
     /// is wired up.
     transpose: Option<::scry_gpu::Kernel>,
+    /// On-device GELU (tanh approximation). WGSL only for now.
+    gelu: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -152,6 +157,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             dev,
             matmul: MatmulStrategy::CuBlas,
             transpose: None,
+            gelu: None,
         });
     }
 
@@ -161,10 +167,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
     let transpose = dev
         .compile(::scry_gpu::shaders::backward::TRANSPOSE)
         .map_err(|e| format!("scry-gpu: transpose compile: {e}"))?;
+    let gelu = dev
+        .compile(::scry_gpu::shaders::elementwise::GELU)
+        .map_err(|e| format!("scry-gpu: gelu compile: {e}"))?;
     Ok(ScryCtx {
         dev,
         matmul: MatmulStrategy::Wgsl(matmul),
         transpose: Some(transpose),
+        gelu: Some(gelu),
     })
 }
 
@@ -296,6 +306,50 @@ fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer
         )
         .ok()?;
     Some(out)
+}
+
+/// Below this element count, elementwise ops are not worth the GPU dispatch
+/// overhead. Higher than the matmul threshold because elementwise ops are
+/// memory-bound (no compute reuse).
+const GPU_ELEMENTWISE_MIN: usize = 16_384;
+
+/// Run a single-input elementwise kernel (RELU/GELU/etc) on `input`.
+/// Returns a fresh GPU buffer of the same length.
+fn run_unary_elementwise(
+    kernel: &::scry_gpu::Kernel,
+    input: &Buffer<f32>,
+    n: usize,
+) -> Option<Buffer<f32>> {
+    let ctx = get_ctx()?;
+    let out = ctx.dev.alloc::<f32>(n).ok()?;
+    let dims: [u32; 1] = [n as u32];
+    let groups = (n as u32).div_ceil(256);
+    ctx.dev
+        .run_configured(
+            kernel,
+            &[input, &out],
+            [groups, 1, 1],
+            Some(bytemuck::bytes_of(&dims)),
+        )
+        .ok()?;
+    Some(out)
+}
+
+/// GPU-resident GELU. Returns `None` when the GPU path is unavailable so the
+/// caller can fall back to CPU.
+fn gpu_gelu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.gelu.as_ref()?;
+    let n = input.len();
+    if n < GPU_ELEMENTWISE_MIN {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = run_unary_elementwise(kernel, &buf_in, n)?;
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: n,
+    })
 }
 
 /// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
@@ -511,6 +565,9 @@ impl MathBackend for ScryGpuBackend {
     }
 
     fn gelu(input: &ScryGpuStorage) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_gelu_persistent(input) {
+            return gpu_out;
+        }
         cpu(CpuBackend::gelu(&input.as_vec()))
     }
 
@@ -759,6 +816,43 @@ mod tests {
                 "mismatch at {i}: cpu={e} gpu={g} (tol={tol})"
             );
         }
+    }
+
+    #[test]
+    fn gpu_gelu_matches_cpu_within_tolerance() {
+        // Above the elementwise threshold so the GPU path engages.
+        let n = 32_768;
+        let input: Vec<f32> = (0..n).map(|i| (i as f32) * 0.001 - 16.0).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_gelu_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_out = ScryGpuBackend::gelu(&gpu);
+        assert!(
+            gpu_out.is_gpu(),
+            "gelu over Gpu input should stay Gpu, got {gpu_out:?}"
+        );
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::gelu(&input);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            // GPU runs in f32, CPU in f64-then-cast. Allow 1e-5 absolute.
+            assert!((gv - cv).abs() < 1e-5, "mismatch at {i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn small_gelu_falls_back_to_cpu() {
+        // Below the elementwise threshold: GPU dispatch isn't worth it,
+        // result should come back as Cpu variant.
+        let input: Vec<f32> = (0..256).map(|i| (i as f32) * 0.01).collect();
+        let storage = ScryGpuStorage::Cpu(input);
+        let out = ScryGpuBackend::gelu(&storage);
+        assert!(!out.is_gpu(), "small gelu should fall back to Cpu");
     }
 
     #[test]
