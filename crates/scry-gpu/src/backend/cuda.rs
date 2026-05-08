@@ -225,8 +225,9 @@ impl Backend for CudaBackend {
             .name()
             .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?;
         let device_memory =
-            ctx.total_mem()
-                .map_err(|e| backend_err(BackendOp::DeviceQuery, e))? as u64;
+            unsafe { cudarc::driver::result::device::total_mem(ctx.cu_device()) }
+                .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?
+                as u64;
 
         let stream = ctx.default_stream();
         let blas = CudaBlas::new(stream.clone()).map_err(|e| backend_err(BackendOp::CuBlas, e))?;
@@ -319,7 +320,7 @@ impl Backend for CudaBackend {
             .alloc_zeros::<u8>(size as usize)
             .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
         self.stream
-            .memcpy_dtod(&mut dst, &src.inner, size as usize)
+            .memcpy_dtod(&src.inner, &mut dst)
             .map_err(|e| backend_err(BackendOp::CopyBuffer, e))?;
         Ok(CudaBuffer {
             inner: dst,
