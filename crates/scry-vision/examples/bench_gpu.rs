@@ -103,10 +103,34 @@ fn run_resnet18(input: &[f32]) {
     println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
         cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
 
+    // The BN-fused row above was measured with cuDNN enabled by default when
+    // the `scry-gpu-cudnn` feature is on. Flip it off and re-run to attribute
+    // wins to cuDNN specifically vs the legacy im2col + cuBLAS chain.
+    #[cfg(feature = "scry-gpu-cudnn")]
+    {
+        ScryGpuBackend::set_cudnn_conv(false).expect("toggle cudnn off");
+        let gpu_im2col_ms = time_ms(2, 5, || {
+            let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+            ScryGpuBackend::synchronize().expect("synchronize");
+        });
+        ScryGpuBackend::set_cudnn_conv(true).expect("toggle cudnn back on");
+        println!(
+            "  ScryGpuBackend (im2col conv): {gpu_im2col_ms:7.1} ms/image  ({:.2}× CPU, baseline)",
+            cpu_ms / gpu_im2col_ms,
+        );
+        println!(
+            "  ScryGpuBackend (cuDNN conv) : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× im2col)",
+            cpu_ms / gpu_fused_ms,
+            gpu_im2col_ms / gpu_fused_ms,
+        );
+    }
+
     #[cfg(feature = "scry-gpu-bf16")]
     {
         // bf16 / fp32-accumulate matmul via cuBLAS GemmEx (tensor cores).
         // Same fused, pre-uploaded model — only the matmul routing changes.
+        // cuDNN runs in fp32 either way; this row stacks bf16 on top of
+        // whichever conv path is currently active (cuDNN if the feature is on).
         ScryGpuBackend::set_bf16_matmul(true).expect("toggle bf16");
         let gpu_bf16_ms = time_ms(2, 5, || {
             let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
@@ -164,6 +188,25 @@ fn run_resnet50(input: &[f32]) {
     println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
         cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
 
+    #[cfg(feature = "scry-gpu-cudnn")]
+    {
+        ScryGpuBackend::set_cudnn_conv(false).expect("toggle cudnn off");
+        let gpu_im2col_ms = time_ms(2, 5, || {
+            let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+            ScryGpuBackend::synchronize().expect("synchronize");
+        });
+        ScryGpuBackend::set_cudnn_conv(true).expect("toggle cudnn back on");
+        println!(
+            "  ScryGpuBackend (im2col conv): {gpu_im2col_ms:7.1} ms/image  ({:.2}× CPU, baseline)",
+            cpu_ms / gpu_im2col_ms,
+        );
+        println!(
+            "  ScryGpuBackend (cuDNN conv) : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× im2col)",
+            cpu_ms / gpu_fused_ms,
+            gpu_im2col_ms / gpu_fused_ms,
+        );
+    }
+
     #[cfg(feature = "scry-gpu-bf16")]
     {
         ScryGpuBackend::set_bf16_matmul(true).expect("toggle bf16");
@@ -186,7 +229,8 @@ fn main() {
 
     let scry_gpu_cuda = cfg!(feature = "scry-gpu-cuda");
     let scry_gpu_bf16 = cfg!(feature = "scry-gpu-bf16");
-    println!("Features: scry-gpu-cuda={scry_gpu_cuda}, scry-gpu-bf16={scry_gpu_bf16}");
+    let scry_gpu_cudnn = cfg!(feature = "scry-gpu-cudnn");
+    println!("Features: scry-gpu-cuda={scry_gpu_cuda}, scry-gpu-bf16={scry_gpu_bf16}, scry-gpu-cudnn={scry_gpu_cudnn}");
     println!(
         "Threads:  RAYON_NUM_THREADS={}",
         rayon::current_num_threads()

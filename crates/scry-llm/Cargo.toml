@@ -23,6 +23,11 @@ scry-gpu-cuda = ["scry-gpu", "scry-gpu/cuda"]
 # Independent of the existing `bf16` feature (which gates the legacy cudarc
 # direct backend's bf16 weight loading); both can coexist.
 scry-gpu-bf16 = ["scry-gpu-cuda", "scry-gpu/bf16", "dep:half"]
+# Route 2D conv forward through cuDNN (implicit-GEMM / Winograd / FFT, picked
+# per shape via the cuDNN heuristic) instead of im2col + cuBLAS. Skips the
+# lowering kernel + its HBM round-trip; expected to close the R18-fp32 gap
+# to PyTorch.
+scry-gpu-cudnn = ["scry-gpu-cuda", "scry-gpu/cudnn"]
 auto = ["blas", "scry-gpu"]
 quantize = []
 

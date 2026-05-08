@@ -16,7 +16,7 @@
 //! the GPU context in a `OnceLock` initialized on first use.
 
 use std::borrow::Cow;
-#[cfg(feature = "scry-gpu-bf16")]
+#[cfg(any(feature = "scry-gpu-bf16", feature = "scry-gpu-cudnn"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "scry-gpu-bf16")]
 use std::sync::OnceLock as BufOnceLock;
@@ -210,6 +210,12 @@ struct ScryCtx {
     /// side-by-side benches.
     #[cfg(feature = "scry-gpu-bf16")]
     bf16_matmul_enabled: AtomicBool,
+    /// Opt-out flag for the cuDNN conv path. Defaults to `true` when the
+    /// `scry-gpu-cudnn` feature is on. Lets benches toggle between cuDNN
+    /// implicit-GEMM and the legacy im2col + cuBLAS chain on the same model
+    /// instance for clean A/B numbers.
+    #[cfg(feature = "scry-gpu-cudnn")]
+    cudnn_conv_enabled: AtomicBool,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -358,6 +364,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             cast_f32_bf16: Some(cast_f32_bf16),
             #[cfg(feature = "scry-gpu-bf16")]
             bf16_matmul_enabled: AtomicBool::new(bf16_matmul_enabled),
+            #[cfg(feature = "scry-gpu-cudnn")]
+            cudnn_conv_enabled: AtomicBool::new(true),
         });
     }
 
@@ -388,6 +396,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         cast_f32_bf16: None,
         #[cfg(feature = "scry-gpu-bf16")]
         bf16_matmul_enabled: AtomicBool::new(false),
+        #[cfg(feature = "scry-gpu-cudnn")]
+        cudnn_conv_enabled: AtomicBool::new(false),
     })
 }
 
@@ -921,6 +931,86 @@ fn gpu_im2col_persistent(
     })
 }
 
+/// Minimum total output element count before engaging the cuDNN conv path.
+/// Same scale as the im2col threshold — at smaller sizes, cuDNN's per-call
+/// dispatch overhead (~30–50 µs) is comparable to a small CPU conv. ResNet
+/// stem (1.84M outputs) and every internal stage (≥200K) clear this easily.
+#[cfg(feature = "scry-gpu-cudnn")]
+const GPU_CUDNN_CONV2D_MIN_OUTPUT_ELEMENTS: usize = 32_768;
+
+/// GPU-resident 2D conv forward via cuDNN. Implicit-GEMM (or Winograd / FFT —
+/// the cuDNN heuristic picks per shape) fused conv that skips the im2col +
+/// cuBLAS round-trip the default path uses.
+///
+/// Returns `None` if scry-gpu, the cuDNN feature, or the cuDNN handle are
+/// unavailable, the workload is below threshold, or the input/weight aren't
+/// already on-device — caller should fall back to the im2col + matmul path.
+#[cfg(feature = "scry-gpu-cudnn")]
+#[allow(clippy::too_many_arguments)]
+fn gpu_conv2d_cudnn_persistent(
+    input: &ScryGpuStorage,
+    weight: &ScryGpuStorage,
+    in_channels: usize,
+    h_in: usize,
+    w_in: usize,
+    out_channels: usize,
+    kernel_h: usize,
+    kernel_w: usize,
+    stride: usize,
+    padding: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    // cuDNN is CUDA-only.
+    if !matches!(ctx.matmul, MatmulStrategy::CuBlas) {
+        return None;
+    }
+    // Runtime opt-out — benches flip this to compare against the im2col path.
+    if !ctx.cudnn_conv_enabled.load(Ordering::Relaxed) {
+        return None;
+    }
+    let h_out = (h_in + 2 * padding).checked_sub(kernel_h)? / stride + 1;
+    let w_out = (w_in + 2 * padding).checked_sub(kernel_w)? / stride + 1;
+    let out_len = out_channels.checked_mul(h_out)?.checked_mul(w_out)?;
+    if out_len < GPU_CUDNN_CONV2D_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if input.len() != in_channels * h_in * w_in {
+        return None;
+    }
+    if weight.len() != out_channels * in_channels * kernel_h * kernel_w {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let buf_w = as_gpu_buffer(weight)?;
+    // cuDNN writes every output element — zero-init is wasted work.
+    let mut out = ctx.dev.alloc_uninit::<f32>(out_len).ok()?;
+
+    ctx.dev
+        .cudnn_conv2d_forward_async(
+            &buf_in,
+            &buf_w,
+            &mut out,
+            1,
+            in_channels as u32,
+            h_in as u32,
+            w_in as u32,
+            out_channels as u32,
+            kernel_h as u32,
+            kernel_w as u32,
+            padding as u32,
+            padding as u32,
+            stride as u32,
+            stride as u32,
+        )
+        .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: out_len,
+    })
+}
+
 /// Minimum total element count before engaging the GPU column-broadcast bias
 /// add. Same scale as `GPU_ELEMENTWISE_MIN` since the kernel is also one
 /// thread per output element with a single load + store + L1-cached bias[r].
@@ -1390,6 +1480,19 @@ impl ScryGpuBackend {
         gpu_matmul_persistent(a, b, m, k, n, false, false)
     }
 
+    /// Toggle the cuDNN convolution fast-path at runtime.
+    ///
+    /// Defaults to `true` when the `scry-gpu-cudnn` feature is enabled. The
+    /// bench harness flips it off to measure the legacy im2col + cuBLAS
+    /// chain on the same model instance and back on for the cuDNN row.
+    /// Returns `Err` only if scry-gpu is unavailable.
+    #[cfg(feature = "scry-gpu-cudnn")]
+    pub fn set_cudnn_conv(enable: bool) -> Result<(), String> {
+        let ctx = get_ctx().ok_or_else(|| "scry-gpu unavailable".to_string())?;
+        ctx.cudnn_conv_enabled.store(enable, Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Toggle the bf16 GemmEx fast-path for matmul at runtime.
     ///
     /// Initial value is taken from `SCRY_GPU_MATMUL_BF16` at first ctx
@@ -1641,6 +1744,63 @@ impl MathBackend for ScryGpuBackend {
             b_shape,
             out_shape,
         ))
+    }
+
+    fn conv2d_forward(
+        input: &ScryGpuStorage,
+        weight: &ScryGpuStorage,
+        in_channels: usize,
+        h_in: usize,
+        w_in: usize,
+        out_channels: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        stride: usize,
+        padding: usize,
+    ) -> ScryGpuStorage {
+        // cuDNN: fused implicit-GEMM, skips the im2col HBM pass. Falls
+        // through to the default (im2col + matmul) path when unavailable
+        // (Vulkan backend, sub-threshold workload, weights still CPU-side).
+        #[cfg(feature = "scry-gpu-cudnn")]
+        if let Some(out) = gpu_conv2d_cudnn_persistent(
+            input,
+            weight,
+            in_channels,
+            h_in,
+            w_in,
+            out_channels,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
+        ) {
+            return out;
+        }
+
+        // Default: same `im2col_2d` + `matmul` composition the trait does,
+        // but kept inline so we hit `Self::im2col_2d` (which routes to the
+        // GPU im2col kernel) and `Self::matmul` (which routes to cuBLAS).
+        let h_out = (h_in + 2 * padding - kernel_h) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel_w) / stride + 1;
+        let lowered = Self::im2col_2d(
+            input,
+            in_channels,
+            h_in,
+            w_in,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
+        );
+        Self::matmul(
+            weight,
+            &lowered,
+            out_channels,
+            in_channels * kernel_h * kernel_w,
+            h_out * w_out,
+            false,
+            false,
+        )
     }
 
     fn im2col_2d(
@@ -2397,6 +2557,66 @@ mod tests {
                 assert!(
                     (gv - cv).abs() < 1e-6,
                     "case ({c_in},{h_in},{w_in},{k},{stride},{padding}) idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "scry-gpu-cudnn")]
+    #[test]
+    fn gpu_conv2d_forward_cudnn_matches_cpu_within_tolerance() {
+        // ResNet stem (3×224×224, 7×7s2p3, 64 out) and a 3×3-s1-p1 stage
+        // (64×56×56, 64 out) — both above GPU_CUDNN_CONV2D_MIN_OUTPUT_ELEMENTS
+        // so the cuDNN path must engage. Validates that conv2d_forward on
+        // ScryGpuBackend produces the same flat output (without bias) as
+        // CpuBackend's default impl (= im2col + matmul).
+        let cases: &[(usize, usize, usize, usize, usize, usize, usize)] = &[
+            // (c_in, h, w, c_out, kernel, stride, padding)
+            (3, 224, 224, 64, 7, 2, 3),
+            (64, 56, 56, 64, 3, 1, 1),
+        ];
+        for &(c_in, h_in, w_in, c_out, k, stride, padding) in cases {
+            let total_in = c_in * h_in * w_in;
+            let total_w = c_out * c_in * k * k;
+            let input: Vec<f32> = (0..total_in)
+                .map(|i| ((i % 113) as f32) * 0.05 - 2.5)
+                .collect();
+            let weight: Vec<f32> = (0..total_w)
+                .map(|i| ((i % 17) as f32) * 0.03 - 0.25)
+                .collect();
+
+            let in_storage = ScryGpuStorage::Cpu(input.clone());
+            let w_storage = ScryGpuStorage::Cpu(weight.clone());
+            let in_gpu = match ScryGpuBackend::to_gpu(&in_storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping cudnn conv test: {e}");
+                    return;
+                }
+            };
+            let w_gpu = ScryGpuBackend::to_gpu(&w_storage).expect("upload weight");
+
+            let gpu_out = ScryGpuBackend::conv2d_forward(
+                &in_gpu, &w_gpu, c_in, h_in, w_in, c_out, k, k, stride, padding,
+            );
+            assert!(
+                gpu_out.is_gpu(),
+                "conv2d_forward output should stay Gpu on CUDA"
+            );
+
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            let c = CpuBackend::conv2d_forward(
+                &input, &weight, c_in, h_in, w_in, c_out, k, k, stride, padding,
+            );
+            assert_eq!(g.len(), c.len());
+            // cuDNN's implicit-GEMM accumulator order may differ from im2col +
+            // SGEMM, so allow a small fp32 rounding tolerance scaled by the
+            // reduction width.
+            let tol = 1e-3 * (c_in * k * k) as f32;
+            for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+                assert!(
+                    (gv - cv).abs() < tol,
+                    "case ({c_in},{h_in},{w_in},{c_out},{k},{stride},{padding}) idx={i}: gpu={gv} cpu={cv}"
                 );
             }
         }

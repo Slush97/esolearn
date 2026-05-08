@@ -545,3 +545,129 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let result = gpu.dispatch(shader, &[&input, &output], 2);
     assert!(result.is_err(), "WGSL dispatch on CUDA should fail");
 }
+
+// ── cuDNN conv2d forward ──
+
+#[cfg(feature = "cudnn")]
+#[test]
+fn cuda_cudnn_conv2d_matches_cpu_reference() {
+    let gpu = cuda_gpu();
+
+    // Small ResNet-shape conv: 1×3×8×8 input, 4×3×3×3 filter, stride 1, pad 1.
+    let n: u32 = 1;
+    let c_in: u32 = 3;
+    let h_in: u32 = 8;
+    let w_in: u32 = 8;
+    let c_out: u32 = 4;
+    let k_h: u32 = 3;
+    let k_w: u32 = 3;
+    let pad: u32 = 1;
+    let stride: u32 = 1;
+    let h_out = (h_in + 2 * pad - k_h) / stride + 1;
+    let w_out = (w_in + 2 * pad - k_w) / stride + 1;
+
+    let input_len = (n * c_in * h_in * w_in) as usize;
+    let filter_len = (c_out * c_in * k_h * k_w) as usize;
+    let output_len = (n * c_out * h_out * w_out) as usize;
+
+    // Deterministic small floats so bit-exact compare against the CPU
+    // reference is practical (cuDNN's implicit-GEMM and our naive loop both
+    // sum in fp32, so single rounding is identical at this size).
+    let input: Vec<f32> = (0..input_len)
+        .map(|i| ((i % 7) as f32 - 3.0) * 0.5)
+        .collect();
+    let filter: Vec<f32> = (0..filter_len)
+        .map(|i| ((i % 5) as f32 - 2.0) * 0.25)
+        .collect();
+
+    // CPU reference: NCHW conv with zero padding, stride 1, no bias.
+    let mut expected = vec![0.0f32; output_len];
+    let h_in_i = h_in as i32;
+    let w_in_i = w_in as i32;
+    let pad_i = pad as i32;
+    for oc in 0..c_out as usize {
+        for oh in 0..h_out as usize {
+            for ow in 0..w_out as usize {
+                let mut acc = 0.0f32;
+                for ic in 0..c_in as usize {
+                    for kh in 0..k_h as usize {
+                        for kw in 0..k_w as usize {
+                            let ih = oh as i32 + kh as i32 - pad_i;
+                            let iw = ow as i32 + kw as i32 - pad_i;
+                            if ih >= 0 && ih < h_in_i && iw >= 0 && iw < w_in_i {
+                                let i_idx = ((ic * h_in as usize) + ih as usize) * w_in as usize
+                                    + iw as usize;
+                                let f_idx = (((oc * c_in as usize) + ic) * k_h as usize + kh)
+                                    * k_w as usize
+                                    + kw;
+                                acc += input[i_idx] * filter[f_idx];
+                            }
+                        }
+                    }
+                }
+                let o_idx = (oc * h_out as usize + oh) * w_out as usize + ow;
+                expected[o_idx] = acc;
+            }
+        }
+    }
+
+    let in_buf = gpu.upload(&input).unwrap();
+    let filt_buf = gpu.upload(&filter).unwrap();
+    let mut out_buf = gpu.alloc::<f32>(output_len).unwrap();
+
+    let (h_got, w_got) = gpu
+        .cudnn_conv2d_forward_async(
+            &in_buf, &filt_buf, &mut out_buf, n, c_in, h_in, w_in, c_out, k_h, k_w, pad, pad,
+            stride, stride,
+        )
+        .unwrap();
+    assert_eq!((h_got, w_got), (h_out, w_out));
+
+    let result: Vec<f32> = out_buf.download().unwrap();
+    for (i, (got, want)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-3,
+            "mismatch at {i}: got {got}, want {want}"
+        );
+    }
+}
+
+#[cfg(feature = "cudnn")]
+#[test]
+fn cuda_cudnn_conv2d_caches_repeat_calls() {
+    // Issue the same conv shape twice; both should succeed (second hits the
+    // descriptor cache, no re-pick).
+    let gpu = cuda_gpu();
+
+    let n: u32 = 1;
+    let c_in: u32 = 4;
+    let h_in: u32 = 16;
+    let w_in: u32 = 16;
+    let c_out: u32 = 8;
+    let k: u32 = 3;
+    let pad: u32 = 1;
+    let stride: u32 = 1;
+
+    let input: Vec<f32> = (0..(c_in * h_in * w_in) as usize)
+        .map(|i| (i as f32) * 0.01)
+        .collect();
+    let filter: Vec<f32> = vec![0.1f32; (c_out * c_in * k * k) as usize];
+
+    let in_buf = gpu.upload(&input).unwrap();
+    let filt_buf = gpu.upload(&filter).unwrap();
+    let mut out_buf = gpu
+        .alloc::<f32>((c_out * h_in * w_in) as usize)
+        .unwrap();
+
+    for _ in 0..3 {
+        gpu.cudnn_conv2d_forward_async(
+            &in_buf, &filt_buf, &mut out_buf, n, c_in, h_in, w_in, c_out, k, k, pad, pad, stride,
+            stride,
+        )
+        .unwrap();
+    }
+
+    let result: Vec<f32> = out_buf.download().unwrap();
+    assert!(result.iter().all(|v| v.is_finite()));
+    assert!(result.iter().any(|v| *v != 0.0));
+}

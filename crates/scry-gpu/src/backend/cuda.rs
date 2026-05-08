@@ -11,6 +11,8 @@
 //! native CUDA kernels, or [`CudaBackend::cublas_matmul`] for matrix multiply.
 
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "cudnn")]
+use std::sync::OnceLock;
 
 use cudarc::cublas::sys::cublasOperation_t;
 use cudarc::cublas::CudaBlas;
@@ -21,6 +23,8 @@ use cudarc::driver::{
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 
 use crate::backend::{Backend, BackendBufferOps};
+#[cfg(feature = "cudnn")]
+use crate::backend::cuda_cudnn::{Conv2dKey, CudnnState};
 use crate::error::{backend_err, BackendOp, GpuError, Result};
 
 // ── Public types ──
@@ -30,6 +34,11 @@ pub struct CudaBackend {
     ctx: Arc<CudaContext>,
     stream: Arc<CudaStream>,
     blas: Mutex<CudaBlas>,
+    /// Lazy-init cuDNN state. First conv call constructs it; subsequent
+    /// calls reuse. Keeps `Backend::create` from failing when cuDNN is
+    /// installed but unusable on this machine.
+    #[cfg(feature = "cudnn")]
+    cudnn: OnceLock<CudnnState>,
     device_name: String,
     device_memory: u64,
 }
@@ -341,6 +350,76 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Run a cuDNN 2D convolution forward pass without synchronizing.
+    ///
+    /// Implicit-GEMM (or Winograd / FFT — cuDNN's heuristic picks per shape)
+    /// fused conv that skips the im2col→cuBLAS round-trip the default path
+    /// uses. First call for a given shape pays the descriptor + algo-pick
+    /// cost; subsequent calls hit the per-backend cache.
+    ///
+    /// Layout is `NCHW`. Buffers must be sized:
+    /// - `input`: `n*c_in*h_in*w_in` × `f32`
+    /// - `filter`: `c_out*c_in*k_h*k_w` × `f32` (PyTorch / scry-llm filter layout)
+    /// - `output`: `n*c_out*h_out*w_out` × `f32`, where output spatial dims
+    ///   come from the standard floor formula. The method returns
+    ///   `(h_out, w_out)` so the caller doesn't have to recompute.
+    ///
+    /// Stream-ordered against subsequent kernels and matmuls; chained
+    /// operators see consistent state without a host fence.
+    #[cfg(feature = "cudnn")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn cudnn_conv2d_forward_async(
+        &self,
+        input: &CudaBuffer,
+        filter: &CudaBuffer,
+        output: &mut CudaBuffer,
+        n: u32,
+        c_in: u32,
+        h_in: u32,
+        w_in: u32,
+        c_out: u32,
+        k_h: u32,
+        k_w: u32,
+        pad_h: u32,
+        pad_w: u32,
+        stride_h: u32,
+        stride_w: u32,
+    ) -> Result<(u32, u32)> {
+        let cudnn = self.cudnn_state()?;
+        let key = Conv2dKey {
+            n,
+            c_in,
+            h_in,
+            w_in,
+            c_out,
+            k_h,
+            k_w,
+            pad_h,
+            pad_w,
+            stride_h,
+            stride_w,
+        };
+        cudnn.conv2d_forward_async(&self.stream, input, filter, output, key)
+    }
+
+    /// Lazy-initialize the cuDNN handle, then return a borrow to it. Stable
+    /// alternative to `OnceLock::get_or_try_init` (which is still nightly):
+    /// peek with `get`, fall back to creating + `set`.
+    #[cfg(feature = "cudnn")]
+    fn cudnn_state(&self) -> Result<&CudnnState> {
+        if let Some(state) = self.cudnn.get() {
+            return Ok(state);
+        }
+        let state = CudnnState::create(Arc::clone(&self.stream))?;
+        // Another thread may have initialized between our `get` and `set` —
+        // their value wins (we drop ours), the caller still gets a valid handle.
+        let _ = self.cudnn.set(state);
+        Ok(self
+            .cudnn
+            .get()
+            .expect("cuDNN handle was just initialized"))
+    }
+
     /// Begin a batch dispatch session.
     ///
     /// On CUDA, kernel launches on the same stream are inherently batched
@@ -378,6 +457,8 @@ impl Backend for CudaBackend {
             ctx,
             stream,
             blas: Mutex::new(blas),
+            #[cfg(feature = "cudnn")]
+            cudnn: OnceLock::new(),
             device_name,
             device_memory,
         })
