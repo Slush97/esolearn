@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use scry_diffusion::text_encoder::clip_text::{ClipTextConfig, ClipTextEncoder};
 use scry_diffusion::tokenizer::Tokenizer;
+use scry_diffusion::vae::{decoder::VaeDecoderConfig, VaeDecoder};
 use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_llm::backend::cpu::CpuBackend;
 
@@ -111,6 +112,17 @@ fn clip_text_encoder_loads_all_keys() {
             .expect("from_safetensors");
     assert_eq!(encoder.d_model(), 768);
     assert_eq!(encoder.num_layers(), 12);
+}
+
+#[test]
+fn vae_decoder_loads_all_keys() {
+    let path = snapshot_root().join("vae/diffusion_pytorch_model.safetensors");
+    if skip_if_missing(&path, "vae_decoder_loads_all_keys") {
+        return;
+    }
+    let ckpt = SafetensorsCheckpoint::open(&path).expect("open vae");
+    let _decoder = VaeDecoder::<CpuBackend>::from_safetensors(VaeDecoderConfig::sd_1_5(), &ckpt)
+        .expect("from_safetensors");
 }
 
 #[test]

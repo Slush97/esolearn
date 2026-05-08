@@ -43,6 +43,10 @@ name = "check_text_encoder"
 required-features = ["safetensors"]
 
 [[example]]
+name = "check_vae_decoder"
+required-features = ["safetensors"]
+
+[[example]]
 name = "inspect_clip_keys"
 required-features = ["safetensors"]
 
