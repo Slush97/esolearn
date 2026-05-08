@@ -682,6 +682,7 @@ impl MathBackend for ScryGpuBackend {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::manual_let_else)] // Match arms keep the error message for skip diagnostics.
 mod tests {
     use super::*;
 
