@@ -14,8 +14,15 @@ pub type ScoringFn = fn(&[f64], &[f64]) -> f64;
 ///
 /// `test_ratio` should be between 0.0 and 1.0 (e.g., 0.2 for 80/20 split).
 /// The `seed` controls the random shuffle for reproducibility.
+///
+/// # Panics
+/// Panics if the dataset has fewer than 2 samples (no meaningful split exists).
 pub fn train_test_split(data: &Dataset, test_ratio: f64, seed: u64) -> (Dataset, Dataset) {
     let n = data.n_samples();
+    assert!(
+        n >= 2,
+        "train_test_split requires at least 2 samples, got {n}"
+    );
     let mut indices: Vec<usize> = (0..n).collect();
     shuffle(&mut indices, seed);
 
@@ -72,8 +79,16 @@ pub fn stratified_split(data: &Dataset, test_ratio: f64, seed: u64) -> (Dataset,
 /// K-fold cross-validation splits.
 ///
 /// Returns `k` pairs of (train, test) datasets.
+///
+/// # Panics
+/// Panics if `k == 0` or if `k > n_samples`.
 pub fn k_fold(data: &Dataset, k: usize, seed: u64) -> Vec<(Dataset, Dataset)> {
     let n = data.n_samples();
+    assert!(k > 0, "k_fold: k must be > 0");
+    assert!(
+        k <= n,
+        "k_fold: k={k} exceeds sample count n={n} \u{2014} not enough samples for {k} folds"
+    );
     let mut indices: Vec<usize> = (0..n).collect();
     shuffle(&mut indices, seed);
 
@@ -96,8 +111,12 @@ pub fn k_fold(data: &Dataset, k: usize, seed: u64) -> Vec<(Dataset, Dataset)> {
 }
 
 /// Stratified k-fold cross-validation.
+///
+/// # Panics
+/// Panics if `k == 0`.
 pub fn stratified_k_fold(data: &Dataset, k: usize, seed: u64) -> Vec<(Dataset, Dataset)> {
     let n = data.n_samples();
+    assert!(k > 0, "stratified_k_fold: k must be > 0");
 
     // Group by class and shuffle within each class.
     let mut class_map: std::collections::HashMap<i64, Vec<usize>> =
@@ -665,5 +684,26 @@ mod tests {
             acc >= 0.8,
             "cross_val_predict accuracy {acc} too low on separable data"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "k_fold: k must be > 0")]
+    fn test_k_fold_panics_on_zero_k() {
+        let ds = dummy_dataset(10);
+        let _ = k_fold(&ds, 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "k_fold: k=20 exceeds sample count")]
+    fn test_k_fold_panics_when_k_exceeds_samples() {
+        let ds = dummy_dataset(10);
+        let _ = k_fold(&ds, 20, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "stratified_k_fold: k must be > 0")]
+    fn test_stratified_k_fold_panics_on_zero_k() {
+        let ds = dummy_dataset(10);
+        let _ = stratified_k_fold(&ds, 0, 0);
     }
 }
