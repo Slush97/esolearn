@@ -14,12 +14,28 @@ fn make_clean_dataset() -> Dataset {
 }
 
 fn make_nan_feature_dataset() -> Dataset {
+    make_nan_feature_dataset_with_target(vec![2.0, 4.0, 6.0, 3.0, 5.0])
+}
+
+fn make_nan_feature_dataset_with_target(target: Vec<f64>) -> Dataset {
     Dataset::new(
         vec![
             vec![1.0, f64::NAN, 3.0, 4.0, 5.0],
             vec![5.0, 3.0, 8.0, 2.0, 7.0],
         ],
-        vec![2.0, 4.0, 6.0, 3.0, 5.0],
+        target,
+        vec!["f1".into(), "f2".into()],
+        "target",
+    )
+}
+
+fn make_neg_inf_feature_dataset_with_target(target: Vec<f64>) -> Dataset {
+    Dataset::new(
+        vec![
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![5.0, f64::NEG_INFINITY, 8.0, 2.0, 7.0],
+        ],
+        target,
         vec!["f1".into(), "f2".into()],
         "target",
     )
@@ -135,8 +151,7 @@ fn linear_regression_rejects_inf_target() {
 fn random_forest_rejects_nan() {
     use scry_learn::tree::RandomForestClassifier;
     // RF needs classification targets
-    let mut data = make_nan_feature_dataset();
-    data.target = vec![0.0, 1.0, 0.0, 1.0, 0.0];
+    let data = make_nan_feature_dataset_with_target(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
     let mut model = RandomForestClassifier::new().n_estimators(5);
     let err = model.fit(&data).unwrap_err();
     assert!(matches!(err, ScryLearnError::InvalidData(_)));
@@ -154,8 +169,7 @@ fn kmeans_rejects_nan() {
 #[test]
 fn logistic_regression_rejects_inf() {
     use scry_learn::linear::LogisticRegression;
-    let mut data = make_neg_inf_feature_dataset();
-    data.target = vec![0.0, 1.0, 0.0, 1.0, 0.0];
+    let data = make_neg_inf_feature_dataset_with_target(vec![0.0, 1.0, 0.0, 1.0, 0.0]);
     let mut model = LogisticRegression::new().max_iter(10);
     let err = model.fit(&data).unwrap_err();
     assert!(matches!(err, ScryLearnError::InvalidData(_)));

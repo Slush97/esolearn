@@ -48,7 +48,7 @@ fn streaming_logistic_regression() {
     let preds = model.predict(&matrix).unwrap();
     let acc = preds
         .iter()
-        .zip(test.target.iter())
+        .zip(test.target().iter())
         .filter(|(p, t)| (*p - *t).abs() < 1e-6)
         .count() as f64
         / test.n_samples() as f64;
@@ -75,7 +75,7 @@ fn streaming_gaussian_nb() {
     let preds = model.predict(&matrix).unwrap();
     let acc = preds
         .iter()
-        .zip(test.target.iter())
+        .zip(test.target().iter())
         .filter(|(p, t)| (*p - *t).abs() < 1e-6)
         .count() as f64
         / test.n_samples() as f64;

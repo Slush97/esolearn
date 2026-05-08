@@ -962,7 +962,7 @@ fn test_dimensionality_scaling() {
         let delta = after.delta_from(before);
 
         // Also measure predict time
-        let rows = to_row_major(&ds.features);
+        let rows = to_row_major(&ds.features());
         let sample = vec![rows[0].clone()];
         let pred_start = Instant::now();
         for _ in 0..50 {
@@ -1121,7 +1121,7 @@ fn test_predict_allocations() {
 
     let (col_reg, target_reg) = gen_regression(n, d);
     let ds_reg = make_dataset(col_reg, target_reg, d);
-    let rows_reg = to_row_major(&ds_reg.features);
+    let rows_reg = to_row_major(&ds_reg.features());
     let reg_single = vec![rows_reg[0].clone()];
 
     let mut lasso = scry_learn::prelude::LassoRegression::new().alpha(0.1);

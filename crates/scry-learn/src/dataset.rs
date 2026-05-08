@@ -53,15 +53,15 @@ pub struct ColumnStats {
 #[non_exhaustive]
 pub struct Dataset {
     /// Feature columns: `features[feature_idx][sample_idx]`.
-    pub features: Vec<Vec<f64>>,
+    pub(crate) features: Vec<Vec<f64>>,
     /// Target values: `target[sample_idx]`.
-    pub target: Vec<f64>,
+    pub(crate) target: Vec<f64>,
     /// Feature column names.
-    pub feature_names: Vec<String>,
+    pub(crate) feature_names: Vec<String>,
     /// Target column name.
-    pub target_name: String,
+    pub(crate) target_name: String,
     /// Class label mapping (index → label string) for classification tasks.
-    pub class_labels: Option<Vec<String>>,
+    pub(crate) class_labels: Option<Vec<String>>,
     /// Per-feature label mappings for columns that were string-valued at
     /// CSV-load time, indexed by feature column.
     ///
@@ -69,7 +69,7 @@ pub struct Dataset {
     /// `Dataset` was constructed from already-encoded features). `Some(labels)`
     /// means feature `i` was label-encoded as `f64(labels.iter().position(s))`.
     /// Empty when the dataset was not loaded from CSV.
-    pub feature_label_maps: Vec<Option<Vec<String>>>,
+    pub(crate) feature_label_maps: Vec<Option<Vec<String>>>,
     /// Lazily-computed contiguous column-major feature matrix.
     ///
     /// Built on first access from `features` via [`OnceCell::get_or_init`],
@@ -92,8 +92,9 @@ impl Dataset {
     ///
     /// # Panics
     ///
-    /// Panics if feature columns have mismatched lengths, or if
-    /// `feature_names.len() != features.len()`.
+    /// Panics if feature columns have mismatched lengths, if
+    /// `feature_names.len() != features.len()`, or if `target.len()`
+    /// disagrees with the feature row count.
     pub fn new(
         features: Vec<Vec<f64>>,
         target: Vec<f64>,
@@ -115,6 +116,21 @@ impl Dataset {
                     first.len(),
                 );
             }
+            assert!(
+                target.len() == first.len(),
+                "target has {} elements but features have {} rows",
+                target.len(),
+                first.len(),
+            );
+        } else {
+            // No feature columns. target may be any length, but n_samples()
+            // (which reads target.len()) and feature row counts must agree;
+            // with zero features there are zero rows by convention.
+            assert!(
+                target.is_empty(),
+                "target has {} elements but features matrix is empty (0 columns)",
+                target.len(),
+            );
         }
         Self {
             features,
@@ -282,6 +298,85 @@ impl Dataset {
             },
             Vec::len,
         )
+    }
+
+    /// Borrow the feature columns (`features[feat_idx][sample_idx]`).
+    #[inline]
+    pub fn features(&self) -> &[Vec<f64>] {
+        &self.features
+    }
+
+    /// Borrow the target column.
+    #[inline]
+    pub fn target(&self) -> &[f64] {
+        &self.target
+    }
+
+    /// Borrow the feature column names.
+    #[inline]
+    pub fn feature_names(&self) -> &[String] {
+        &self.feature_names
+    }
+
+    /// Borrow the target column name.
+    #[inline]
+    pub fn target_name(&self) -> &str {
+        &self.target_name
+    }
+
+    /// Borrow the class label mapping (index → label string), if present.
+    ///
+    /// Populated when the target column was string-valued at CSV load time
+    /// or when [`Self::with_class_labels`] was called. `None` otherwise.
+    #[inline]
+    pub fn class_labels(&self) -> Option<&[String]> {
+        self.class_labels.as_deref()
+    }
+
+    /// Borrow per-feature label maps (one entry per feature; `None` for numeric).
+    #[inline]
+    pub fn feature_label_maps(&self) -> &[Option<Vec<String>>] {
+        &self.feature_label_maps
+    }
+
+    /// Verify that internal invariants hold.
+    ///
+    /// Returns [`ScryLearnError::ShapeMismatch`] on the first violation.
+    /// All public constructors maintain these invariants by construction;
+    /// `validate()` exists for code that ingests an already-built `Dataset`
+    /// from an untrusted source (deserialization, FFI, etc.).
+    pub fn validate(&self) -> Result<()> {
+        if self.feature_names.len() != self.features.len() {
+            return Err(ScryLearnError::ShapeMismatch {
+                expected: self.feature_names.len(),
+                got: self.features.len(),
+            });
+        }
+        if let Some(first) = self.features.first() {
+            for col in &self.features {
+                if col.len() != first.len() {
+                    return Err(ScryLearnError::ShapeMismatch {
+                        expected: first.len(),
+                        got: col.len(),
+                    });
+                }
+            }
+            if self.target.len() != first.len() {
+                return Err(ScryLearnError::ShapeMismatch {
+                    expected: first.len(),
+                    got: self.target.len(),
+                });
+            }
+        }
+        if !self.feature_label_maps.is_empty()
+            && self.feature_label_maps.len() != self.features.len()
+        {
+            return Err(ScryLearnError::ShapeMismatch {
+                expected: self.features.len(),
+                got: self.feature_label_maps.len(),
+            });
+        }
+        Ok(())
     }
 
     /// Get a single feature column by index.

@@ -55,7 +55,7 @@ fn main() {
     // ── Inference benchmark ──
     // Build row-major feature matrix for predict (one Vec per sample)
     let features_for_predict: Vec<Vec<f64>> = (0..n_samples)
-        .map(|i| (0..n_features).map(|j| ds.features[j][i]).collect())
+        .map(|i| (0..n_features).map(|j| ds.features()[j][i]).collect())
         .collect();
 
     // Warm up
@@ -80,8 +80,8 @@ fn main() {
     let preds = clf.predict(&features_for_predict).expect("predict failed");
     let correct = preds
         .iter()
-        .zip(&ds.target)
-        .filter(|(p, t)| (**p - *t).abs() < 0.5)
+        .zip(ds.target())
+        .filter(|(p, t)| (*p - *t).abs() < 0.5)
         .count();
     println!(
         "Train accuracy: {:.1}% ({correct}/{n_samples})",

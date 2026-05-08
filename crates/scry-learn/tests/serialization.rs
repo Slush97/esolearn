@@ -213,7 +213,7 @@ fn serde_standard_scaler() {
     scaler.transform(&mut d1).unwrap();
     restored.transform(&mut d2).unwrap();
 
-    for (a, b) in d1.features[0].iter().zip(d2.features[0].iter()) {
+    for (a, b) in d1.features()[0].iter().zip(d2.features()[0].iter()) {
         assert!((a - b).abs() < 1e-10, "scaler mismatch: {a} vs {b}");
     }
 }
@@ -232,7 +232,7 @@ fn serde_pca() {
     pca.transform(&mut d1).unwrap();
     restored.transform(&mut d2).unwrap();
 
-    for (a, b) in d1.features[0].iter().zip(d2.features[0].iter()) {
+    for (a, b) in d1.features()[0].iter().zip(d2.features()[0].iter()) {
         assert!((a - b).abs() < 1e-10, "PCA mismatch: {a} vs {b}");
     }
 }
@@ -249,9 +249,9 @@ fn serde_dataset() {
 
     assert_eq!(data.n_samples(), restored.n_samples());
     assert_eq!(data.n_features(), restored.n_features());
-    assert_eq!(data.feature_names, restored.feature_names);
-    assert_eq!(data.target_name, restored.target_name);
-    for (a, b) in data.target.iter().zip(restored.target.iter()) {
+    assert_eq!(data.feature_names(), restored.feature_names());
+    assert_eq!(data.target_name(), restored.target_name());
+    for (a, b) in data.target().iter().zip(restored.target().iter()) {
         assert!((a - b).abs() < 1e-10);
     }
 }

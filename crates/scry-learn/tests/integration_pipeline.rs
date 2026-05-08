@@ -137,7 +137,7 @@ fn classifier_decision_tree() {
     let mut model = DecisionTreeClassifier::new();
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("DecisionTreeClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -148,7 +148,7 @@ fn classifier_random_forest() {
     let mut model = RandomForestClassifier::new().n_estimators(10).seed(42);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("RandomForestClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -162,7 +162,7 @@ fn classifier_gradient_boosting() {
         .max_depth(3);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("GradientBoostingClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -175,7 +175,7 @@ fn classifier_hist_gradient_boosting() {
         .learning_rate(0.1);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("HistGradientBoostingClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -186,7 +186,7 @@ fn classifier_knn() {
     let mut model = KnnClassifier::new().k(5);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("KnnClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -197,7 +197,7 @@ fn classifier_gaussian_nb() {
     let mut model = GaussianNb::new();
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("GaussianNb accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -208,7 +208,7 @@ fn classifier_logistic_regression() {
     let mut model = LogisticRegression::new().learning_rate(0.1).max_iter(1000);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("LogisticRegression accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -219,7 +219,7 @@ fn classifier_linear_svc() {
     let mut model = LinearSVC::new().c(1.0).max_iter(2000);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("LinearSVC accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -235,7 +235,7 @@ fn classifier_kernel_svc() {
         .max_iter(100);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("KernelSVC accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -250,7 +250,7 @@ fn classifier_mlp() {
         .seed(42);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("MLPClassifier accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }
@@ -261,7 +261,7 @@ fn classifier_bernoulli_nb() {
     let mut model = BernoulliNB::new().binarize(Some(3.0));
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("BernoulliNB accuracy: {acc:.3}");
     // BernoulliNB with binarized continuous features is weaker; accept > 0.5
     assert!(acc > 0.5, "accuracy {acc} <= 0.5");
@@ -277,7 +277,7 @@ fn regressor_linear() {
     let mut model = LinearRegression::new();
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("LinearRegression R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -288,7 +288,7 @@ fn regressor_ridge() {
     let mut model = Ridge::new(1.0);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("Ridge R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -299,7 +299,7 @@ fn regressor_lasso() {
     let mut model = LassoRegression::new().alpha(0.1).max_iter(5000);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("LassoRegression R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -310,7 +310,7 @@ fn regressor_elastic_net() {
     let mut model = ElasticNet::new().alpha(0.1).l1_ratio(0.5).max_iter(5000);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("ElasticNet R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -321,7 +321,7 @@ fn regressor_decision_tree() {
     let mut model = DecisionTreeRegressor::new();
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("DecisionTreeRegressor R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -332,7 +332,7 @@ fn regressor_random_forest() {
     let mut model = RandomForestRegressor::new().n_estimators(10).seed(42);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("RandomForestRegressor R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -346,7 +346,7 @@ fn regressor_gradient_boosting() {
         .max_depth(3);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("GradientBoostingRegressor R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -359,7 +359,7 @@ fn regressor_hist_gradient_boosting() {
         .learning_rate(0.1);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("HistGradientBoostingRegressor R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -370,7 +370,7 @@ fn regressor_knn() {
     let mut model = KnnRegressor::new().k(5);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("KnnRegressor R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -385,8 +385,8 @@ fn regressor_mlp() {
         .seed(42);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
-    let mse = mean_squared_error(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
+    let mse = mean_squared_error(&test.target(), &preds);
     println!("MLPRegressor R²: {r2:.3}, MSE: {mse:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -397,7 +397,7 @@ fn regressor_linear_svr() {
     let mut model = LinearSVR::new().c(10.0).max_iter(2000);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("LinearSVR R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -413,7 +413,7 @@ fn regressor_kernel_svr() {
         .max_iter(100);
     model.fit(&train).unwrap();
     let preds = model.predict(&test.feature_matrix()).unwrap();
-    let r2 = r2_score(&test.target, &preds);
+    let r2 = r2_score(&test.target(), &preds);
     println!("KernelSVR R²: {r2:.3}");
     assert!(r2 > 0.8, "R² {r2} <= 0.8");
 }
@@ -460,7 +460,7 @@ fn preprocess_standard_scaler() {
 
     // After transform, each feature column should have mean ≈ 0, std ≈ 1
     for col_idx in 0..train.n_features() {
-        let col = &train.features[col_idx];
+        let col = &train.features()[col_idx];
         let mean = col.iter().sum::<f64>() / col.len() as f64;
         let std = (col.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / col.len() as f64).sqrt();
         assert!(mean.abs() < 1e-10, "feature {col_idx} mean {mean} not ≈ 0");
@@ -480,7 +480,7 @@ fn preprocess_minmax_scaler() {
     scaler.transform(&mut train).unwrap();
 
     for col_idx in 0..train.n_features() {
-        let col = &train.features[col_idx];
+        let col = &train.features()[col_idx];
         let min = col.iter().copied().fold(f64::INFINITY, f64::min);
         let max = col.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         assert!(min >= -1e-10, "feature {col_idx} min {min} < 0");
@@ -518,7 +518,7 @@ fn pipeline_scaler_rf() {
 
     pipeline.fit(&train).unwrap();
     let preds = pipeline.predict(&test).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
     println!("Pipeline(StandardScaler + RF) accuracy: {acc:.3}");
     assert!(acc > 0.8, "accuracy {acc} <= 0.8");
 }

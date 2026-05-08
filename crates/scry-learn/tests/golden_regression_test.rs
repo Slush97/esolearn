@@ -271,7 +271,7 @@ fn golden_regression_r2() {
             other => panic!("Unknown regression model in golden baselines: {other}"),
         };
 
-        let r2 = scry_learn::metrics::r2_score(&test.target, &preds);
+        let r2 = scry_learn::metrics::r2_score(&test.target(), &preds);
         let delta = r2 - baseline.expected;
         let passed = delta.abs() <= baseline.tolerance;
 
@@ -424,7 +424,7 @@ fn golden_mlp_classifier() {
             .seed(configs::MLP_SEED);
         model.fit(&train).unwrap();
         let preds = model.predict(&test_rows).unwrap();
-        let acc = accuracy(&test.target, &preds);
+        let acc = accuracy(&test.target(), &preds);
 
         // MLP accuracy should be reasonable (> 0.70) on these datasets
         let min_acc = 0.70;
@@ -485,7 +485,7 @@ fn golden_clustering_metrics() {
             model.fit(&scaled).unwrap();
             let labels = labels_usize_to_f64(model.labels());
             let sil = scry_learn::cluster::silhouette_score(&rows, model.labels());
-            let ari = adjusted_rand_index(&scaled.target, &labels);
+            let ari = adjusted_rand_index(&scaled.target(), &labels);
             let passed = sil > 0.0;
             let status = if passed { "PASS" } else { "FAIL" };
             println!("  KMeans/{ds_name:16} sil={sil:.4} ari={ari:.4}  {status}");
@@ -502,7 +502,7 @@ fn golden_clustering_metrics() {
             model.fit(&scaled).unwrap();
             let labels = labels_usize_to_f64(model.labels());
             let sil = scry_learn::cluster::silhouette_score(&rows, model.labels());
-            let ari = adjusted_rand_index(&scaled.target, &labels);
+            let ari = adjusted_rand_index(&scaled.target(), &labels);
             let passed = sil > 0.0;
             let status = if passed { "PASS" } else { "FAIL" };
             println!("  MiniBatchKMeans/{ds_name:10} sil={sil:.4} ari={ari:.4}  {status}");
@@ -552,7 +552,7 @@ fn golden_clustering_metrics() {
             model.fit(&scaled).unwrap();
             let labels = labels_usize_to_f64(model.labels());
             let sil = scry_learn::cluster::silhouette_score(&rows, model.labels());
-            let ari = adjusted_rand_index(&scaled.target, &labels);
+            let ari = adjusted_rand_index(&scaled.target(), &labels);
             let passed = sil > 0.0;
             let status = if passed { "PASS" } else { "FAIL" };
             println!("  Agglomerative/{ds_name:9} sil={sil:.4} ari={ari:.4}  {status}");
@@ -592,7 +592,7 @@ fn golden_anomaly_detection() {
     ifo.fit(&rows).unwrap();
 
     let scores = ifo.predict(&rows);
-    let auc = roc_auc_score(&data.target, &scores);
+    let auc = roc_auc_score(&data.target(), &scores);
 
     // Anomaly scores should separate normal from outlier well
     let min_auc = 0.90;
@@ -695,7 +695,7 @@ fn golden_pipeline() {
 
     pipeline.fit(&train).unwrap();
     let preds = pipeline.predict(&test).unwrap();
-    let acc = accuracy(&test.target, &preds);
+    let acc = accuracy(&test.target(), &preds);
 
     let min_acc = 0.85;
     let passed = acc >= min_acc;

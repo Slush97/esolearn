@@ -54,7 +54,7 @@ fn main() -> scry_learn::error::Result<()> {
     // ── 3. Clean — drop non-predictive columns (ID, ZIP Code) ──────
     let drop_cols: Vec<&str> = vec!["ID", "ZIP Code"];
     let keep: Vec<usize> = data
-        .feature_names
+        .feature_names()
         .iter()
         .enumerate()
         .filter(|(_, name)| !drop_cols.contains(&name.as_str()))
@@ -63,31 +63,31 @@ fn main() -> scry_learn::error::Result<()> {
 
     let kept_names: Vec<String> = keep
         .iter()
-        .map(|&i| data.feature_names[i].clone())
+        .map(|&i| data.feature_names()[i].clone())
         .collect();
-    let kept_features: Vec<Vec<f64>> = keep.iter().map(|&i| data.features[i].clone()).collect();
+    let kept_features: Vec<Vec<f64>> = keep.iter().map(|&i| data.features()[i].clone()).collect();
 
     data = Dataset::new(
         kept_features,
-        data.target.clone(),
+        data.target().to_vec(),
         kept_names,
-        &data.target_name,
+        data.target_name().to_string(),
     );
 
     println!("Dropped: {drop_cols:?}");
     println!(
         "Remaining features ({}): {:?}\n",
         data.n_features(),
-        data.feature_names
+        data.feature_names()
     );
 
     // ── 4. Clean — impute any NaN values ────────────────────────────
     let nan_counts: Vec<(String, usize)> = data
-        .feature_names
+        .feature_names()
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let nans = data.features[i].iter().filter(|v| v.is_nan()).count();
+            let nans = data.features()[i].iter().filter(|v| v.is_nan()).count();
             (name.clone(), nans)
         })
         .filter(|(_, c)| *c > 0)
@@ -107,15 +107,23 @@ fn main() -> scry_learn::error::Result<()> {
     }
 
     // ── 5. Check for negative Experience values ─────────────────────
-    if let Some(exp_idx) = data.feature_names.iter().position(|n| n == "Experience") {
-        let neg_count = data.features[exp_idx].iter().filter(|&&v| v < 0.0).count();
+    if let Some(exp_idx) = data.feature_names().iter().position(|n| n == "Experience") {
+        let neg_count = data.features()[exp_idx].iter().filter(|&&v| v < 0.0).count();
         if neg_count > 0 {
             println!("Found {neg_count} negative Experience values — clipping to 0.");
-            for v in &mut data.features[exp_idx] {
+            // Rebuild the dataset with the clipped column.
+            let mut cols: Vec<Vec<f64>> = data.features().iter().map(Vec::clone).collect();
+            for v in &mut cols[exp_idx] {
                 if *v < 0.0 {
                     *v = 0.0;
                 }
             }
+            data = Dataset::new(
+                cols,
+                data.target().to_vec(),
+                data.feature_names().to_vec(),
+                data.target_name().to_string(),
+            );
             println!();
         }
     }
@@ -127,9 +135,9 @@ fn main() -> scry_learn::error::Result<()> {
 
     // ── 7. Class distribution ───────────────────────────────────────
     #[allow(clippy::float_cmp)]
-    let positive = data.target.iter().filter(|&&v| v == 1.0).count();
+    let positive = data.target().iter().filter(|&&v| v == 1.0).count();
     #[allow(clippy::float_cmp)]
-    let negative = data.target.iter().filter(|&&v| v == 0.0).count();
+    let negative = data.target().iter().filter(|&&v| v == 0.0).count();
     println!("── Class Distribution ──");
     println!(
         "  Declined (0): {} ({:.1}%)",
@@ -240,7 +248,7 @@ fn main() -> scry_learn::error::Result<()> {
     let test_rows = to_row_major(&test);
     let preds = rf.predict(&test_rows)?;
 
-    let report = classification_report(&test.target, &preds);
+    let report = classification_report(&test.target(), &preds);
     println!("{report}\n");
 
     // ── 12. Also show Logistic Regression on scaled data ────────────
@@ -253,7 +261,7 @@ fn main() -> scry_learn::error::Result<()> {
     let test_s_rows = to_row_major(&test_s);
     let preds_lr = lr.predict(&test_s_rows)?;
 
-    let report_lr = classification_report(&test_s.target, &preds_lr);
+    let report_lr = classification_report(&test_s.target(), &preds_lr);
     println!("{report_lr}\n");
 
     println!("═══════════════════════════════════════════════════════════");
@@ -268,7 +276,7 @@ fn to_row_major(data: &Dataset) -> Vec<Vec<f64>> {
     let n = data.n_samples();
     let m = data.n_features();
     (0..n)
-        .map(|i| (0..m).map(|j| data.features[j][i]).collect())
+        .map(|i| (0..m).map(|j| data.features()[j][i]).collect())
         .collect()
 }
 

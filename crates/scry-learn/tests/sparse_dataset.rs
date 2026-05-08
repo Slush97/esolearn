@@ -56,8 +56,8 @@ fn test_sparse_ensure_dense_after_split() {
 
     // Densify and verify features are accessible.
     train.ensure_dense();
-    assert_eq!(train.features.len(), 2);
-    assert_eq!(train.n_samples(), train.features[0].len());
+    assert_eq!(train.features().len(), 2);
+    assert_eq!(train.n_samples(), train.features()[0].len());
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -109,7 +109,7 @@ fn test_sparse_decision_tree_fit_predict() {
     // On this separable data, accuracy should be reasonable.
     let correct = preds
         .iter()
-        .zip(test.target.iter())
+        .zip(test.target().iter())
         .filter(|(p, t)| (**p - **t).abs() < 0.5)
         .count();
     let acc = correct as f64 / preds.len() as f64;
@@ -160,7 +160,7 @@ fn test_sparse_standard_scaler() {
     scry_learn::preprocess::Transformer::transform(&scaler, &mut ds_copy).unwrap();
 
     // Verify scaled values are finite.
-    for col in &ds_copy.features {
+    for col in ds_copy.features() {
         for &v in col {
             assert!(v.is_finite(), "scaled sparse value not finite: {v}");
         }
