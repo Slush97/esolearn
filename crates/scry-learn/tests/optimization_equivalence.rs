@@ -538,6 +538,10 @@ fn median_of(times: &mut [f64]) -> f64 {
 }
 
 #[test]
+// Wall-clock ratios are dominated by setup overhead at small N in debug mode,
+// inflating the ratio above the (release-mode-calibrated) 6.0 threshold.
+// Only run this scaling check in release mode, where the timing is meaningful.
+#[cfg_attr(debug_assertions, ignore)]
 fn training_time_scales_linearly() {
     println!("\n═══ Training time scaling ═══\n");
 
