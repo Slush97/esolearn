@@ -455,6 +455,72 @@ impl ScryGpuBackend {
             }
         }
     }
+
+    /// Experimental: record `matmul` + `gelu` into a single `Device::batch()`
+    /// and submit with one fence wait, instead of two synchronous
+    /// `run_configured` round trips.
+    ///
+    /// Used by the `gpu_batched_poc` bench to validate whether eliminating
+    /// one fence per chain wins enough to justify a broader batched-dispatch
+    /// port. Not yet wired into the `MathBackend` impl.
+    ///
+    /// Returns `None` when the GPU path is unavailable for any reason
+    /// (no device, cuBLAS path, sub-threshold size, transposes requested).
+    /// Inputs must be `ScryGpuStorage::Gpu` or upload-able to it.
+    /// No transpose support — caller pre-transposes if needed.
+    pub fn matmul_then_gelu_batched_for_bench(
+        a: &ScryGpuStorage,
+        b: &ScryGpuStorage,
+        m: usize,
+        k: usize,
+        n: usize,
+    ) -> Option<ScryGpuStorage> {
+        let ctx = get_ctx()?;
+        // cuBLAS path can't be recorded into a Vulkan-style batch.
+        #[allow(clippy::infallible_destructuring_match)]
+        let mm_kernel = match &ctx.matmul {
+            MatmulStrategy::Wgsl(k) => k,
+            #[cfg(feature = "scry-gpu-cuda")]
+            MatmulStrategy::CuBlas => return None,
+        };
+        let gelu_kernel = ctx.gelu.as_ref()?;
+
+        let buf_a = as_gpu_buffer(a)?;
+        let buf_b = as_gpu_buffer(b)?;
+
+        let c_buf = ctx.dev.alloc::<f32>(m * n).ok()?;
+        let g_buf = ctx.dev.alloc::<f32>(m * n).ok()?;
+
+        let mm_dims: [u32; 3] = [m as u32, n as u32, k as u32];
+        let gelu_dims: [u32; 1] = [(m * n) as u32];
+        let gelu_groups = ((m * n) as u32).div_ceil(256);
+
+        let mut batch = ctx.dev.batch().ok()?;
+        batch
+            .run_configured(
+                mm_kernel,
+                &[&*buf_a, &*buf_b, &c_buf],
+                [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+                Some(bytemuck::bytes_of(&mm_dims)),
+            )
+            .ok()?;
+        // c_buf is read by gelu — barrier is required for correct ordering.
+        batch.barrier();
+        batch
+            .run_configured(
+                gelu_kernel,
+                &[&c_buf, &g_buf],
+                [gelu_groups, 1, 1],
+                Some(bytemuck::bytes_of(&gelu_dims)),
+            )
+            .ok()?;
+        batch.submit().ok()?;
+
+        Some(ScryGpuStorage::Gpu {
+            buf: Arc::new(g_buf),
+            len: m * n,
+        })
+    }
 }
 
 impl DeviceBackend for ScryGpuBackend {

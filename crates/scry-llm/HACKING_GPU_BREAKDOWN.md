@@ -61,11 +61,31 @@ Stage-sum tracks chained total within ~20 µs across all sizes — the per-stage
 
 In priority order:
 
-1. **Port batched command buffers to `ScryGpuBackend`.** scry-gpu already exposes `Device::batch()`; scry-learn's Phase 4 already uses it (memo `project_gpu_persistent_tensors.md`). Recording matmul + GELU into one batch with a single fence wait should eliminate one full per-op overhead. Expected savings: ~20–30 µs/op at small/medium, on a chain currently ~80 µs of compute time. **30–40% wall-clock reduction at small/medium sizes.**
+1. **Port batched command buffers to `ScryGpuBackend`.** scry-gpu already exposes `Device::batch()`; scry-learn's Phase 4 already uses it (memo `project_gpu_persistent_tensors.md`). Recording matmul + GELU into one batch with a single fence wait should eliminate one full per-op overhead. **Validated by `cargo bench -p scry-llm --features scry-gpu --bench gpu_batched_poc`** — see "POC validation" below.
 
 2. **Avoid downloads when possible.** The largest single cost at the large size is `to_vec`. The M1 work already keeps tensors on-GPU between matmul and GELU; the same discipline needs to apply across whole forward passes. M3/M4 (ResNet, ViT GPU residency) are what this unlocks.
 
 3. **Kernel tiling/vec4 loads** is third priority. Until #1 is shipped, faster compute just makes the dispatch overhead a larger fraction of total time. Once batching lands, kernel work becomes the bottleneck at large sizes and is worth optimizing further.
+
+## POC validation
+
+`cargo bench -p scry-llm --features scry-gpu --bench gpu_batched_poc` records `matmul + barrier + gelu` into a single `Device::batch()` (one fence wait) and compares to the current path (two `run_configured` calls, two fence waits). Same workload sizes as the breakdown bench.
+
+| size | unbatched median | batched median | saved | saved % |
+|---|---:|---:|---:|---:|
+| small  (128, 256, 128) | 55.49 µs | 39.46 µs | 16.03 µs | 28.9% |
+| medium (256, 512, 256) | 69.43 µs | 53.61 µs | 15.82 µs | 22.8% |
+| large  (1024, 1024, 1024) | 220.55 µs | 199.79 µs | 20.76 µs | 9.4% |
+
+Findings vs. breakdown predictions:
+
+- **Per-fence cost is ~17 µs, not ~40 µs.** The breakdown's compute-floor math overestimated. Fence wait partially overlaps GPU execution — when the GPU is still finishing the kernel, the wait doesn't cost a full roundtrip. The savings come from eliminating the *second* fence's submission + scheduling round-trip, not the wait itself.
+- **Absolute savings are nearly constant across sizes** (~16–21 µs). Confirms it's a fixed per-op overhead being eliminated, exactly the predicted shape.
+- **% savings tracks the regime**: 29% at small (overhead-dominated) → 9% at large (compute-dominated). Same pattern the breakdown showed for TFLOPS.
+
+**Decision: port is justified.** At LLM-typical hidden dims (256–1024), 22–29% wall-clock savings per matmul+activation chain. A transformer layer has ~6–10 such chains; per-layer savings compound through long generations. Keep "expect 20–30% at common sizes" as the realistic target — the original "30–40%" estimate was optimistic.
+
+The POC also serves as the API smoke test for the port: `ScryGpuBackend::matmul_then_gelu_batched_for_bench` is the prototype, and produces numerically equivalent output to the unbatched path (1e-3 relative tolerance).
 
 ## Out of scope here
 

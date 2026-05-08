@@ -52,6 +52,11 @@ name = "gpu_breakdown"
 harness = false
 required-features = ["scry-gpu"]
 
+[[bench]]
+name = "gpu_batched_poc"
+harness = false
+required-features = ["scry-gpu"]
+
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 cast_possible_truncation = "allow"
