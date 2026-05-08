@@ -28,3 +28,8 @@
 # Local-only example workspaces
 /examples/bank_bi/
 /examples/bank_report/
+
+# Python virtualenvs (PyTorch reference benches)
+.venv/
+__pycache__/
+*.pyc
