@@ -4,6 +4,12 @@ Findings from `cargo bench -p scry-llm --features scry-gpu --bench gpu_breakdown
 
 The bench times each stage of `C = GELU(A @ B)` separately at three sizes: upload, matmul, GELU, download. Reports median + p95 per stage.
 
+> **Update 2026-05-08:** cuBLAS + CUDA-compiled transpose/GELU are now plumbed
+> into the persistent matmul path (`gpu_matmul_persistent` no longer
+> early-returns on the cuBLAS branch). The numbers below reflect the
+> Vulkan/WGSL chain that motivated the work; the post-cuBLAS section at the
+> bottom captures the new state on CUDA.
+
 ## Reproduction
 
 ```bash
@@ -189,6 +195,177 @@ CUDARC_CUDA_VERSION=13010 cargo run -p scry-gpu \
 - **Splitting per-op time into "kernel compute" vs "fence wait" vs "command-buffer record"** would need GPU timestamp queries (`vkCmdWriteTimestamp`, `vkCmdResetQueryPool`). That's a scry-gpu-side instrumentation effort, not a scry-llm bench. The compute-floor argument above pins down compute time well enough to justify the next investment without it.
 - **Comparing to candle-core** — still not wired. Self-vs-self proves architecture; self-vs-industry proves competitiveness. Worth doing once batching lands and we have a number worth defending.
 - **Sweeping buffer-pool / threshold heuristics** (`GPU_MIN_ELEMENTS = 65_536`, `GPU_ELEMENTWISE_MIN = 16_384`). These were picked on intuition; the breakdown shows the small workload (4M FMAs, just over the matmul threshold) gets a 0.18 TFLOPS effective rate — the threshold may be too aggressive. Empirical curves would be a follow-up bench.
+
+## Post-cuBLAS results (2026-05-08)
+
+After plumbing cuBLAS into `gpu_matmul_persistent` and compiling the
+transpose / GELU CUDA kernels (`scry-gpu/src/shaders.rs::TRANSPOSE_CUDA`,
+`GELU_CUDA`), re-running the breakdown bench with `--features scry-gpu-cuda`:
+
+```bash
+CUDARC_CUDA_VERSION=13010 cargo bench -p scry-llm \
+    --features scry-gpu-cuda --bench gpu_breakdown
+```
+
+| stage (median µs)    | small | medium | large (1024³) |
+|---|---:|---:|---:|
+| upload B             |   5.97 |  19.06 |  146.02 |
+| matmul (cuBLAS)      |  11.98 |  31.83 |  115.18 |
+| gelu (CUDA)          |   6.48 |   6.53 |   13.29 |
+| download C           |   9.81 |  27.29 |  981.13 |
+| **chained total**    | **34.09** | **85.27** | **1255.41** |
+
+| size | WGSL chain (before) | cuBLAS chain (now) | Speedup |
+|---|---:|---:|---:|
+| small  (128, 256, 128)    | 138.71 µs |  34.09 µs | **4.07×** |
+| medium (256, 512, 256)    | 157.58 µs |  85.27 µs | **1.85×** |
+| large  (1024³)            | 1372.57 µs | 1255.41 µs | 1.09× |
+
+### Matmul-only TFLOPS — closing the kernel-quality gap
+
+| backend | small | medium | large (1024³) |
+|---|---:|---:|---:|
+| WGSL coarse 4×4 (before) | 0.18 TF |  1.26 TF | 10.69 TF |
+| cuBLAS persistent (now)  | 0.70 TF |  2.11 TF | 18.64 TF |
+| cuBLAS standalone (`bench_cuda_compare`) | — | — | 22.99 TF |
+
+cuBLAS standalone hits 22.99 TFLOPS at 1024³; the persistent path measures
+18.64 TFLOPS on the same hardware. The ~22 µs delta per call is allocation
++ Rust-side timer overhead (each `Device::cublas_matmul` already
+`stream.synchronize()`s internally). At 2048³ standalone hits 31.7 TFLOPS,
+so the kernel itself is no longer the ceiling.
+
+### Matmul + GELU only (vs PyTorch — fair comparison)
+
+PyTorch's chain measurement excludes upload/download (matrices live on
+GPU), so the apples-to-apples line is `matmul + gelu`:
+
+| size | scry-llm WGSL | scry-llm cuBLAS | PyTorch | gap remaining |
+|---|---:|---:|---:|---:|
+| small  | 74.19 µs |  18.46 µs | 12.26 µs | 1.5× |
+| medium | 79.76 µs |  38.36 µs | 14.47 µs | 2.7× |
+| large  | 238.10 µs | 128.47 µs | 90.53 µs | 1.4× |
+
+That's the "~80% of the gap" the path-forward analysis predicted, in one move.
+
+### What now dominates
+
+At small/medium: still per-launch overhead, but cuBLAS' launch is much
+tighter than WGSL's — each stage drops by roughly a factor of 2–3.
+
+At 1024³: **download is 78% of the chain** (981 µs of 1255 µs). Real
+models don't `to_vec` after every operator, so this isn't the bottleneck
+end-to-end — but it caps how much faster the breakdown bench can get.
+Anything that fixes it (page-locked staging, async copy) is a separate
+investment from the kernel work.
+
+GELU at large dropped 37 → 13 µs (2.8×) — the CUDA elementwise substrate
+gap is largely closed. PyTorch's 9 µs is still ~30% faster, presumably
+from launch + tighter kernel; small further wins available with vec4
+loads but not where to spend cycles next.
+
+### Where the remaining gap to PyTorch lives
+
+- **Sync overhead per dispatch.** Each cuBLAS / CUDA-kernel call inside
+  scry-gpu calls `stream.synchronize()` to mirror Vulkan fence semantics.
+  Two syncs per chain (matmul + gelu) ≈ ~20–30 µs. PyTorch only syncs
+  when the user calls `torch.cuda.synchronize()`. Eliminating these
+  internal syncs (or using `Device::batch()` on CUDA — the API already
+  exists) is the next 20–30% at small sizes.
+- **Allocation per call.** Both stages `alloc::<f32>(m*n)` fresh. A
+  small workspace pool would erase a few µs per stage.
+
+### Path forward, updated (CUDA-first as of 2026-05-08)
+
+Strategic call: optimization investment goes into CUDA. PyTorch is also
+CUDA-first, so that's where parity is reachable. WGSL kernels stay
+correct and supported but aren't the focus. The Vulkan batched-dispatch
+port (which gpu_batched_poc validated for 22–29% wins) is **off the
+active backlog**.
+
+1. **(Done)** Plumb cuBLAS + CUDA helpers into the persistent path.
+2. **(Done, 2026-05-09)** Drop internal sync from cuBLAS / `dispatch_cuda`.
+   See "Async dispatch results" below.
+3. **Workspace pool** for `gpu_matmul_persistent` / `gpu_gelu_persistent`
+   output buffers. A few µs per call, removes alloc churn.
+4. **Tune `GPU_MIN_ELEMENTS`** on CUDA. Cutoff was set when small-matmul
+   was 0.18 TFLOPS; cuBLAS is now 0.70. Threshold likely too conservative.
+5. **M2 CUDA kernels** — softmax, layernorm, batchnorm, conv2d (hard).
+   Each one unblocks a class of vision/transformer workloads.
+6. **End-to-end model bench.** Operator wins don't count until they
+   show up in a real forward pass. Pick BERT-base / ViT-small / ResNet-18
+   and time vs PyTorch on the same GPU.
+
+## Async dispatch results (2026-05-09)
+
+`CudaBackend::dispatch_cuda` and `cublas_matmul` no longer sync internally;
+new `*_async` variants are wired into `gpu_matmul_persistent`,
+`gpu_transpose`, and `gpu_gelu_persistent`. The host sync moved to the
+storage boundary — `CudaBuffer::read_back` (called from `Buffer::download`
+and `ScryGpuBackend::to_vec`) issues a single `stream.synchronize()` once
+the host actually needs the data. Re-running the breakdown bench:
+
+```bash
+CUDARC_CUDA_VERSION=13010 cargo bench -p scry-llm \
+    --features scry-gpu-cuda --bench gpu_breakdown
+```
+
+| stage (median µs)  | small | medium | large (1024³) |
+|---|---:|---:|---:|
+| upload B           |   5.94 |  18.84 |  147.44 |
+| matmul (queue)     |   7.32 |   6.95 |    9.92 |
+| gelu (queue)       |   3.27 |   3.31 |    3.63 |
+| download C         |  10.86 |  57.13 | 1074.21 |
+| **chained total**  | **27.46** | **86.96** | **1243.68** |
+
+| size  | sync chain (prev) | async chain (now) | delta |
+|---|---:|---:|---:|
+| small  (128, 256, 128) |   34.09 µs |  27.46 µs | **−6.6 µs (−19%)** |
+| medium (256, 512, 256) |   85.27 µs |  86.96 µs |   ≈ noise          |
+| large  (1024³)         | 1255.41 µs | 1243.68 µs |   ≈ noise          |
+
+Small matches the doc's "10–15 µs at small" prediction in shape (a hair
+under in magnitude). Medium and large are already download-bound, so
+async vs sync doesn't move the chained total — the savings get absorbed
+into download because the GPU is still finishing kernels when the host
+asks for the result.
+
+**Caveat on per-stage numbers under async dispatch.** The matmul/gelu
+medians above only reflect launch+queue time (216 TFLOPS at 1024³ is not
+a real number — it's the launch returning before the GPU is done). Only
+chained totals are meaningful for direct comparison. Per-stage values
+still help diagnose *where* dispatch overhead lives, but don't compare
+them to the pre-async numbers stage-by-stage.
+
+### What now dominates (post-async)
+
+At small/medium: per-launch overhead, but cuBLAS' launch is tight enough
+that the chain is approaching the irreducible floor. Further gains here
+are mostly allocation pool (#3 above).
+
+At 1024³: download is **86%** of the chain (1074 µs of 1244 µs). Real
+forward passes don't materialize after every operator, so the bench's
+download cost overstates what models actually pay. The real story for
+end-to-end perf shows up in #6 (model-level bench).
+
+### Validation
+
+- All 51 scry-gpu lib tests + 13 cuda_compute integration tests pass.
+- All 31 scry-llm lib tests pass, including
+  `chained_matmuls_stay_on_gpu`, `matmul_through_gpu_resident_inputs_matches_cpu`,
+  and `gpu_gelu_matches_cpu_within_tolerance` — these exercise the
+  exact paths that changed and check numerical equivalence with CPU
+  within 1e-3.
+- Clippy clean on `--lib --benches` for both crates.
+
+### Sync semantics — important context for future kernel work
+
+cudarc's `clone_dtoh` for plain `Vec<T>` destinations issues a stream-ordered
+async memcpy, but its `SyncOnDrop::Sync(None)` is a **no-op**. The host
+data is not guaranteed visible on return. `CudaBuffer::read_back` now
+calls `stream.synchronize()` explicitly after the copy. Any new kernel
+or dispatch path added on the CUDA backend should follow the same
+pattern: queue async, sync at storage boundaries.
 
 ## Source
 

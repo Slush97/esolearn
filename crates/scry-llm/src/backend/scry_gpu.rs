@@ -9,9 +9,8 @@
 //! for explicit transfers.
 //!
 //! With the `scry-gpu-cuda` feature, matmul uses cuBLAS SGEMM (~2x faster
-//! than the best Vulkan compute shader). The cuBLAS path keeps the legacy
-//! materialize-and-download behavior until CUDA versions of the helper
-//! kernels (transpose, GELU, etc.) are wired in.
+//! than the best Vulkan compute shader). Transpose and GELU dispatch to
+//! NVRTC-compiled CUDA kernels so the chain stays GPU-resident.
 //!
 //! Because `MathBackend` trait methods are static (no `&self`), we store
 //! the GPU context in a `OnceLock` initialized on first use.
@@ -120,11 +119,9 @@ enum MatmulStrategy {
 struct ScryCtx {
     dev: ::scry_gpu::Device,
     matmul: MatmulStrategy,
-    /// On-device transpose kernel — populated only on the WGSL path.
-    /// cuBLAS dispatch transposes on CPU until a CUDA transpose kernel
-    /// is wired up.
+    /// On-device transpose kernel. Populated for both WGSL and CUDA paths.
     transpose: Option<::scry_gpu::Kernel>,
-    /// On-device GELU (tanh approximation). WGSL only for now.
+    /// On-device GELU (tanh approximation). Populated for both paths.
     gelu: Option<::scry_gpu::Kernel>,
 }
 
@@ -150,14 +147,31 @@ fn get_ctx() -> Option<&'static ScryCtx> {
 fn init_scry_context() -> Result<ScryCtx, String> {
     let dev = ::scry_gpu::Device::auto().map_err(|e| format!("scry-gpu: {e}"))?;
 
-    // Try CUDA path: cuBLAS for matmul (no kernel compilation needed).
+    // CUDA path: cuBLAS for matmul + NVRTC-compiled helper kernels so the
+    // persistent chain stays GPU-resident.
     #[cfg(feature = "scry-gpu-cuda")]
     if dev.backend_kind() == ::scry_gpu::BackendKind::Cuda {
+        let transpose = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::backward::TRANSPOSE_CUDA,
+                "transpose_2d",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: transpose_cuda compile: {e}"))?;
+        let gelu = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::GELU_CUDA,
+                "gelu",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: gelu_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
-            transpose: None,
-            gelu: None,
+            transpose: Some(transpose),
+            gelu: Some(gelu),
         });
     }
 
@@ -181,6 +195,29 @@ fn init_scry_context() -> Result<ScryCtx, String> {
 // ---------------------------------------------------------------------------
 // GPU matmul dispatch
 // ---------------------------------------------------------------------------
+
+/// Dispatch a kernel on the active backend, skipping the per-call host sync
+/// when running on CUDA. The next `Buffer::download` (or any explicit fence)
+/// observes the result; in tight chains this elides one stream sync per op.
+/// On Vulkan we keep the synchronous path — its async wins live behind the
+/// batched-dispatch port, which is off the active backlog (per
+/// `HACKING_GPU_BREAKDOWN.md`, post-cuBLAS section).
+fn dispatch_kernel(
+    ctx: &ScryCtx,
+    kernel: &::scry_gpu::Kernel,
+    buffers: &[&dyn ::scry_gpu::GpuBuf],
+    workgroups: [u32; 3],
+    push_constants: Option<&[u8]>,
+) -> ::scry_gpu::Result<()> {
+    #[cfg(feature = "scry-gpu-cuda")]
+    if matches!(ctx.matmul, MatmulStrategy::CuBlas) {
+        return ctx
+            .dev
+            .run_configured_async(kernel, buffers, workgroups, push_constants);
+    }
+    ctx.dev
+        .run_configured(kernel, buffers, workgroups, push_constants)
+}
 
 /// Run a single matmul on GPU. Returns None if GPU is unavailable.
 fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Option<Vec<f32>> {
@@ -207,7 +244,7 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Option<Vec<
         MatmulStrategy::CuBlas => {
             let mut sc = ctx.dev.alloc::<f32>(m * n).ok()?;
             ctx.dev
-                .cublas_matmul(&sa, &sb, &mut sc, m as u32, n as u32, k as u32)
+                .cublas_matmul_async(&sa, &sb, &mut sc, m as u32, n as u32, k as u32)
                 .ok()?;
             sc.download().ok()
         }
@@ -297,14 +334,14 @@ fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer
     let out = ctx.dev.alloc::<f32>(rows * cols).ok()?;
     let dims: [u32; 2] = [rows as u32, cols as u32];
     let groups = ((rows * cols) as u32).div_ceil(256);
-    ctx.dev
-        .run_configured(
-            kernel,
-            &[input, &out],
-            [groups, 1, 1],
-            Some(bytemuck::bytes_of(&dims)),
-        )
-        .ok()?;
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[input, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims)),
+    )
+    .ok()?;
     Some(out)
 }
 
@@ -324,14 +361,14 @@ fn run_unary_elementwise(
     let out = ctx.dev.alloc::<f32>(n).ok()?;
     let dims: [u32; 1] = [n as u32];
     let groups = (n as u32).div_ceil(256);
-    ctx.dev
-        .run_configured(
-            kernel,
-            &[input, &out],
-            [groups, 1, 1],
-            Some(bytemuck::bytes_of(&dims)),
-        )
-        .ok()?;
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[input, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims)),
+    )
+    .ok()?;
     Some(out)
 }
 
@@ -356,6 +393,9 @@ fn gpu_gelu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
 /// output without round-tripping through CPU. Returns `None` if the GPU path
 /// is unavailable for the given inputs (caller should fall back to CPU).
 ///
+/// On CUDA, dispatches to cuBLAS SGEMM (≈45% of f32 peak on RTX 5070 Ti).
+/// On Vulkan, dispatches to the WGSL coarse 4×4 tiled matmul (~19%).
+///
 /// Preconditions enforced by caller via [`should_use_gpu`].
 fn gpu_matmul_persistent(
     a: &ScryGpuStorage,
@@ -367,20 +407,12 @@ fn gpu_matmul_persistent(
     trans_b: bool,
 ) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
-    // cuBLAS path doesn't have a CUDA transpose kernel wired yet; defer to
-    // the legacy materialize-and-download path for now.
-    // Single-arm without scry-gpu-cuda — clippy doesn't see the cfg arm.
-    #[allow(clippy::infallible_destructuring_match)]
-    let kernel = match &ctx.matmul {
-        MatmulStrategy::Wgsl(k) => k,
-        #[cfg(feature = "scry-gpu-cuda")]
-        MatmulStrategy::CuBlas => return None,
-    };
 
     let buf_a = as_gpu_buffer(a)?;
     let buf_b = as_gpu_buffer(b)?;
 
-    // Transpose on-device when needed. The shader expects row-major M×K and K×N.
+    // Transpose on-device when needed. The matmul kernels (WGSL and cuBLAS)
+    // both expect row-major M×K and K×N.
     let a_t;
     let buf_a_ref: &Buffer<f32> = if trans_a {
         a_t = gpu_transpose(&buf_a, k, m)?;
@@ -396,16 +428,35 @@ fn gpu_matmul_persistent(
         &buf_b
     };
 
-    let out = ctx.dev.alloc::<f32>(m * n).ok()?;
-    let dims: [u32; 3] = [m as u32, n as u32, k as u32];
-    ctx.dev
-        .run_configured(
-            kernel,
-            &[buf_a_ref, buf_b_ref, &out],
-            [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
-            Some(bytemuck::bytes_of(&dims)),
-        )
-        .ok()?;
+    // `mut` only needed on the cuBLAS arm; Vulkan path doesn't mutate the binding.
+    #[allow(unused_mut)]
+    let mut out = ctx.dev.alloc::<f32>(m * n).ok()?;
+    match &ctx.matmul {
+        MatmulStrategy::Wgsl(kernel) => {
+            let dims: [u32; 3] = [m as u32, n as u32, k as u32];
+            ctx.dev
+                .run_configured(
+                    kernel,
+                    &[buf_a_ref, buf_b_ref, &out],
+                    [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+                    Some(bytemuck::bytes_of(&dims)),
+                )
+                .ok()?;
+        }
+        #[cfg(feature = "scry-gpu-cuda")]
+        MatmulStrategy::CuBlas => {
+            ctx.dev
+                .cublas_matmul_async(
+                    buf_a_ref,
+                    buf_b_ref,
+                    &mut out,
+                    m as u32,
+                    n as u32,
+                    k as u32,
+                )
+                .ok()?;
+        }
+    }
 
     Some(ScryGpuStorage::Gpu {
         buf: Arc::new(out),

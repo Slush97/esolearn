@@ -1,41 +1,57 @@
-# GPU-Resident scry-llm — Session Handoff (Round 2, 2026-05-08)
+# GPU-Resident scry-llm — Session Handoff (Round 4, 2026-05-09)
 
-You are continuing work on branch `gpu-resident/scry-vision`. This doc supersedes the previous handoff (the breakdown experiment it called for has been done). Read in this order:
+You are continuing work on branch `gpu-resident/scry-vision`. This round closed the async-dispatch refactor the previous handoff called for. Read in this order:
 
 1. This doc.
 2. Memory entry `project_scry_vision_gpu_residency.md` (durable cross-session context).
-3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research that justifies the next move).
+3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research + post-cuBLAS + post-async sections at the bottom).
 
 ## What's done
 
-M1 (ScryGpuStorage enum, persistent matmul on Wgsl) and M2 (1/6 — GELU shader on Wgsl) shipped earlier. Recent investigation phase landed:
+M1 (ScryGpuStorage enum, persistent matmul on Wgsl) and M2 (1/6 — GELU shader on Wgsl) shipped earlier. Recent commits and in-flight work:
 
 ```
+3413894 docs: handoff Round 2 — next move is cuBLAS into persistent matmul
 66fa7dc docs(scry-llm): competitive comparison — cuBLAS, PyTorch, and the gap
 190f5d9 fix(scry-gpu): bring CUDA backend up to cudarc 0.19.3 API
 08e00a5 bench(scry-llm): batched-dispatch POC validates 22-29% wins at common sizes
 7b1abc5 bench(scry-llm): GPU breakdown bench identifies dispatch as dominant cost
 ```
 
-## The big finding
+Round 3 (cuBLAS plumbing) and Round 4 (async dispatch) ship together in this handoff's commit. cuBLAS is now wired into `gpu_matmul_persistent` with CUDA-compiled `TRANSPOSE_CUDA` / `GELU_CUDA` helpers; per-call `stream.synchronize()` is gone from the persistent path. Storage-boundary sync moved to `CudaBuffer::read_back` — required because cudarc's `clone_dtoh` on plain `Vec<T>` does not block (`SyncOnDrop::Sync(None)` is a no-op).
 
-PyTorch matmul on RTX 5070 Ti ≡ scry-gpu cuBLAS within 1% (both ~24.5 TFLOPS at 1024³). Our WGSL kernel: 10.69 TFLOPS. **The kernel-quality gap is the dominant source of our 2.6–6× slowdown vs PyTorch end-to-end.** scry-gpu already has a working cuBLAS path (`Device::cublas_matmul` at `crates/scry-gpu/src/device.rs:600`); it's just not plumbed into the *persistent* matmul.
+Headlines:
+- **cuBLAS:** matmul+gelu chain at 1024³ dropped 238 µs (WGSL) → 128 µs — 1.85×, vs PyTorch's 90 µs. At small (128×256×128) the chain dropped 4×.
+- **Async dispatch:** chained-total at small dropped another −19% (34.09 → 27.46 µs). Medium/large unchanged because download dominates the bench. Per-stage matmul/gelu numbers are now misleading under async — only the chained total is meaningful.
 
-## Next work — plumb cuBLAS into the persistent matmul path on CUDA
+## Strategic direction — CUDA first
 
-Today, `gpu_matmul_persistent` (in `crates/scry-llm/src/backend/scry_gpu.rs`, lines ~360–415) early-returns `None` on cuBLAS at line 377. The cuBLAS path uses the legacy `gpu_matmul` which uploads → computes → downloads on every call — defeating M1's residency guarantee.
+**Decision (2026-05-08):** scry-llm/scry-vision optimization work focuses primarily on CUDA. PyTorch is also CUDA-first, so that's where parity is reachable; Apple/AMD users have other inference tooling (llama.cpp + Metal, etc.) and the Vulkan substrate gap is structural, not solvable by more engineering. WGSL kernels stay correct and supported, but performance investment goes into CUDA.
 
-To get cuBLAS users on the GPU-resident path:
+Concrete consequences:
+- New ops (M2 backlog: softmax, layernorm, batchnorm, pool, conv2d) ship CUDA-first; WGSL versions can lag or stay CPU-fallback indefinitely if they're not in a hot path.
+- The Vulkan batched-dispatch port (validated by `gpu_batched_poc`, 22–29% wins) is **off the active backlog**. The POC bench stays for reference but isn't the next move anymore.
+- The yardstick for "is this fast enough" is PyTorch on the same NVIDIA GPU, not self-vs-self.
 
-1. **Add a cuBLAS arm to `gpu_matmul_persistent`.** Replace the early-return with a call to `ctx.dev.cublas_matmul(...)`. That function already takes `Buffer<f32>` inputs and writes to a `&mut Buffer<f32>`; no allocation work to do. Wrap the result in `ScryGpuStorage::Gpu`.
-2. **Wire a CUDA transpose shader.** WGSL transpose lives at `crates/scry-gpu/src/shaders.rs` (used by `gpu_transpose`). Add an NVRTC-compiled CUDA equivalent. Set `transpose: Some(...)` for the cuBLAS branch of `init_scry_context` (currently `None` there).
-3. **Wire a CUDA GELU shader.** Same pattern — WGSL GELU already exists, add CUDA, populate `gelu: Some(...)` for cuBLAS init. The GELU shader exists in scry-gpu's `shaders::elementwise::GELU` which today is WGSL only.
-4. **Validate.** Re-run `gpu_breakdown` with `--features scry-gpu-cuda`. At 1024³ we should approach PyTorch's ~90 µs chain (down from 220 µs unbatched WGSL). At small sizes we expect more modest gains since launch overhead doesn't change.
-5. **Update HACKING_GPU_BREAKDOWN.md** with the post-cuBLAS numbers and refresh the path-forward analysis.
+## Next work — workspace pool for output buffers
 
-### Why this and not batched dispatch
+Every call to `gpu_matmul_persistent` / `gpu_gelu_persistent` does a fresh `ctx.dev.alloc::<f32>(m * n)`. Under steady-state inference (e.g. a transformer running many layers per token) that's hundreds of allocations per forward pass. A simple per-size buffer pool keyed by element count would erase the alloc churn — likely a few µs per call at small sizes, larger savings as alloc gets more expensive.
 
-The batched-dispatch POC (commit 08e00a5) validated 22–29% savings on Vulkan. cuBLAS plumbing closes ~80% of the gap to PyTorch on NVIDIA. **CUDA is bigger leverage on the hardware most users have.** Once the cuBLAS persistent path works, batched dispatch becomes the right next move — it primarily helps Vulkan platforms (Apple via MoltenVK, AMD on Linux, integrated GPUs) where there's no CUDA fallback.
+Approach: `OnceLock<Mutex<HashMap<usize, Vec<Buffer<f32>>>>>` in `scry_gpu.rs`. On call, pop a buffer of the right size; if none available, alloc fresh. On the result-tensor's drop (or via a wrapper), return the underlying buffer to the pool. Bound the pool size per-key to avoid hoarding (e.g. 4 buffers max).
+
+Validate with `gpu_breakdown` and the existing scry-llm tests. Numerical equivalence must hold (pool returns whatever was last written; new allocations should not assume zero-initialization unless we add it).
+
+## Backlog after workspace pool
+
+In rough priority order, all CUDA-focused:
+
+1. **Tune `GPU_MIN_ELEMENTS`** for CUDA. The 65,536 cutoff was picked when small-matmul was 0.18 TFLOPS; on cuBLAS it's now 0.70+ TFLOPS, so the threshold is probably too conservative on the CUDA path. One sweep through realistic sizes, pick the new crossover.
+2. **M2 CUDA kernels** — softmax, layernorm, batchnorm, then conv2d (the hard one). Each unblocks a class of vision/transformer models. WGSL versions can follow opportunistically.
+3. **Real model bench**: pick a small-but-real workload (BERT-base, ViT-small, ResNet-18) and time end-to-end on CUDA vs PyTorch. Operator-level wins don't count until they show up in a real forward pass.
+
+## Image-gen path (longer horizon)
+
+Strategic context: this branch is phase 1 of the broader image-generation roadmap (per `project_scry_vision_gpu_residency.md` and `project_gpu_persistent_tensors.md`). After M2 kernels land, the natural next milestone is a tiny VAE decoder driven by scry-llm's autoregressive loop — the smallest end-to-end "image in → image out" target that exercises the full GPU-resident pipeline. conv2d is the gating kernel.
 
 ### Build & validation commands
 
@@ -76,6 +92,7 @@ Stop and ask before:
 - Adding heavy deps (candle-core, ort, tch) — multi-hour decisions.
 - Touching scry-vision model files (resnet.rs, vit.rs, clip.rs) — M3/M4, comes after the M2 kernels.
 - Modifying the `MathBackend` trait surface — affects scry-llm's whole LLM inference path.
+- Adding async-sync semantics across scry-gpu's backend trait — talk through the API shape first; mirroring Vulkan-style fences vs CUDA streams cleanly is a design call.
 - Merging this branch to main — wait for measurable wins vs PyTorch on real models, not just operators.
 
 Otherwise: commit small, run the bench between steps, keep the tree clean.
