@@ -239,7 +239,18 @@ impl RandomForestClassifier {
             })
             .collect();
 
-        // Aggregate feature importances.
+        // Drop trees whose fit() silently failed — keeping them would bias
+        // averages (predict_proba, feature_importances_) toward zero.
+        let n_attempted = trees.len();
+        trees.retain(|t| t.flat_tree.is_some());
+        if trees.is_empty() {
+            return Err(ScryLearnError::InvalidParameter(format!(
+                "RandomForestClassifier: all {n_attempted} trees failed to fit \
+                 \u{2014} check input data and hyperparameters"
+            )));
+        }
+
+        // Aggregate feature importances over successful trees only.
         self.feature_importances_ = vec![0.0; self.n_features];
         for tree in &trees {
             if let Ok(imp) = tree.feature_importances() {
@@ -404,6 +415,16 @@ impl RandomForestClassifier {
         self.trees.len()
     }
 
+    /// Number of requested trees that failed to fit.
+    ///
+    /// Random forests intentionally swallow per-tree training errors so that
+    /// transient bootstrap pathologies don't kill the whole fit. This getter
+    /// reports how many of the requested `n_estimators` were dropped — if
+    /// non-zero, the resulting forest is smaller than asked for.
+    pub fn n_failed_trees(&self) -> usize {
+        self.n_estimators.saturating_sub(self.trees.len())
+    }
+
     /// Get individual trees (for visualization or inspection).
     pub fn trees(&self) -> &[DecisionTreeClassifier] {
         &self.trees
@@ -528,6 +549,16 @@ impl RandomForestRegressor {
             })
             .collect();
 
+        // Drop trees whose fit() silently failed.
+        let n_attempted = trees.len();
+        trees.retain(|t| t.flat_tree.is_some());
+        if trees.is_empty() {
+            return Err(ScryLearnError::InvalidParameter(format!(
+                "RandomForestRegressor: all {n_attempted} trees failed to fit \
+                 \u{2014} check input data and hyperparameters"
+            )));
+        }
+
         self.feature_importances_ = vec![0.0; self.n_features];
         for tree in &trees {
             if let Ok(imp) = tree.feature_importances() {
@@ -592,6 +623,18 @@ impl RandomForestRegressor {
     /// Get individual trees (for inspection or ONNX export).
     pub fn trees(&self) -> &[DecisionTreeRegressor] {
         &self.trees
+    }
+
+    /// Number of trained trees.
+    pub fn n_trees(&self) -> usize {
+        self.trees.len()
+    }
+
+    /// Number of requested trees that failed to fit.
+    ///
+    /// See [`RandomForestClassifier::n_failed_trees`].
+    pub fn n_failed_trees(&self) -> usize {
+        self.n_estimators.saturating_sub(self.trees.len())
     }
 
     /// Number of features the model was trained on.
@@ -717,6 +760,18 @@ mod tests {
             rf.oob_score().is_none(),
             "OOB score should be None when bootstrap=false"
         );
+    }
+
+    #[test]
+    fn test_healthy_fit_reports_no_failed_trees() {
+        let data = make_classification_data();
+        let mut rf = RandomForestClassifier::new()
+            .n_estimators(10)
+            .max_depth(5)
+            .seed(42);
+        rf.fit(&data).unwrap();
+        assert_eq!(rf.n_trees(), 10);
+        assert_eq!(rf.n_failed_trees(), 0);
     }
 
     #[test]
