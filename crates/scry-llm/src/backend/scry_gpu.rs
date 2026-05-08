@@ -228,7 +228,7 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Option<Vec<
 
     match &ctx.matmul {
         MatmulStrategy::Wgsl(kernel) => {
-            let sc = ctx.dev.alloc::<f32>(m * n).ok()?;
+            let sc = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
             let dims: [u32; 3] = [m as u32, n as u32, k as u32];
             ctx.dev
                 .run_configured(
@@ -242,7 +242,7 @@ fn gpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Option<Vec<
         }
         #[cfg(feature = "scry-gpu-cuda")]
         MatmulStrategy::CuBlas => {
-            let mut sc = ctx.dev.alloc::<f32>(m * n).ok()?;
+            let mut sc = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
             ctx.dev
                 .cublas_matmul_async(&sa, &sb, &mut sc, m as u32, n as u32, k as u32)
                 .ok()?;
@@ -331,7 +331,8 @@ fn as_gpu_buffer(storage: &ScryGpuStorage) -> Option<Arc<Buffer<f32>>> {
 fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer<f32>> {
     let ctx = get_ctx()?;
     let kernel = ctx.transpose.as_ref()?;
-    let out = ctx.dev.alloc::<f32>(rows * cols).ok()?;
+    // Transpose kernel writes every output element; zero-init is wasted work.
+    let out = ctx.dev.alloc_uninit::<f32>(rows * cols).ok()?;
     let dims: [u32; 2] = [rows as u32, cols as u32];
     let groups = ((rows * cols) as u32).div_ceil(256);
     dispatch_kernel(
@@ -358,7 +359,9 @@ fn run_unary_elementwise(
     n: usize,
 ) -> Option<Buffer<f32>> {
     let ctx = get_ctx()?;
-    let out = ctx.dev.alloc::<f32>(n).ok()?;
+    // Elementwise kernels dispatch one thread per output element; every byte
+    // is overwritten before any read.
+    let out = ctx.dev.alloc_uninit::<f32>(n).ok()?;
     let dims: [u32; 1] = [n as u32];
     let groups = (n as u32).div_ceil(256);
     dispatch_kernel(
@@ -429,8 +432,10 @@ fn gpu_matmul_persistent(
     };
 
     // `mut` only needed on the cuBLAS arm; Vulkan path doesn't mutate the binding.
+    // Both matmul kernels (WGSL and cuBLAS SGEMM) write the entire C[m*n]
+    // matrix, so zero-init is wasted work.
     #[allow(unused_mut)]
-    let mut out = ctx.dev.alloc::<f32>(m * n).ok()?;
+    let mut out = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
     match &ctx.matmul {
         MatmulStrategy::Wgsl(kernel) => {
             let dims: [u32; 3] = [m as u32, n as u32, k as u32];
@@ -539,8 +544,8 @@ impl ScryGpuBackend {
         let buf_a = as_gpu_buffer(a)?;
         let buf_b = as_gpu_buffer(b)?;
 
-        let c_buf = ctx.dev.alloc::<f32>(m * n).ok()?;
-        let g_buf = ctx.dev.alloc::<f32>(m * n).ok()?;
+        let c_buf = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
+        let g_buf = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
 
         let mm_dims: [u32; 3] = [m as u32, n as u32, k as u32];
         let gelu_dims: [u32; 1] = [(m * n) as u32];

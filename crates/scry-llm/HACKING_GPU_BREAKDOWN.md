@@ -286,8 +286,13 @@ active backlog**.
 1. **(Done)** Plumb cuBLAS + CUDA helpers into the persistent path.
 2. **(Done, 2026-05-09)** Drop internal sync from cuBLAS / `dispatch_cuda`.
    See "Async dispatch results" below.
-3. **Workspace pool** for `gpu_matmul_persistent` / `gpu_gelu_persistent`
-   output buffers. A few µs per call, removes alloc churn.
+3. **(Done, 2026-05-09)** Skip wasted zero-init on output buffers via
+   `Backend::alloc_uninit`. Cudarc's stream allocator already pools, so
+   the actual win was eliminating the unnecessary `cuMemsetD8Async`
+   dispatch per `dev.alloc::<f32>()` call. A full Drop-wrapper buffer pool
+   (the original "workspace pool" plan) was deemed too invasive vs the
+   marginal alloc-churn-on-top-of-pool win. See "alloc_uninit results"
+   below.
 4. **Tune `GPU_MIN_ELEMENTS`** on CUDA. Cutoff was set when small-matmul
    was 0.18 TFLOPS; cuBLAS is now 0.70. Threshold likely too conservative.
 5. **M2 CUDA kernels** — softmax, layernorm, batchnorm, conv2d (hard).
@@ -366,6 +371,62 @@ data is not guaranteed visible on return. `CudaBuffer::read_back` now
 calls `stream.synchronize()` explicitly after the copy. Any new kernel
 or dispatch path added on the CUDA backend should follow the same
 pattern: queue async, sync at storage boundaries.
+
+## alloc_uninit results (2026-05-09)
+
+`cudarc::Stream::alloc_zeros` calls `cuMemAllocAsync` (cheap — hits CUDA's
+stream-ordered pool) followed by `cuMemsetD8Async` (a separate kernel
+dispatch that writes zeros across the buffer). For output buffers that the
+next kernel fully overwrites — matmul C, GELU output, transpose output —
+the zero-fill is wasted work.
+
+Added `Backend::alloc_uninit` (default impl falls back to `alloc`, CUDA
+overrides to call `Stream::alloc::<u8>` and skip the memset). Mirrored on
+`Device::alloc_uninit<T>`. scry-llm's persistent path now uses it for all
+output buffers (matmul, GELU, transpose, plus the legacy `gpu_matmul` and
+the bench-only batched helper).
+
+Re-running the breakdown bench after the change:
+
+| stage (median µs)  | small | medium | large (1024³) |
+|---|---:|---:|---:|
+| upload B           |   5.98 |  19.21 |  146.66 |
+| matmul (queue)     |   5.85 |   5.68 |    8.04 |
+| gelu (queue)       |   1.80 |   1.84 |    1.99 |
+| download C         |  11.69 |  59.01 | 1065.23 |
+| **chained total**  | **25.39** | **85.98** | **1225.48** |
+
+| size  | post-async chain | post-uninit chain | delta |
+|---|---:|---:|---:|
+| small  (128, 256, 128) |  27.46 µs |  25.39 µs | **−2.1 µs (−7.5%)** |
+| medium (256, 512, 256) |  86.96 µs |  85.98 µs |   ≈ noise          |
+| large  (1024³)         | 1243.68 µs | 1225.48 µs |  −18 µs (−1.5%)    |
+
+Per-stage GELU at small dropped 3.27 → 1.80 µs (−45%) — the zero-init
+dispatch was nearly half the stage time at this scale. Per-stage matmul
+dropped 7.32 → 5.85 µs (−20%) for the same reason.
+
+Cumulative wins this session (cuBLAS already in place at start, then
+async dispatch + alloc_uninit on top): **34.09 → 25.39 µs at small,
+−25.5%**.
+
+### Note on comparing to PyTorch under async dispatch
+
+The earlier "Matmul + GELU only (vs PyTorch — fair comparison)" table
+was meaningful when each stage synced internally, because matmul/gelu
+medians measured actual GPU work. Under async dispatch the per-stage
+values are launch+queue time only — the GPU is still running when the
+timer stops, with the actual compute charged to the next stage that
+syncs (download). So per-stage TFLOPS and per-stage µs are no longer
+apples-to-apples vs PyTorch.
+
+The chained total *is* still apples-to-apples (both ends synced). For
+small/medium that's the meaningful number. For 1024³, the bench's
+download cost dominates — real forward passes don't materialize after
+every operator, so it overstates what models actually pay. Real-model
+perf comparison (item #6 above) is where the cumulative wins get
+validated end-to-end. Per-op wins don't count until they show up in a
+full forward pass.
 
 ## Source
 

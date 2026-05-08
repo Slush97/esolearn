@@ -33,21 +33,32 @@ Concrete consequences:
 - The Vulkan batched-dispatch port (validated by `gpu_batched_poc`, 22–29% wins) is **off the active backlog**. The POC bench stays for reference but isn't the next move anymore.
 - The yardstick for "is this fast enough" is PyTorch on the same NVIDIA GPU, not self-vs-self.
 
-## Next work — workspace pool for output buffers
+## Round 5 (also in this commit) — alloc_uninit
 
-Every call to `gpu_matmul_persistent` / `gpu_gelu_persistent` does a fresh `ctx.dev.alloc::<f32>(m * n)`. Under steady-state inference (e.g. a transformer running many layers per token) that's hundreds of allocations per forward pass. A simple per-size buffer pool keyed by element count would erase the alloc churn — likely a few µs per call at small sizes, larger savings as alloc gets more expensive.
+Discovered that the proposed "workspace pool" was solving the wrong problem. cudarc's `Stream::alloc_zeros` already hits CUDA's stream-ordered memory pool (`cuMemAllocAsync`) — actual alloc churn is sub-microsecond. The wasted work was the `cuMemsetD8Async` dispatch that `alloc_zeros` adds: a separate kernel that zero-fills buffers we're about to overwrite.
 
-Approach: `OnceLock<Mutex<HashMap<usize, Vec<Buffer<f32>>>>>` in `scry_gpu.rs`. On call, pop a buffer of the right size; if none available, alloc fresh. On the result-tensor's drop (or via a wrapper), return the underlying buffer to the pool. Bound the pool size per-key to avoid hoarding (e.g. 4 buffers max).
+Fix: added `Backend::alloc_uninit` (CUDA overrides to skip the memset; default impl falls back to `alloc`) and `Device::alloc_uninit<T>`. scry-llm's persistent path uses it for all outputs the kernel fully overwrites — matmul C, GELU output, transpose output. Tests pass; numerical equivalence preserved.
 
-Validate with `gpu_breakdown` and the existing scry-llm tests. Numerical equivalence must hold (pool returns whatever was last written; new allocations should not assume zero-initialization unless we add it).
+Bench delta (small chain): 27.46 → 25.39 µs, −7.5%. Per-stage GELU at small dropped −45% (3.27 → 1.80 µs) — the zero-init dispatch was nearly half the stage time.
 
-## Backlog after workspace pool
+Cumulative wins this branch (cuBLAS already in place at start, async dispatch + alloc_uninit on top): **34.09 → 25.39 µs at small, −25.5%**.
+
+A full Drop-wrapper buffer pool was deferred — the alloc-churn-on-top-of-CUDA-pool win is marginal once zero-init is gone, and the wrapper would invade `ScryGpuStorage::Gpu` and every consumer that derefs `Arc<Buffer<f32>>`. Revisit only if a real-model bench shows alloc as a meaningful fraction of forward-pass time.
+
+## Next work — tune `GPU_MIN_ELEMENTS` on CUDA
+
+The 65,536-element cutoff was picked when small-matmul was 0.18 TFLOPS; on cuBLAS it's now 0.70+ TFLOPS (4× faster). With async dispatch + uninit alloc the per-call overhead is also lower. The threshold is almost certainly too conservative.
+
+Approach: write a small sweep bench that times CPU vs GPU at sizes spanning 1K–256K elements (M=K=N varies), pick the crossover where GPU starts beating CPU+BLAS for matmul and CPU for GELU. Adjust both `GPU_MIN_ELEMENTS` (matmul) and `GPU_ELEMENTWISE_MIN` (GELU) constants.
+
+Should be a 1-hour task. The reward is small (workloads in the 16K–64K element range start using GPU and getting cuBLAS speeds) but it's a clean closeout before moving to M2 kernels.
+
+## Backlog after threshold tuning
 
 In rough priority order, all CUDA-focused:
 
-1. **Tune `GPU_MIN_ELEMENTS`** for CUDA. The 65,536 cutoff was picked when small-matmul was 0.18 TFLOPS; on cuBLAS it's now 0.70+ TFLOPS, so the threshold is probably too conservative on the CUDA path. One sweep through realistic sizes, pick the new crossover.
-2. **M2 CUDA kernels** — softmax, layernorm, batchnorm, then conv2d (the hard one). Each unblocks a class of vision/transformer models. WGSL versions can follow opportunistically.
-3. **Real model bench**: pick a small-but-real workload (BERT-base, ViT-small, ResNet-18) and time end-to-end on CUDA vs PyTorch. Operator-level wins don't count until they show up in a real forward pass.
+1. **M2 CUDA kernels** — softmax, layernorm, batchnorm, then conv2d (the hard one). Each unblocks a class of vision/transformer models. WGSL versions can follow opportunistically.
+2. **Real model bench**: pick a small-but-real workload (BERT-base, ViT-small, ResNet-18) and time end-to-end on CUDA vs PyTorch. Operator-level wins don't count until they show up in a real forward pass.
 
 ## Image-gen path (longer horizon)
 

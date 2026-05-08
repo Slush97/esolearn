@@ -26,8 +26,24 @@ pub trait Backend: Sized {
     /// Allocate a GPU buffer and upload `data` into it.
     fn upload(&self, data: &[u8]) -> Result<Self::Buffer>;
 
-    /// Allocate an uninitialized GPU buffer of `size` bytes.
+    /// Allocate a GPU buffer of `size` bytes.
+    ///
+    /// On backends that zero-initialize by default (CUDA), this method does
+    /// the zero-fill. Use [`Self::alloc_uninit`] when the caller will
+    /// overwrite the buffer before any read.
     fn alloc(&self, size: u64) -> Result<Self::Buffer>;
+
+    /// Allocate a GPU buffer with **undefined** contents.
+    ///
+    /// Faster than [`Self::alloc`] on backends that would otherwise zero-fill
+    /// (CUDA dispatches a `cuMemsetD8Async` kernel under the default path).
+    /// The caller must overwrite every byte that will subsequently be read;
+    /// otherwise downstream computation observes garbage.
+    ///
+    /// Default implementation falls back to [`Self::alloc`].
+    fn alloc_uninit(&self, size: u64) -> Result<Self::Buffer> {
+        self.alloc(size)
+    }
 
     /// Compile a SPIR-V shader module and dispatch it.
     fn dispatch(

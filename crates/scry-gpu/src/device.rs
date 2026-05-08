@@ -126,7 +126,12 @@ impl Device {
         })
     }
 
-    /// Allocate an uninitialized GPU buffer for `count` elements of type `T`.
+    /// Allocate a GPU buffer for `count` elements of type `T`.
+    ///
+    /// On backends that zero-initialize by default (CUDA), the buffer is
+    /// zero-filled before return. Use [`Self::alloc_uninit`] in tight loops
+    /// where the caller fully overwrites the buffer (matmul output, kernel
+    /// dispatches that write every element).
     pub fn alloc<T: bytemuck::Pod>(&self, count: usize) -> Result<Buffer<T>> {
         let size = count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
             GpuError::AllocationFailed {
@@ -135,6 +140,28 @@ impl Device {
             }
         })? as u64;
         let inner = self.alloc_raw(size)?;
+        Ok(Buffer {
+            inner,
+            len: count,
+            _marker: std::marker::PhantomData,
+        })
+    }
+
+    /// Allocate a GPU buffer with **undefined** contents.
+    ///
+    /// Faster than [`Self::alloc`] on CUDA (skips a `cuMemsetD8Async`
+    /// dispatch). Caller must overwrite every element that will later be
+    /// read — otherwise downstream computation observes garbage. Use this
+    /// only for outputs that the next kernel writes in full (matmul C
+    /// matrix, elementwise kernels with full-coverage thread dispatch).
+    pub fn alloc_uninit<T: bytemuck::Pod>(&self, count: usize) -> Result<Buffer<T>> {
+        let size = count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+            GpuError::AllocationFailed {
+                requested: u64::MAX,
+                device_max: self.memory(),
+            }
+        })? as u64;
+        let inner = self.alloc_uninit_raw(size)?;
         Ok(Buffer {
             inner,
             len: count,
@@ -428,6 +455,21 @@ impl Device {
             #[cfg(feature = "cuda")]
             DeviceInner::Cuda(b) => {
                 let buf = b.alloc(size)?;
+                Ok(BackendBuffer::Cuda(buf))
+            }
+        }
+    }
+
+    fn alloc_uninit_raw(&self, size: u64) -> Result<BackendBuffer> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let buf = b.alloc_uninit(size)?;
+                Ok(BackendBuffer::Vulkan(buf))
+            }
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(b) => {
+                let buf = b.alloc_uninit(size)?;
                 Ok(BackendBuffer::Cuda(buf))
             }
         }

@@ -271,6 +271,23 @@ impl Backend for CudaBackend {
         })
     }
 
+    fn alloc_uninit(&self, size: u64) -> Result<Self::Buffer> {
+        // SAFETY: cudarc's `Stream::alloc` returns a CudaSlice<u8> whose
+        // contents are undefined. That's exactly the contract of
+        // alloc_uninit — caller is responsible for fully overwriting
+        // before any read.
+        let inner = unsafe {
+            self.stream
+                .alloc::<u8>(size as usize)
+                .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?
+        };
+        Ok(CudaBuffer {
+            inner,
+            size,
+            stream: Arc::clone(&self.stream),
+        })
+    }
+
     fn dispatch(
         &self,
         _spirv: &[u32],
