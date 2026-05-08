@@ -1,10 +1,46 @@
-# GPU-Resident scry-llm — Session Handoff (Round 4, 2026-05-09)
+# GPU-Resident scry-llm — Session Handoff (Round 5, 2026-05-08)
 
-You are continuing work on branch `gpu-resident/scry-vision`. This round closed the async-dispatch refactor the previous handoff called for. Read in this order:
+You are continuing work on branch `gpu-resident/scry-vision`. Round 5 closed the threshold-tuning closeout the previous handoff called for and started M2 with a CUDA softmax kernel. Read in this order:
 
-1. This doc.
+1. This doc — Round 5 section first, then Round 4 below for prior context.
 2. Memory entry `project_scry_vision_gpu_residency.md` (durable cross-session context).
-3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research + post-cuBLAS + post-async sections at the bottom).
+3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research + post-cuBLAS + post-async + threshold-tuning sections at the bottom).
+
+## Round 5 (2026-05-08) — what's new
+
+```
+1e4df2d feat(scry-gpu, scry-llm): M2 — CUDA row-wise softmax kernel
+39ffae8 perf(scry-llm): retune GPU dispatch thresholds against post-async sweep
+```
+
+**Threshold retune.** Empirical sweep (`crates/scry-llm/benches/threshold_sweep.rs`) showed the existing cutoffs were set against pre-cuBLAS WGSL numbers. Square matmul crossover is ~50K FMAs (side 32 cpu 6 µs / gpu 13 µs; side 40 cpu 16 µs / gpu 13 µs); elementwise crossover is ~1.5K elements (n=1024 cpu 6 µs / gpu 8 µs; n=2048 cpu 12 µs / gpu 9 µs). Updated `GPU_MIN_ELEMENTS = 32_768` (was 65 536) and `GPU_ELEMENTWISE_MIN = 2_048` (was 16 384). gpu_breakdown unchanged within noise across small/medium/large.
+
+The new constants bias slightly aggressive vs the single-op breakeven because the persistent path makes chain-mode crossovers lower than single-op crossovers — once a tensor is GPU-resident, the kernel dispatch is the only marginal cost.
+
+**M2 softmax (CUDA).** `SOFTMAX_ROWWISE_CUDA` in `crates/scry-gpu/src/shaders.rs::elementwise`. One block per row of a `[n_rows, d]` tensor, 256 threads, static shared memory for the max reduction and sum reduction. `d > 256` handled by a strided per-thread loop, so any last-dim length works without a recompile. Wired into `MathBackend::softmax` via `gpu_softmax_persistent` through the existing `dispatch_kernel` helper (async on CUDA, sync on Vulkan). Storage stays on device — softmax over a `Gpu` storage returns `Gpu`, keeping attention chains GPU-resident.
+
+`GPU_SOFTMAX_MIN_ROWS = 32` — below ~32 rows the kernel-launch grid overhead loses to rayon's row-parallel CPU path. CUDA-only; Vulkan falls back to CPU per the strategic direction. New tests `gpu_softmax_matches_cpu_within_tolerance` (covers d=64 and d=512, asserts `is_gpu()` post-op so silent fallback fails) and `small_softmax_falls_back_to_cpu`.
+
+M2 status: **2/6 kernels done** (GELU, softmax). Remaining: layernorm, batchnorm, pool, conv2d.
+
+## Round 5 — next work, pick ONE
+
+(A) **M2 layernorm (CUDA)**. Same pattern as softmax — row-wise, one block per row, two block-wide reductions (mean, variance). Inputs `[N, D]` data + `[D]` gamma + `[D]` beta + eps. The CPU reference is `CpuBackend::layernorm_inference` in `crates/scry-llm/src/backend/cpu.rs` (returns `(out, mean, rstd)` triple — but `MathBackend::layernorm` already returns the triple, so plumb through). Test must assert `is_gpu()` on the output. ~2 hours including tests.
+
+(B) **Extend `gpu_breakdown` with attention-shape softmax + layernorm stages, then start a real-model bench**. The merge-to-main gate (HACKING_GPU_BREAKDOWN.md item #6) is end-to-end vs PyTorch on a real model — BERT-base, ViT-small, or ResNet-18. Operator wins don't count until they show up in a forward pass. This is the closeout path for the branch.
+
+(C) **Conv2d (the hard one)**. Im2col is straightforward but blows up memory at 7×7 ResNet stem (49× expansion). Direct conv2d is the right answer for ResNet but is a multi-day design problem. Don't pick this unless you want to commit; talk through the design call per the Round 4 stop conditions.
+
+Run benches with: `CUDARC_CUDA_VERSION=13010 cargo bench -p scry-llm --features scry-gpu-cuda --bench gpu_breakdown` (and `--bench threshold_sweep` for the new sweep). Tests with `cargo test`. CUDA-first remains; don't invest in Vulkan-specific wins.
+
+## Round 5 — new gotchas
+
+- **NVRTC doesn't include `<math.h>` / `<math_constants.h>` by default.** `INFINITY`, `FLT_MAX`, `M_PI`, etc. are NOT in scope inside `compile_cuda` source. Use literals — `-3.402823466e38f` for `-FLT_MAX`, `__int_as_float(0x7f800000)` for +inf if you really need it. The softmax kernel hit this on first compile and the test "passed" by silently skipping (because `to_gpu` errored out and the test caught the error).
+- **GPU tests can silently skip if init fails.** `to_gpu` returns `Err` when context init fails (e.g. NVRTC compile error in any kernel), and most existing tests early-return on that error. ALWAYS assert `is_gpu()` on the result of any persistent-path op when the CUDA feature is on, so a bad kernel fails the test instead of falling through to CPU. The new softmax test does this — copy the pattern.
+
+---
+
+# Round 4 (2026-05-09)  *(prior context — Round 5 supersedes the "next work" section)*
 
 ## What's done
 
