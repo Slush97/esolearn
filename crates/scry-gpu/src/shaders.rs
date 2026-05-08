@@ -658,6 +658,90 @@ extern \"C\" __global__ void layernorm_rowwise(
     }
 }";
 
+    /// `im2col` lowering for a 2D convolution input `[C_in, H_in, W_in]`.
+    ///
+    /// Produces a `[C_in*kH*kW, H_out*W_out]` matrix in row-major layout where
+    /// row `c*kH*kW + kh*kW + kw` and column `oh*W_out + ow` is the input
+    /// pixel at channel `c`, position `(oh*stride + kh - padding,
+    /// ow*stride + kw - padding)`, zero where that position lies outside the
+    /// input. Lowering convolution to a GEMM lets the cuBLAS path do the
+    /// arithmetic; the kernel here is the lowering itself.
+    ///
+    /// One thread per output element; each thread does one bounds check + one
+    /// load + one store. Memory-bound; the input read pattern is strided per
+    /// `(kh, kw)` but the working set is small (one channel plane fits in L2
+    /// for ResNet-class layers), so cache hit rate is high.
+    ///
+    /// **Kernel signature:** `im2col_nchw(const float* input, float* col,
+    /// unsigned int c_in, unsigned int h_in, unsigned int w_in,
+    /// unsigned int kh, unsigned int kw,
+    /// unsigned int stride, unsigned int padding,
+    /// unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(c_in*kh*kw*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const IM2COL_NCHW_CUDA: &str = "\
+extern \"C\" __global__ void im2col_nchw(
+    const float* input, float* col,
+    unsigned int c_in, unsigned int h_in, unsigned int w_in,
+    unsigned int kh, unsigned int kw,
+    unsigned int stride, unsigned int padding,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int khw = kh * kw;
+    unsigned int col_rows = c_in * khw;
+    unsigned int total = col_rows * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int row = idx / spatial_out;
+    unsigned int out_col = idx - row * spatial_out;
+
+    unsigned int c = row / khw;
+    unsigned int rem = row - c * khw;
+    unsigned int khi = rem / kw;
+    unsigned int kwi = rem - khi * kw;
+
+    unsigned int oh = out_col / w_out;
+    unsigned int ow = out_col - oh * w_out;
+
+    int ih = (int)(oh * stride + khi) - (int)padding;
+    int iw = (int)(ow * stride + kwi) - (int)padding;
+
+    float v = 0.0f;
+    if (ih >= 0 && ih < (int)h_in && iw >= 0 && iw < (int)w_in) {
+        v = input[(c * h_in + (unsigned int)ih) * w_in + (unsigned int)iw];
+    }
+    col[idx] = v;
+}";
+
+    /// Column-broadcast bias add: `out[r*cols + c] = a[r*cols + c] + bias[r]`.
+    ///
+    /// Mirrors the `[N, M] + [N, 1]` row-bias broadcast that
+    /// `CpuBackend::add` already handles — used by Conv2d to add a
+    /// `[C_out]` bias to a `[C_out, H_out*W_out]` matmul output without
+    /// rounding through the CPU. One thread per output element; the
+    /// per-row `bias[r]` load is L1-broadcast across the block.
+    ///
+    /// **Kernel signature:** `add_row_bias(const float* a, const float* bias,
+    /// float* out, unsigned int rows, unsigned int cols)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*cols).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const ADD_ROW_BIAS_CUDA: &str = "\
+extern \"C\" __global__ void add_row_bias(
+    const float* a, const float* bias, float* out,
+    unsigned int rows, unsigned int cols
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * cols;
+    if (idx >= total) return;
+    unsigned int r = idx / cols;
+    out[idx] = a[idx] + bias[r];
+}";
+
     /// 2D batch normalization (inference) with stored running stats.
     ///
     /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),

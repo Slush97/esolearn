@@ -29,8 +29,6 @@ pub struct Conv2d<B: MathBackend> {
     pub kernel_w: usize,
     pub stride: usize,
     pub padding: usize,
-    /// Reusable workspace to avoid per-forward allocation.
-    pub workspace: RefCell<Vec<f32>>,
     /// Cached Winograd F(2×2, 3×3) transformed filter weights as backend storage.
     /// 16 elements, each a `[C_out, C_in]` matrix in `B::Storage` form.
     /// Lazily computed on first forward pass for eligible convolutions.
@@ -107,7 +105,6 @@ impl<B: MathBackend> Conv2d<B> {
             kernel_w,
             stride,
             padding,
-            workspace: RefCell::new(Vec::new()),
             winograd_weight: RefCell::new(None),
         }
     }
@@ -146,6 +143,11 @@ impl<B: MathBackend> Conv2d<B> {
     }
 
     /// Im2col + matmul convolution (general case, also used as test reference).
+    ///
+    /// Lowers the convolution to a GEMM via `B::im2col_2d`, then multiplies by
+    /// the flattened weight matrix and adds the per-channel bias. Backends
+    /// with on-device im2col + matmul + row-bias-add kernels (e.g.
+    /// `ScryGpuBackend` on CUDA) keep the entire chain GPU-resident.
     pub fn forward_im2col(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let h_in = dims[1];
@@ -154,47 +156,17 @@ impl<B: MathBackend> Conv2d<B> {
         let h_out = (h_in + 2 * self.padding - self.kernel_h) / self.stride + 1;
         let w_out = (w_in + 2 * self.padding - self.kernel_w) / self.stride + 1;
         let spatial_out = h_out * w_out;
-
-        let input_vec = input.to_vec();
-
-        // im2col: [C_in * kH * kW, H_out * W_out]
         let col_rows = self.in_channels * self.kernel_h * self.kernel_w;
-        let needed = col_rows * spatial_out;
-        let mut col = self.workspace.borrow_mut();
-        if col.len() < needed {
-            col.resize(needed, 0.0);
-        }
 
-        for oh in 0..h_out {
-            for ow in 0..w_out {
-                let out_col = oh * w_out + ow;
-                for c in 0..self.in_channels {
-                    for kh in 0..self.kernel_h {
-                        for kw in 0..self.kernel_w {
-                            let ih = oh * self.stride + kh;
-                            let iw = ow * self.stride + kw;
-                            let val = if ih >= self.padding
-                                && ih < self.padding + h_in
-                                && iw >= self.padding
-                                && iw < self.padding + w_in
-                            {
-                                let h_idx = ih - self.padding;
-                                let w_idx = iw - self.padding;
-                                input_vec[c * h_in * w_in + h_idx * w_in + w_idx]
-                            } else {
-                                0.0 // zero padding
-                            };
-                            let row = c * self.kernel_h * self.kernel_w + kh * self.kernel_w + kw;
-                            col[row * spatial_out + out_col] = val;
-                        }
-                    }
-                }
-            }
-        }
-
-        let col_storage = B::from_vec(
-            col[..needed].to_vec(),
-            &Shape::new(&[col_rows, spatial_out]),
+        let col_storage = B::im2col_2d(
+            &input.data,
+            self.in_channels,
+            h_in,
+            w_in,
+            self.kernel_h,
+            self.kernel_w,
+            self.stride,
+            self.padding,
         );
 
         // Weight [out_ch, in_ch, kH, kW] has same flat layout as [out_ch, in_ch*kH*kW]
@@ -208,12 +180,15 @@ impl<B: MathBackend> Conv2d<B> {
             false,
         );
 
-        // Bias add: bias[out_ch] broadcast across spatial dims
-        let bias_col = B::from_vec(self.bias.to_vec(), &Shape::new(&[self.out_channels, 1]));
+        // Bias add: bias[out_ch] broadcast across spatial dims as a [C_out, 1]
+        // column vector. ScryGpuBackend's add detects this row-bias broadcast
+        // and routes to the on-device add_row_bias kernel.
+        let bias_col =
+            Tensor::<B>::new(B::clone_storage(&self.bias.data), Shape::new(&[self.out_channels, 1]));
         let out_shape = Shape::new(&[self.out_channels, spatial_out]);
         let result = B::add(
             &out_data,
-            &bias_col,
+            &bias_col.data,
             &out_shape,
             &Shape::new(&[self.out_channels, 1]),
             &out_shape,

@@ -181,6 +181,67 @@ pub trait MathBackend: DeviceBackend {
     /// GELU activation (tanh approximation).
     fn gelu(input: &Self::Storage) -> Self::Storage;
 
+    /// Im2col lowering for a 2D convolution.
+    ///
+    /// Input is `[in_channels, h_in, w_in]`; output is
+    /// `[in_channels*kernel_h*kernel_w, h_out*w_out]` in row-major layout
+    /// suitable for direct multiplication by a `[out_channels, in_channels*kernel_h*kernel_w]`
+    /// weight matrix. Zero-pads outside the input. Stride and padding are
+    /// symmetric (same value for height and width).
+    ///
+    /// `h_out = (h_in + 2*padding - kernel_h) / stride + 1` (and likewise
+    /// for `w_out`); callers compute these themselves.
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    #[allow(clippy::too_many_arguments)]
+    fn im2col_2d(
+        input: &Self::Storage,
+        in_channels: usize,
+        h_in: usize,
+        w_in: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        stride: usize,
+        padding: usize,
+    ) -> Self::Storage {
+        let input_v = Self::to_vec(input);
+        let h_out = (h_in + 2 * padding - kernel_h) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel_w) / stride + 1;
+        let spatial_out = h_out * w_out;
+        let col_rows = in_channels * kernel_h * kernel_w;
+        let mut col = vec![0.0f32; col_rows * spatial_out];
+
+        for oh in 0..h_out {
+            for ow in 0..w_out {
+                let out_col = oh * w_out + ow;
+                for c in 0..in_channels {
+                    for kh in 0..kernel_h {
+                        for kw in 0..kernel_w {
+                            let ih = oh * stride + kh;
+                            let iw = ow * stride + kw;
+                            let val = if ih >= padding
+                                && ih < padding + h_in
+                                && iw >= padding
+                                && iw < padding + w_in
+                            {
+                                let h_idx = ih - padding;
+                                let w_idx = iw - padding;
+                                input_v[c * h_in * w_in + h_idx * w_in + w_idx]
+                            } else {
+                                0.0
+                            };
+                            let row = c * kernel_h * kernel_w + kh * kernel_w + kw;
+                            col[row * spatial_out + out_col] = val;
+                        }
+                    }
+                }
+            }
+        }
+
+        Self::from_vec(col, &Shape::new(&[col_rows, spatial_out]))
+    }
+
     /// Embedding lookup: gather rows by indices.
     fn embedding(
         weight: &Self::Storage,

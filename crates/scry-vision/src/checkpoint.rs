@@ -115,7 +115,6 @@ pub fn load_conv2d<B: MathBackend>(
         kernel_w,
         stride,
         padding,
-        workspace: RefCell::new(Vec::new()),
         winograd_weight: RefCell::new(None),
     })
 }
@@ -171,7 +170,6 @@ pub fn load_conv2d_with_bias<B: MathBackend>(
         kernel_w,
         stride,
         padding,
-        workspace: RefCell::new(Vec::new()),
         winograd_weight: RefCell::new(None),
     })
 }

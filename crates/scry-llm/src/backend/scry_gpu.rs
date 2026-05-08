@@ -139,6 +139,12 @@ struct ScryCtx {
     /// On-device 2D batch-normalization (inference) with stored running stats.
     /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
     batchnorm: Option<::scry_gpu::Kernel>,
+    /// On-device im2col lowering for 2D convolution. CUDA-only; Vulkan path
+    /// is `None` and callers fall back to CPU.
+    im2col: Option<::scry_gpu::Kernel>,
+    /// On-device column-broadcast bias add (`out[r,c] = a[r,c] + bias[r]`).
+    /// Used to keep Conv2d's bias add GPU-resident after the matmul. CUDA-only.
+    add_row_bias: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -207,6 +213,22 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: batchnorm_cuda compile: {e}"))?;
+        let im2col = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::IM2COL_NCHW_CUDA,
+                "im2col_nchw",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: im2col_cuda compile: {e}"))?;
+        let add_row_bias = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::ADD_ROW_BIAS_CUDA,
+                "add_row_bias",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: add_row_bias_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
@@ -215,6 +237,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             softmax: Some(softmax),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
+            im2col: Some(im2col),
+            add_row_bias: Some(add_row_bias),
         });
     }
 
@@ -235,6 +259,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         softmax: None,
         layernorm: None,
         batchnorm: None,
+        im2col: None,
+        add_row_bias: None,
     })
 }
 
@@ -634,6 +660,126 @@ fn gpu_batchnorm_persistent(
     })
 }
 
+/// Minimum number of output elements before engaging the GPU im2col path.
+/// Below this, the CPU loop (with rayon-friendly memory layout and warm cache)
+/// beats the GPU launch + upload + download chain for a one-shot conv. The
+/// kernel is one thread per output element, so this is a memory-traffic
+/// crossover, not compute. Set to match `GPU_MIN_ELEMENTS` (32_768): ResNet's
+/// first layer produces 3*7*7 * 112*112 = 1.85M output elements, well above.
+const GPU_IM2COL_MIN_OUTPUT_ELEMENTS: usize = 32_768;
+
+/// GPU-resident im2col lowering for a 2D convolution.
+///
+/// `input` is `[c_in, h_in, w_in]`; output is `[c_in*kh*kw, h_out*w_out]` in
+/// row-major layout. Returns `None` when the GPU path is unavailable, the
+/// workload is below threshold, or any dimension is zero.
+#[allow(clippy::too_many_arguments)]
+fn gpu_im2col_persistent(
+    input: &ScryGpuStorage,
+    c_in: usize,
+    h_in: usize,
+    w_in: usize,
+    kh: usize,
+    kw: usize,
+    stride: usize,
+    padding: usize,
+    h_out: usize,
+    w_out: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.im2col.as_ref()?;
+    let col_rows = c_in.checked_mul(kh)?.checked_mul(kw)?;
+    let spatial_out = h_out.checked_mul(w_out)?;
+    let total = col_rows.checked_mul(spatial_out)?;
+    if col_rows == 0 || spatial_out == 0 || total < GPU_IM2COL_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if input.len() != c_in * h_in * w_in {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    // Push constants pack 9 u32s = 36 bytes, well under the 128-byte limit.
+    let dims_pc: [u32; 9] = [
+        c_in as u32,
+        h_in as u32,
+        w_in as u32,
+        kh as u32,
+        kw as u32,
+        stride as u32,
+        padding as u32,
+        h_out as u32,
+        w_out as u32,
+    ];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
+    })
+}
+
+/// Minimum total element count before engaging the GPU column-broadcast bias
+/// add. Same scale as `GPU_ELEMENTWISE_MIN` since the kernel is also one
+/// thread per output element with a single load + store + L1-cached bias[r].
+const GPU_ADD_ROW_BIAS_MIN: usize = 2_048;
+
+/// GPU-resident `[rows, cols] + bias[rows]` (column-broadcast). Bias buffer
+/// length must equal `rows`; an `[rows, 1]` shape is also accepted by the
+/// caller. Returns `None` when the GPU path is unavailable or the workload is
+/// below threshold.
+fn gpu_add_row_bias_persistent(
+    a: &ScryGpuStorage,
+    bias: &ScryGpuStorage,
+    rows: usize,
+    cols: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.add_row_bias.as_ref()?;
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    let total = rows.checked_mul(cols)?;
+    if total < GPU_ADD_ROW_BIAS_MIN {
+        return None;
+    }
+    if a.len() != total || bias.len() != rows {
+        return None;
+    }
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(bias)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 2] = [rows as u32, cols as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_a, &*buf_b, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
+    })
+}
+
 /// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
 /// output without round-tripping through CPU. Returns `None` if the GPU path
 /// is unavailable for the given inputs (caller should fall back to CPU).
@@ -931,12 +1077,69 @@ impl MathBackend for ScryGpuBackend {
         b_shape: &Shape,
         out_shape: &Shape,
     ) -> ScryGpuStorage {
+        // Fast path: column broadcast `[rows, cols] + [rows, 1]` — Conv2d's
+        // bias add post-matmul. Mirrors the same pattern in `CpuBackend::add`
+        // (and its swapped-operand twin). Kept on-device so the conv result
+        // chains into the next layer without a round trip.
+        let a_dims = a_shape.dims();
+        let b_dims = b_shape.dims();
+        let out_dims = out_shape.dims();
+        if out_dims.len() == 2 {
+            let (rows, cols) = (out_dims[0], out_dims[1]);
+            if a_dims == out_dims && b_dims == [rows, 1] {
+                if let Some(gpu_out) = gpu_add_row_bias_persistent(a, b, rows, cols) {
+                    return gpu_out;
+                }
+            } else if b_dims == out_dims && a_dims == [rows, 1] {
+                if let Some(gpu_out) = gpu_add_row_bias_persistent(b, a, rows, cols) {
+                    return gpu_out;
+                }
+            }
+        }
         cpu(CpuBackend::add(
             &a.as_vec(),
             &b.as_vec(),
             a_shape,
             b_shape,
             out_shape,
+        ))
+    }
+
+    fn im2col_2d(
+        input: &ScryGpuStorage,
+        in_channels: usize,
+        h_in: usize,
+        w_in: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        stride: usize,
+        padding: usize,
+    ) -> ScryGpuStorage {
+        let h_out = (h_in + 2 * padding - kernel_h) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel_w) / stride + 1;
+        if let Some(gpu_out) = gpu_im2col_persistent(
+            input,
+            in_channels,
+            h_in,
+            w_in,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
+            h_out,
+            w_out,
+        ) {
+            return gpu_out;
+        }
+        cpu(CpuBackend::im2col_2d(
+            &input.as_vec(),
+            in_channels,
+            h_in,
+            w_in,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
         ))
     }
 
@@ -1500,6 +1703,99 @@ mod tests {
                     "channels={channels} spatial={spatial} idx={i}: gpu={gv} cpu={cv}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gpu_im2col_matches_cpu_within_tolerance() {
+        // Two configurations: ResNet first-layer (3×224×224, 7×7 stride-2 pad-3
+        // → 3*7*7=147 rows × 112*112=12_544 cols, 1.84M output elements) and a
+        // mid-network 3×3 conv (64×56×56, kernel-3 stride-1 pad-1 → 576 × 3136,
+        // 1.81M elements). Both clear GPU_IM2COL_MIN_OUTPUT_ELEMENTS so the
+        // kernel must engage on CUDA; falling back here means a silent compile
+        // or dispatch failure.
+        let cases: &[(usize, usize, usize, usize, usize, usize)] = &[
+            // (c_in, h, w, kernel, stride, padding)
+            (3, 224, 224, 7, 2, 3),
+            (64, 56, 56, 3, 1, 1),
+        ];
+        for &(c_in, h_in, w_in, k, stride, padding) in cases {
+            let total = c_in * h_in * w_in;
+            let input: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.05 - 2.5).collect();
+            let storage = ScryGpuStorage::Cpu(input.clone());
+            let gpu = match ScryGpuBackend::to_gpu(&storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_im2col_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+            let gpu_out =
+                ScryGpuBackend::im2col_2d(&gpu, c_in, h_in, w_in, k, k, stride, padding);
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                gpu_out.is_gpu(),
+                "im2col output should stay Gpu on CUDA, got {gpu_out:?}"
+            );
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            let c = CpuBackend::im2col_2d(&input, c_in, h_in, w_in, k, k, stride, padding);
+            assert_eq!(g.len(), c.len(), "len mismatch for case ({c_in},{h_in},{w_in},{k},{stride},{padding})");
+            // Pure copy/zero kernel — values must match exactly.
+            for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+                assert!(
+                    (gv - cv).abs() < 1e-6,
+                    "case ({c_in},{h_in},{w_in},{k},{stride},{padding}) idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_im2col_falls_back_to_cpu() {
+        // Below GPU_IM2COL_MIN_OUTPUT_ELEMENTS (3*3*3*4*4 = 432 elements):
+        // result should come back as Cpu variant.
+        let c_in = 3;
+        let (h, w, k, stride, padding) = (4, 4, 3, 1, 1);
+        let input: Vec<f32> = (0..c_in * h * w).map(|i| (i as f32) * 0.01).collect();
+        let storage = ScryGpuStorage::Cpu(input);
+        let out = ScryGpuBackend::im2col_2d(&storage, c_in, h, w, k, k, stride, padding);
+        assert!(!out.is_gpu(), "small im2col should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_add_row_bias_matches_cpu_within_tolerance() {
+        // [rows, cols] + [rows, 1] broadcast — Conv2d's bias add. Sized above
+        // GPU_ADD_ROW_BIAS_MIN so the kernel engages.
+        let rows = 64;
+        let cols = 256;
+        let total = rows * cols;
+        let a: Vec<f32> = (0..total).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+        let bias: Vec<f32> = (0..rows).map(|r| (r as f32) * 0.1 - 1.0).collect();
+
+        let a_s = ScryGpuStorage::Cpu(a.clone());
+        let b_s = ScryGpuStorage::Cpu(bias.clone());
+        let gpu_a = match ScryGpuBackend::to_gpu(&a_s) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_add_row_bias_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+
+        let a_shape = Shape::new(&[rows, cols]);
+        let b_shape = Shape::new(&[rows, 1]);
+        let gpu_out = ScryGpuBackend::add(&gpu_a, &b_s, &a_shape, &b_shape, &a_shape);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "row-bias add should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::add(&a, &bias, &a_shape, &b_shape, &a_shape);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
         }
     }
 
