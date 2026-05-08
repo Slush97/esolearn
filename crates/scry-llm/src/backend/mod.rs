@@ -60,6 +60,23 @@ pub trait DeviceBackend: Sized {
 
 /// Math operations trait — all operations needed for forward passes.
 pub trait MathBackend: DeviceBackend {
+    // ---- Routing hints ----
+
+    /// Whether this backend's `im2col_2d` + `matmul` chain stays on-device,
+    /// so consumers (e.g. `Conv2d`) should prefer im2col over Winograd
+    /// F(2×2, 3×3) for 3×3-stride-1-padding-1 kernels.
+    ///
+    /// Winograd reduces arithmetic count by ~2.25× but its standard
+    /// implementation does CPU-side filter and tile transforms. Backends
+    /// where that forces host↔device round-trips (e.g. `ScryGpuBackend`
+    /// on CUDA) lose more to transfer overhead than they gain in FLOPs.
+    /// CPU backends keep the default `false` and benefit from the lower
+    /// FLOP count.
+    ///
+    /// Read once at `Conv2d` construction via
+    /// `Conv2dStrategy::default_for::<B>()`, not branched per forward.
+    const PREFERS_IM2COL_OVER_WINOGRAD: bool = false;
+
     // ---- Core forward ops ----
 
     /// General matrix multiply: `C = alpha * op(A) * op(B) + beta * C`

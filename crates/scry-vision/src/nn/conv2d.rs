@@ -2,7 +2,10 @@
 //! 2D convolution layer (inference-only).
 //!
 //! Uses im2col + matmul as the default path, with Winograd F(2×2, 3×3) fast
-//! convolution auto-dispatched for 3×3 stride-1 padding-1 kernels.
+//! convolution auto-dispatched for 3×3 stride-1 padding-1 kernels — except
+//! on backends with device-resident im2col, which set
+//! [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`] and skip Winograd at
+//! construction time (see [`Conv2dStrategy`]).
 //!
 //! Input shape: `[C_in, H, W]`
 //! Output shape: `[C_out, H_out, W_out]`
@@ -13,6 +16,38 @@ use scry_llm::backend::MathBackend;
 use scry_llm::nn::Module;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
+
+/// Convolution algorithm choice for [`Conv2d`].
+///
+/// Set once at construction via [`Conv2dStrategy::default_for`] from the
+/// backend's [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`] hint. Tests and
+/// benchmarks can override per-instance via [`Conv2d::with_strategy`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Conv2dStrategy {
+    /// 3×3-stride-1-padding-1 kernels use Winograd F(2×2, 3×3); other
+    /// shapes use im2col + matmul. Best on CPU backends where Winograd's
+    /// ~2.25× lower FLOP count dominates.
+    #[default]
+    Auto,
+    /// Always use im2col + matmul. Best on backends with device-resident
+    /// im2col + matmul + bias-add (e.g. `ScryGpuBackend` on CUDA), where
+    /// Winograd's CPU-side filter and tile transforms force per-call
+    /// host↔device round-trips that swamp the FLOP savings.
+    Im2col,
+}
+
+impl Conv2dStrategy {
+    /// Pick the default strategy for backend `B` from
+    /// [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`].
+    #[must_use]
+    pub fn default_for<B: MathBackend>() -> Self {
+        if B::PREFERS_IM2COL_OVER_WINOGRAD {
+            Self::Im2col
+        } else {
+            Self::Auto
+        }
+    }
+}
 
 /// 2D convolution with im2col + matmul and Winograd F(2×2, 3×3) fast path.
 ///
@@ -29,6 +64,9 @@ pub struct Conv2d<B: MathBackend> {
     pub kernel_w: usize,
     pub stride: usize,
     pub padding: usize,
+    /// Algorithm selection. Defaults from `B::PREFERS_IM2COL_OVER_WINOGRAD`
+    /// at construction; override per-instance via [`Conv2d::with_strategy`].
+    pub strategy: Conv2dStrategy,
     /// Cached Winograd F(2×2, 3×3) transformed filter weights as backend storage.
     /// 16 elements, each a `[C_out, C_in]` matrix in `B::Storage` form.
     /// Lazily computed on first forward pass for eligible convolutions.
@@ -105,8 +143,17 @@ impl<B: MathBackend> Conv2d<B> {
             kernel_w,
             stride,
             padding,
+            strategy: Conv2dStrategy::default_for::<B>(),
             winograd_weight: RefCell::new(None),
         }
+    }
+
+    /// Override the convolution algorithm. Useful for benchmarks or tests
+    /// that want to force a specific path.
+    #[must_use]
+    pub fn with_strategy(mut self, strategy: Conv2dStrategy) -> Self {
+        self.strategy = strategy;
+        self
     }
 
     /// Convenience constructor for square kernels.
@@ -145,12 +192,14 @@ impl<B: MathBackend> Conv2d<B> {
 
     /// Forward pass: `[C_in, H, W]` → `[C_out, H_out, W_out]`.
     ///
-    /// Auto-dispatches to Winograd for 3×3/stride-1/pad-1 kernels.
+    /// Routing follows `self.strategy`:
+    /// - [`Conv2dStrategy::Auto`] → Winograd for 3×3/stride-1/pad-1, im2col otherwise.
+    /// - [`Conv2dStrategy::Im2col`] → always im2col, even for Winograd-eligible kernels.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
-        if self.use_winograd() {
-            return self.forward_winograd(input);
+        match self.strategy {
+            Conv2dStrategy::Auto if self.use_winograd() => self.forward_winograd(input),
+            _ => self.forward_im2col(input),
         }
-        self.forward_im2col(input)
     }
 
     /// Im2col + matmul convolution (general case, also used as test reference).
@@ -563,5 +612,44 @@ mod tests {
     fn winograd_not_used_for_1x1() {
         let conv = Conv2d::<CpuBackend>::square(3, 16, 1, 1, 0);
         assert!(!conv.use_winograd());
+    }
+
+    // ── Strategy tests ──
+
+    #[test]
+    fn cpu_default_strategy_is_auto() {
+        let conv = Conv2d::<CpuBackend>::square(3, 16, 3, 1, 1);
+        assert_eq!(conv.strategy, Conv2dStrategy::Auto);
+        assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
+    }
+
+    #[test]
+    fn with_strategy_im2col_skips_winograd_on_cpu() {
+        // Force im2col on a Winograd-eligible CPU conv; output must match
+        // both the Auto-Winograd path and the explicit im2col path.
+        let conv = random_conv(3, 16).with_strategy(Conv2dStrategy::Im2col);
+        let input = random_input(3, 8, 8);
+        assert_eq!(conv.strategy, Conv2dStrategy::Im2col);
+        assert!(conv.use_winograd(), "kernel still Winograd-eligible");
+        let out = conv.forward(&input);
+        let ref_out = conv.forward_im2col(&input);
+        assert_close(&out.to_vec(), &ref_out.to_vec(), 1e-4, "im2col strategy");
+    }
+
+    #[test]
+    fn auto_strategy_matches_im2col_strategy_numerically() {
+        // The two strategies must produce equivalent outputs on the same
+        // input — Winograd is just a faster algorithm, not a different op.
+        let auto = random_conv(3, 16);
+        let im2col = random_conv(3, 16).with_strategy(Conv2dStrategy::Im2col);
+        let input = random_input(3, 14, 14);
+        let auto_out = auto.forward(&input);
+        let im2col_out = im2col.forward(&input);
+        assert_close(
+            &auto_out.to_vec(),
+            &im2col_out.to_vec(),
+            1e-4,
+            "auto vs im2col",
+        );
     }
 }

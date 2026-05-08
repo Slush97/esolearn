@@ -1223,6 +1223,8 @@ fn cpu(v: Vec<f32>) -> ScryGpuStorage {
 }
 
 impl MathBackend for ScryGpuBackend {
+    const PREFERS_IM2COL_OVER_WINOGRAD: bool = true;
+
     fn matmul(
         a: &ScryGpuStorage,
         b: &ScryGpuStorage,
