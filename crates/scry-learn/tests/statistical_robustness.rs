@@ -78,7 +78,7 @@ fn multi_seed_random_forest_classifier() {
             .seed(seed);
         rf.fit(&train).unwrap();
         let preds = rf.predict(&test.feature_matrix()).unwrap();
-        accs.push(accuracy(&test.target, &preds));
+        accs.push(accuracy(test.target(), &preds));
     }
 
     let mean = accs.iter().sum::<f64>() / accs.len() as f64;
@@ -121,7 +121,7 @@ fn multi_seed_random_forest_regressor() {
             .seed(seed);
         rf.fit(&train).unwrap();
         let preds = rf.predict(&test.feature_matrix()).unwrap();
-        r2s.push(r2_score(&test.target, &preds));
+        r2s.push(r2_score(test.target(), &preds));
     }
 
     let mean = r2s.iter().sum::<f64>() / r2s.len() as f64;
@@ -157,7 +157,7 @@ fn multi_seed_gbt_classifier() {
             .seed(seed);
         gbt.fit(&train).unwrap();
         let preds = gbt.predict(&test.feature_matrix()).unwrap();
-        accs.push(accuracy(&test.target, &preds));
+        accs.push(accuracy(test.target(), &preds));
     }
 
     let mean = accs.iter().sum::<f64>() / accs.len() as f64;
@@ -195,7 +195,7 @@ fn multi_seed_gbt_regressor() {
             .seed(seed);
         gbt.fit(&train).unwrap();
         let preds = gbt.predict(&test.feature_matrix()).unwrap();
-        r2s.push(r2_score(&test.target, &preds));
+        r2s.push(r2_score(test.target(), &preds));
     }
 
     let mean = r2s.iter().sum::<f64>() / r2s.len() as f64;
@@ -258,16 +258,19 @@ fn scaling_dt_accuracy_vs_dataset_size() {
     for &n in &sizes {
         // Take first n samples (use stratified approach for fairness)
         let subset = Dataset::new(
-            data.features.iter().map(|col| col[..n].to_vec()).collect(),
-            data.target[..n].to_vec(),
-            data.feature_names.clone(),
-            &data.target_name,
+            data.features()
+                .iter()
+                .map(|col| col[..n].to_vec())
+                .collect(),
+            data.target()[..n].to_vec(),
+            data.feature_names().to_vec(),
+            data.target_name(),
         );
         let (train, test) = scry_learn::split::train_test_split(&subset, 0.3, 42);
         let mut dt = DecisionTreeClassifier::new().max_depth(5);
         dt.fit(&train).unwrap();
         let preds = dt.predict(&test.feature_matrix()).unwrap();
-        let acc = accuracy(&test.target, &preds);
+        let acc = accuracy(test.target(), &preds);
 
         eprintln!("DT accuracy with {n} samples: {:.1}%", acc * 100.0);
 
@@ -332,8 +335,8 @@ fn overfitting_rf_train_vs_test() {
     let train_preds = rf.predict(&train.feature_matrix()).unwrap();
     let test_preds = rf.predict(&test.feature_matrix()).unwrap();
 
-    let train_acc = accuracy(&train.target, &train_preds);
-    let test_acc = accuracy(&test.target, &test_preds);
+    let train_acc = accuracy(train.target(), &train_preds);
+    let test_acc = accuracy(test.target(), &test_preds);
 
     eprintln!(
         "RF train acc: {:.1}%, test acc: {:.1}%",
@@ -467,7 +470,7 @@ fn convergence_logreg_solvers_agree() {
         .solver(scry_learn::linear::Solver::Lbfgs);
     lr_lbfgs.fit(&ds).unwrap();
     let preds_lbfgs = lr_lbfgs.predict(&ds.feature_matrix()).unwrap();
-    let acc_lbfgs = accuracy(&ds.target, &preds_lbfgs);
+    let acc_lbfgs = accuracy(ds.target(), &preds_lbfgs);
 
     // GD solver
     let mut lr_gd = LogisticRegression::new()
@@ -477,7 +480,7 @@ fn convergence_logreg_solvers_agree() {
         .solver(scry_learn::linear::Solver::GradientDescent);
     lr_gd.fit(&ds).unwrap();
     let preds_gd = lr_gd.predict(&ds.feature_matrix()).unwrap();
-    let acc_gd = accuracy(&ds.target, &preds_gd);
+    let acc_gd = accuracy(ds.target(), &preds_gd);
 
     eprintln!("LogReg L-BFGS accuracy: {:.1}%", acc_lbfgs * 100.0);
     eprintln!("LogReg GD accuracy:     {:.1}%", acc_gd * 100.0);
@@ -525,10 +528,10 @@ fn convergence_gbt_error_decreases_with_estimators() {
         let preds = gbt.predict(&data.feature_matrix()).unwrap();
         let mse: f64 = preds
             .iter()
-            .zip(data.target.iter())
+            .zip(data.target().iter())
             .map(|(p, t)| (p - t).powi(2))
             .sum::<f64>()
-            / data.target.len() as f64;
+            / data.target().len() as f64;
 
         eprintln!("GBT n_estimators={n_est}: MSE={mse:.4}");
         assert!(

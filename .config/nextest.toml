@@ -1,0 +1,14 @@
+[profile.default]
+# Show failure output immediately AND repeat at the end so it's not lost in the scroll.
+failure-output = "immediate-final"
+# Don't print PASS for every test — only show non-skipped final status.
+status-level = "fail"
+final-status-level = "flaky"
+# Warn on tests over 30s; kill any single test that hangs past 2 minutes.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+retries = 2
+fail-fast = false
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 3 }

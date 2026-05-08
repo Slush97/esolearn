@@ -170,9 +170,9 @@ fn section_1_classification_metrics() {
         let data = load_dataset(ds_name);
         let (train, test) = train_test_split(&data, 0.2, 42);
         let matrix = test.feature_matrix();
-        let y_true = &test.target;
+        let y_true = &test.target();
         let is_binary = {
-            let mut classes: Vec<f64> = data.target.clone();
+            let mut classes: Vec<f64> = data.target().to_vec();
             classes.sort_by(|a, b| a.partial_cmp(b).unwrap());
             classes.dedup();
             classes.len() == 2
@@ -302,17 +302,17 @@ fn section_1_classification_metrics() {
             let mut m = LogisticRegression::new().max_iter(500);
             m.fit(&train_s).unwrap();
             let preds = m.predict(&mat_s).unwrap();
-            let acc = accuracy(&test_s.target, &preds);
-            let f1 = f1_score(&test_s.target, &preds, Average::Macro);
-            let prec = precision(&test_s.target, &preds, Average::Macro);
-            let rec = recall(&test_s.target, &preds, Average::Macro);
+            let acc = accuracy(test_s.target(), &preds);
+            let f1 = f1_score(test_s.target(), &preds, Average::Macro);
+            let prec = precision(test_s.target(), &preds, Average::Macro);
+            let rec = recall(test_s.target(), &preds, Average::Macro);
             let auc_str = if is_binary {
                 let probas = m.predict_proba(&mat_s).unwrap();
                 let scores: Vec<f64> = probas
                     .iter()
                     .map(|p| p.get(1).copied().unwrap_or(0.0))
                     .collect();
-                format!("{:.4}", roc_auc_score(&test_s.target, &scores))
+                format!("{:.4}", roc_auc_score(test_s.target(), &scores))
             } else {
                 "n/a".to_string()
             };
@@ -385,10 +385,10 @@ fn section_1_classification_metrics() {
             let mut m = LinearSVC::new().max_iter(1000);
             m.fit(&train_s).unwrap();
             let preds = m.predict(&mat_s).unwrap();
-            let acc = accuracy(&test_s.target, &preds);
-            let f1 = f1_score(&test_s.target, &preds, Average::Macro);
-            let prec = precision(&test_s.target, &preds, Average::Macro);
-            let rec = recall(&test_s.target, &preds, Average::Macro);
+            let acc = accuracy(test_s.target(), &preds);
+            let f1 = f1_score(test_s.target(), &preds, Average::Macro);
+            let prec = precision(test_s.target(), &preds, Average::Macro);
+            let rec = recall(test_s.target(), &preds, Average::Macro);
             // LinearSVC predict_proba requires .probability(true) — skip AUC for SVC
             println!(
                 "  {:<24} {:<10} {:.4} {:.4} {:.4} {:.4} {:>8}",
@@ -414,7 +414,7 @@ fn section_2_regression_vitals() {
 
     let (train, test) = train_test_split(&data, 0.2, 42);
     let matrix = test.feature_matrix();
-    let y = &test.target;
+    let y = &test.target();
 
     println!("  {:<28} {:>8} {:>8} {:>8}", "Model", "R²", "RMSE", "MAE");
     println!("  {}", "-".repeat(56));
@@ -531,8 +531,8 @@ fn section_3_confusion_matrix() {
     dt.fit(&train).unwrap();
     let preds = dt.predict(&matrix).unwrap();
 
-    let cm = confusion_matrix(&test.target, &preds);
-    let report = classification_report(&test.target, &preds);
+    let cm = confusion_matrix(test.target(), &preds);
+    let report = classification_report(test.target(), &preds);
 
     println!(
         "  Confusion Matrix ({} classes, {}×{}):",

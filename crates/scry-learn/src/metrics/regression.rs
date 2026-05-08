@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Regression metrics: MSE, RMSE, MAE, R².
 
+use super::assert_same_len;
+
 /// Mean Squared Error.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn mean_squared_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }
@@ -15,12 +21,19 @@ pub fn mean_squared_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
 }
 
 /// Root Mean Squared Error.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn root_mean_squared_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
     mean_squared_error(y_true, y_pred).sqrt()
 }
 
 /// Mean Absolute Error.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn mean_absolute_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }
@@ -36,7 +49,11 @@ pub fn mean_absolute_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
 ///
 /// Returns 1.0 for perfect predictions, 0.0 for predicting the mean,
 /// and negative values for worse-than-mean predictions.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn r2_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }
@@ -59,7 +76,11 @@ pub fn r2_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
 /// Computes `1 - Var(y_true - y_pred) / Var(y_true)`.
 /// Unlike R², this uses the variance of the residuals rather than the
 /// sum of squared residuals, so it does not account for bias.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn explained_variance_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }
@@ -92,7 +113,11 @@ pub fn explained_variance_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
 ///
 /// Computes `mean(|y_true - y_pred| / |y_true|)`.
 /// Samples where `y_true` is zero are skipped to avoid division by zero.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn mean_absolute_percentage_error(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }

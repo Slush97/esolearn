@@ -64,7 +64,11 @@ impl PrCurve {
 /// `y_scores` should be continuous scores (e.g., predicted probabilities).
 ///
 /// Returns `auc = NaN` when only one class is present (ROC is undefined).
+///
+/// # Panics
+/// Panics if `y_true.len() != y_scores.len()`.
 pub fn roc_curve(y_true: &[f64], y_scores: &[f64]) -> RocCurve {
+    super::assert_same_len(y_true.len(), y_scores.len(), "y_true", "y_scores");
     let n = y_true.len();
     let pos_count = y_true.iter().filter(|&&v| v > 0.5).count();
     let neg_count = n - pos_count;
@@ -132,7 +136,11 @@ pub fn roc_auc_score(y_true: &[f64], y_scores: &[f64]) -> f64 {
 }
 
 /// Compute the precision-recall curve.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_scores.len()`.
 pub fn pr_curve(y_true: &[f64], y_scores: &[f64]) -> PrCurve {
+    super::assert_same_len(y_true.len(), y_scores.len(), "y_true", "y_scores");
     let n = y_true.len();
     let pos_count = y_true.iter().filter(|&&v| v > 0.5).count();
 

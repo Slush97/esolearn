@@ -180,7 +180,7 @@ fn invariant_pca_roundtrip_all_components() {
     let mut max_err = 0.0f64;
     for j in 0..data.n_features() {
         for i in 0..data.n_samples() {
-            let err = (ds.features[j][i] - data.features[j][i]).abs();
+            let err = (ds.features()[j][i] - data.features()[j][i]).abs();
             max_err = max_err.max(err);
         }
     }
@@ -213,7 +213,7 @@ fn invariant_kmeans_centroid_is_mean() {
             if label == k {
                 count += 1;
                 for j in 0..n_features {
-                    sums[j] += data.features[j][i];
+                    sums[j] += data.features()[j][i];
                 }
             }
         }
@@ -244,7 +244,7 @@ fn invariant_kmeans_inertia_equals_sum_sq_dist() {
     let mut manual_inertia = 0.0;
     for (i, &label) in labels.iter().enumerate() {
         for j in 0..data.n_features() {
-            let diff = data.features[j][i] - centroids[label][j];
+            let diff = data.features()[j][i] - centroids[label][j];
             manual_inertia += diff * diff;
         }
     }
@@ -477,7 +477,7 @@ fn invariant_logistic_regression_separable_data() {
 
     let features = data.feature_matrix();
     let preds = lr.predict(&features).unwrap();
-    let acc = accuracy(&data.target, &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         (acc - 1.0).abs() < 1e-6,
@@ -591,7 +591,7 @@ fn invariant_knn_exact_match() {
     let features = data.feature_matrix();
     let preds = knn.predict(&features).unwrap();
 
-    for (i, (&pred, &actual)) in preds.iter().zip(data.target.iter()).enumerate() {
+    for (i, (&pred, &actual)) in preds.iter().zip(data.target().iter()).enumerate() {
         assert!(
             (pred - actual).abs() < 1e-6,
             "k=1 KNN on training point {i}: pred={pred}, actual={actual}"
@@ -633,7 +633,7 @@ fn invariant_decision_tree_pure_leaves_on_separable() {
 
     let features = data.feature_matrix();
     let preds = dt.predict(&features).unwrap();
-    let acc = accuracy(&data.target, &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         (acc - 1.0).abs() < 1e-6,

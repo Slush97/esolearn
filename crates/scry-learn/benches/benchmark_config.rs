@@ -293,9 +293,9 @@ pub fn load_dataset(base: &str) -> Dataset {
 /// Build row-major feature matrix from a Dataset.
 pub fn to_row_major(ds: &Dataset) -> Vec<Vec<f64>> {
     let n = ds.n_samples();
-    let d = ds.features.len();
+    let d = ds.features().len();
     (0..n)
-        .map(|i| (0..d).map(|j| ds.features[j][i]).collect())
+        .map(|i| (0..d).map(|j| ds.features()[j][i]).collect())
         .collect()
 }
 

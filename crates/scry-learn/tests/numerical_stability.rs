@@ -144,7 +144,7 @@ fn severe_class_imbalance() {
     let mut dt = DecisionTreeClassifier::new();
     dt.fit(&ds).unwrap();
     let rows: Vec<Vec<f64>> = (0..n)
-        .map(|i| (0..n_features).map(|j| ds.features[j][i]).collect())
+        .map(|i| (0..n_features).map(|j| ds.features()[j][i]).collect())
         .collect();
     let preds = dt.predict(&rows).unwrap();
 
@@ -223,7 +223,7 @@ fn zero_variance_columns() {
     let mut ds_scaled = ds.clone();
     scaler.transform(&mut ds_scaled).unwrap();
     // Constant column should become all zeros (0-mean / 1-std-as-safeguard)
-    for &v in &ds_scaled.features[0] {
+    for &v in &ds_scaled.features()[0] {
         assert!(v.is_finite(), "scaled zero-variance value not finite: {v}");
     }
 
@@ -254,7 +254,7 @@ fn near_zero_variance() {
     scaler.fit(&ds).unwrap();
     let mut ds_scaled = ds.clone();
     scaler.transform(&mut ds_scaled).unwrap();
-    for &v in &ds_scaled.features[0] {
+    for &v in &ds_scaled.features()[0] {
         assert!(
             v.is_finite(),
             "near-zero-variance scaled value not finite: {v}"

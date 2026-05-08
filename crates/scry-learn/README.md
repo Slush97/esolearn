@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/crates/l/scry-learn.svg)](https://github.com/Slush97/esolearn/blob/main/LICENSE-MIT)
 [![CI](https://img.shields.io/github/actions/workflow/status/Slush97/esolearn/ci.yml?label=tests)](https://github.com/Slush97/esolearn)
 
-A scikit-learn-style ML toolkit in pure Rust. No Python runtime, no BLAS, no LAPACK — `cargo add scry-learn` and build.
+A scikit-learn-style ML toolkit in pure Rust. No Python runtime, no BLAS, no LAPACK — `cargo add scry-learn --features csv` and build.
 
 ```rust
 use scry_learn::prelude::*;
@@ -18,8 +18,8 @@ let mut rf = RandomForestClassifier::new()
     .max_depth(10);
 rf.fit(&train)?;
 
-let preds = rf.predict(&test)?;
-println!("{}", classification_report(&test.target, &preds));
+let preds = rf.predict(&test.feature_matrix())?;
+println!("{}", classification_report(test.target(), &preds));
 ```
 
 > **Status:** 0.x, pre-1.0 — breaking changes are possible between minor versions. This started as a learning project (implement each algorithm from scratch to understand it) and grew into something usable, but it isn't a drop-in replacement for an established stack. If you need a settled Rust ML library today, [linfa](https://github.com/rust-ml/linfa) is the safer pick. The benchmarks below let you decide whether scry-learn fits your use case.
@@ -32,7 +32,7 @@ println!("{}", classification_report(&test.target, &preds));
 - TreeSHAP and permutation importance built in.
 - Cross-library benchmarks vs linfa and smartcore, with a counting allocator, single-thread enforcement, and accuracy parity gates. [Run them yourself.](#benchmarks)
 - Column-major data layout — tree models scan features without a transpose.
-- `#![deny(unsafe_code)]`.
+- `#![deny(unsafe_code)]` at the crate root. Tree prediction's hot DFS loop locally re-enables `unsafe` for unchecked indexing inside `FlatTree`; the public predict APIs validate row width upstream so the contract holds end-to-end.
 
 ---
 

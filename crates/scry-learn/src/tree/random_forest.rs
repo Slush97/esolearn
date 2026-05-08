@@ -239,7 +239,18 @@ impl RandomForestClassifier {
             })
             .collect();
 
-        // Aggregate feature importances.
+        // Drop trees whose fit() silently failed — keeping them would bias
+        // averages (predict_proba, feature_importances_) toward zero.
+        let n_attempted = trees.len();
+        trees.retain(|t| t.flat_tree.is_some());
+        if trees.is_empty() {
+            return Err(ScryLearnError::InvalidParameter(format!(
+                "RandomForestClassifier: all {n_attempted} trees failed to fit \
+                 \u{2014} check input data and hyperparameters"
+            )));
+        }
+
+        // Aggregate feature importances over successful trees only.
         self.feature_importances_ = vec![0.0; self.n_features];
         for tree in &trees {
             if let Ok(imp) = tree.feature_importances() {
@@ -313,11 +324,15 @@ impl RandomForestClassifier {
     ///
     /// Uses `FlatTree::predict_sample` for cache-optimal traversal.
     /// Parallelized across samples via rayon.
+    ///
+    /// Each row must have exactly `n_features` columns; otherwise
+    /// returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         crate::version::check_schema_version(self._schema_version)?;
         if self.trees.is_empty() {
             return Err(ScryLearnError::NotFitted);
         }
+        crate::error::ensure_row_widths(features, self.n_features)?;
 
         let n_classes = self.n_classes;
         let predictions: Vec<f64> = features
@@ -346,10 +361,14 @@ impl RandomForestClassifier {
     /// Predict class probabilities (average across trees).
     ///
     /// Parallelized across samples via rayon.
+    ///
+    /// Each row must have exactly `n_features` columns; otherwise
+    /// returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict_proba(&self, features: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
         if self.trees.is_empty() {
             return Err(ScryLearnError::NotFitted);
         }
+        crate::error::ensure_row_widths(features, self.n_features)?;
 
         let n_classes = self.n_classes;
         let n_trees = self.trees.len() as f64;
@@ -394,6 +413,16 @@ impl RandomForestClassifier {
     /// Number of trained trees.
     pub fn n_trees(&self) -> usize {
         self.trees.len()
+    }
+
+    /// Number of requested trees that failed to fit.
+    ///
+    /// Random forests intentionally swallow per-tree training errors so that
+    /// transient bootstrap pathologies don't kill the whole fit. This getter
+    /// reports how many of the requested `n_estimators` were dropped — if
+    /// non-zero, the resulting forest is smaller than asked for.
+    pub fn n_failed_trees(&self) -> usize {
+        self.n_estimators.saturating_sub(self.trees.len())
     }
 
     /// Get individual trees (for visualization or inspection).
@@ -520,6 +549,16 @@ impl RandomForestRegressor {
             })
             .collect();
 
+        // Drop trees whose fit() silently failed.
+        let n_attempted = trees.len();
+        trees.retain(|t| t.flat_tree.is_some());
+        if trees.is_empty() {
+            return Err(ScryLearnError::InvalidParameter(format!(
+                "RandomForestRegressor: all {n_attempted} trees failed to fit \
+                 \u{2014} check input data and hyperparameters"
+            )));
+        }
+
         self.feature_importances_ = vec![0.0; self.n_features];
         for tree in &trees {
             if let Ok(imp) = tree.feature_importances() {
@@ -545,11 +584,15 @@ impl RandomForestRegressor {
     /// Predict values (mean across trees).
     ///
     /// Parallelized across samples via rayon.
+    ///
+    /// Each row must have exactly `n_features` columns; otherwise
+    /// returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         crate::version::check_schema_version(self._schema_version)?;
         if self.trees.is_empty() {
             return Err(ScryLearnError::NotFitted);
         }
+        crate::error::ensure_row_widths(features, self.n_features)?;
 
         let n_trees = self.trees.len() as f64;
 
@@ -580,6 +623,18 @@ impl RandomForestRegressor {
     /// Get individual trees (for inspection or ONNX export).
     pub fn trees(&self) -> &[DecisionTreeRegressor] {
         &self.trees
+    }
+
+    /// Number of trained trees.
+    pub fn n_trees(&self) -> usize {
+        self.trees.len()
+    }
+
+    /// Number of requested trees that failed to fit.
+    ///
+    /// See [`RandomForestClassifier::n_failed_trees`].
+    pub fn n_failed_trees(&self) -> usize {
+        self.n_estimators.saturating_sub(self.trees.len())
     }
 
     /// Number of features the model was trained on.
@@ -705,5 +760,63 @@ mod tests {
             rf.oob_score().is_none(),
             "OOB score should be None when bootstrap=false"
         );
+    }
+
+    #[test]
+    fn test_healthy_fit_reports_no_failed_trees() {
+        let data = make_classification_data();
+        let mut rf = RandomForestClassifier::new()
+            .n_estimators(10)
+            .max_depth(5)
+            .seed(42);
+        rf.fit(&data).unwrap();
+        assert_eq!(rf.n_trees(), 10);
+        assert_eq!(rf.n_failed_trees(), 0);
+    }
+
+    #[test]
+    fn test_predict_rejects_short_rows() {
+        let data = make_classification_data();
+        let mut rf = RandomForestClassifier::new()
+            .n_estimators(5)
+            .max_depth(3)
+            .seed(42);
+        rf.fit(&data).unwrap();
+
+        // Trained on 2 features; pass 1-feature rows.
+        let bad: Vec<Vec<f64>> = vec![vec![1.0]];
+        let err = rf.predict(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            ScryLearnError::ShapeMismatch {
+                expected: 2,
+                got: 1
+            }
+        ));
+        let err = rf.predict_proba(&bad).unwrap_err();
+        assert!(matches!(err, ScryLearnError::ShapeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_regressor_predict_rejects_short_rows() {
+        let f0: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let f1: Vec<f64> = (0..20).map(|i| (i * 2) as f64).collect();
+        let target: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let data = Dataset::new(vec![f0, f1], target, vec!["a".into(), "b".into()], "y");
+        let mut rf = RandomForestRegressor::new()
+            .n_estimators(5)
+            .max_depth(3)
+            .seed(42);
+        rf.fit(&data).unwrap();
+
+        let bad: Vec<Vec<f64>> = vec![vec![1.0]];
+        let err = rf.predict(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            ScryLearnError::ShapeMismatch {
+                expected: 2,
+                got: 1
+            }
+        ));
     }
 }

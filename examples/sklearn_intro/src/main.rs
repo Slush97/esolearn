@@ -141,7 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // ── 3. KNN sweep on digits ────────────────────────────────────
     let (train, test) = train_test_split(&digits, 0.25, 42);
     let test_x = rows(&test);
-    let test_y = test.target.clone();
+    let test_y = test.target().to_vec();
 
     println!(
         "\n=== KNN sweep (train={}, test={}) ===",

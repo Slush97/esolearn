@@ -332,15 +332,22 @@ impl DecisionTreeClassifier {
     /// Predict class labels for a feature matrix.
     ///
     /// `features` is row-major: `features[sample_idx][feature_idx]`.
+    /// Each row must have exactly [`Self::n_features`] columns; otherwise
+    /// returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         crate::version::check_schema_version(self._schema_version)?;
         let ft = self.flat_tree.as_ref().ok_or(ScryLearnError::NotFitted)?;
+        crate::error::ensure_row_widths(features, self.n_features)?;
         Ok(ft.predict(features))
     }
 
     /// Predict class probabilities for a feature matrix.
+    ///
+    /// Each row must have exactly [`Self::n_features`] columns; otherwise
+    /// returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict_proba(&self, features: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
         let ft = self.flat_tree.as_ref().ok_or(ScryLearnError::NotFitted)?;
+        crate::error::ensure_row_widths(features, self.n_features)?;
         let n_classes = self.n_classes;
         Ok(features
             .iter()
@@ -1022,9 +1029,13 @@ impl DecisionTreeRegressor {
     }
 
     /// Predict values.
+    ///
+    /// Each row of `features` must have exactly `n_features` columns;
+    /// otherwise returns [`ScryLearnError::ShapeMismatch`].
     pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<f64>> {
         crate::version::check_schema_version(self._schema_version)?;
         let ft = self.flat_tree.as_ref().ok_or(ScryLearnError::NotFitted)?;
+        crate::error::ensure_row_widths(features, self.n_features)?;
         Ok(ft.predict(features))
     }
 

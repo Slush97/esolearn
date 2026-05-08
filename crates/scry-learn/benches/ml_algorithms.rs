@@ -574,7 +574,7 @@ fn bench_e2e_pipeline(c: &mut Criterion) {
                 .set_model(DecisionTreeClassifier::new());
             pipeline.fit(black_box(&train)).unwrap();
             let preds = pipeline.predict(black_box(&test)).unwrap();
-            black_box(accuracy(&test.target, &preds));
+            black_box(accuracy(test.target(), &preds));
         });
     });
 
@@ -585,7 +585,7 @@ fn bench_e2e_pipeline(c: &mut Criterion) {
                 .set_model(RandomForestClassifier::new().n_estimators(20).seed(42));
             pipeline.fit(black_box(&train)).unwrap();
             let preds = pipeline.predict(black_box(&test)).unwrap();
-            black_box(accuracy(&test.target, &preds));
+            black_box(accuracy(test.target(), &preds));
         });
     });
 
@@ -596,7 +596,7 @@ fn bench_e2e_pipeline(c: &mut Criterion) {
                 .set_model(LogisticRegression::new().max_iter(200).learning_rate(0.1));
             pipeline.fit(black_box(&train)).unwrap();
             let preds = pipeline.predict(black_box(&test)).unwrap();
-            black_box(accuracy(&test.target, &preds));
+            black_box(accuracy(test.target(), &preds));
         });
     });
 
@@ -609,9 +609,9 @@ fn bench_e2e_pipeline(c: &mut Criterion) {
             rf.fit(black_box(&train)).unwrap();
             let features = test.feature_matrix();
             let preds = rf.predict(black_box(&features)).unwrap();
-            let _acc = accuracy(&test.target, &preds);
-            let _report = classification_report(&test.target, &preds);
-            let _cm = confusion_matrix(&test.target, &preds);
+            let _acc = accuracy(test.target(), &preds);
+            let _report = classification_report(test.target(), &preds);
+            let _cm = confusion_matrix(test.target(), &preds);
         });
     });
 

@@ -210,7 +210,7 @@ fn bench_throughput(c: &mut Criterion) {
         let mut model = LinearRegression::new();
         model.fit(&data).unwrap();
         let test_rows: Vec<Vec<f64>> = (0..n_rows)
-            .map(|i| (0..n_cols).map(|j| data.features[j][i]).collect())
+            .map(|i| (0..n_cols).map(|j| data.features()[j][i]).collect())
             .collect();
         b.iter(|| {
             std::hint::black_box(model.predict(&test_rows).unwrap());

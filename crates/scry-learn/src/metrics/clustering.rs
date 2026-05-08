@@ -7,6 +7,19 @@
 
 use std::collections::HashMap;
 
+/// Assert every feature column has length equal to `n` (the label count).
+#[inline]
+#[track_caller]
+fn assert_columns_match_labels(features: &[Vec<f64>], n: usize) {
+    for (i, col) in features.iter().enumerate() {
+        assert!(
+            col.len() == n,
+            "feature column {i} has {} rows but labels has {n}",
+            col.len()
+        );
+    }
+}
+
 /// Map f64 labels to contiguous 0-based indices.
 fn label_to_index(labels: &[f64]) -> (Vec<usize>, usize) {
     let mut map: HashMap<i64, usize> = HashMap::new();
@@ -31,7 +44,16 @@ fn label_to_index(labels: &[f64]) -> (Vec<usize>, usize) {
 /// - 1.0 means perfect match
 /// - 0.0 means random agreement
 /// - negative values indicate worse than random
+///
+/// # Panics
+/// Panics if `labels_true.len() != labels_pred.len()`.
 pub fn adjusted_rand_index(labels_true: &[f64], labels_pred: &[f64]) -> f64 {
+    super::assert_same_len(
+        labels_true.len(),
+        labels_pred.len(),
+        "labels_true",
+        "labels_pred",
+    );
     let n = labels_true.len();
     if n == 0 {
         return 0.0;
@@ -87,12 +109,16 @@ pub fn adjusted_rand_index(labels_true: &[f64], labels_pred: &[f64]) -> f64 {
 ///
 /// Higher values indicate better-defined clusters. Features are provided
 /// in column-major format (one `Vec<f64>` per feature).
+///
+/// # Panics
+/// Panics if any feature column has length different from `labels.len()`.
 pub fn calinski_harabasz_score(features: &[Vec<f64>], labels: &[f64]) -> f64 {
     let n = labels.len();
     if n == 0 || features.is_empty() {
         return 0.0;
     }
     let n_features = features.len();
+    assert_columns_match_labels(features, n);
 
     let (label_idx, k) = label_to_index(labels);
 
@@ -162,12 +188,16 @@ pub fn calinski_harabasz_score(features: &[Vec<f64>], labels: &[f64]) -> f64 {
 ///
 /// Lower values indicate better separation. Features are provided
 /// in column-major format (one `Vec<f64>` per feature).
+///
+/// # Panics
+/// Panics if any feature column has length different from `labels.len()`.
 pub fn davies_bouldin_score(features: &[Vec<f64>], labels: &[f64]) -> f64 {
     let n = labels.len();
     if n == 0 || features.is_empty() {
         return 0.0;
     }
     let n_features = features.len();
+    assert_columns_match_labels(features, n);
 
     let (label_idx, k) = label_to_index(labels);
 

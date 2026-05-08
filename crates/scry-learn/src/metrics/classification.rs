@@ -100,7 +100,11 @@ impl fmt::Display for ClassificationReport {
 }
 
 /// Compute accuracy: fraction of correct predictions.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn accuracy(y_true: &[f64], y_pred: &[f64]) -> f64 {
+    super::assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     if y_true.is_empty() {
         return 0.0;
     }
@@ -224,12 +228,18 @@ fn recall_from_cm(cm: &ConfusionMatrix, avg: Average) -> f64 {
 }
 
 /// Compute precision (builds confusion matrix internally).
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn precision(y_true: &[f64], y_pred: &[f64], avg: Average) -> f64 {
     let cm = confusion_matrix(y_true, y_pred);
     precision_from_cm(&cm, avg)
 }
 
 /// Compute recall (builds confusion matrix internally).
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn recall(y_true: &[f64], y_pred: &[f64], avg: Average) -> f64 {
     let cm = confusion_matrix(y_true, y_pred);
     recall_from_cm(&cm, avg)
@@ -240,6 +250,9 @@ pub fn recall(y_true: &[f64], y_pred: &[f64], avg: Average) -> f64 {
 /// For `Binary`, computes `2 * precision * recall / (precision + recall)`.
 /// For `Macro`, computes per-class F1 scores then averages (matching sklearn).
 /// For `Weighted`, computes per-class F1 scores then takes a support-weighted average.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn f1_score(y_true: &[f64], y_pred: &[f64], avg: Average) -> f64 {
     let cm = confusion_matrix(y_true, y_pred);
     let n = cm.matrix.len();
@@ -317,7 +330,11 @@ pub fn f1_score(y_true: &[f64], y_pred: &[f64], avg: Average) -> f64 {
 }
 
 /// Build a confusion matrix from true and predicted labels.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn confusion_matrix(y_true: &[f64], y_pred: &[f64]) -> ConfusionMatrix {
+    super::assert_same_len(y_true.len(), y_pred.len(), "y_true", "y_pred");
     let mut classes: Vec<i64> = y_true
         .iter()
         .chain(y_pred.iter())
@@ -346,6 +363,9 @@ pub fn confusion_matrix(y_true: &[f64], y_pred: &[f64]) -> ConfusionMatrix {
 }
 
 /// Generate a full classification report (like sklearn's `classification_report`).
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn classification_report(y_true: &[f64], y_pred: &[f64]) -> ClassificationReport {
     let cm = confusion_matrix(y_true, y_pred);
     let n = cm.matrix.len();
@@ -429,8 +449,12 @@ pub fn classification_report(y_true: &[f64], y_pred: &[f64]) -> ClassificationRe
 /// - `y_prob` — predicted probability vectors, one per sample
 ///
 /// Probabilities are clipped to `[1e-15, 1 - 1e-15]` to avoid `log(0)`.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_prob.len()`.
 pub fn log_loss(y_true: &[f64], y_prob: &[Vec<f64>]) -> f64 {
-    if y_true.is_empty() || y_prob.is_empty() {
+    super::assert_same_len(y_true.len(), y_prob.len(), "y_true", "y_prob");
+    if y_true.is_empty() {
         return 0.0;
     }
     let eps = 1e-15;
@@ -450,6 +474,9 @@ pub fn log_loss(y_true: &[f64], y_prob: &[Vec<f64>]) -> f64 {
 ///
 /// Particularly useful when classes are imbalanced, since it weights
 /// each class equally regardless of support.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn balanced_accuracy(y_true: &[f64], y_pred: &[f64]) -> f64 {
     if y_true.is_empty() {
         return 0.0;
@@ -474,6 +501,9 @@ pub fn balanced_accuracy(y_true: &[f64], y_pred: &[f64]) -> f64 {
 /// Returns a value in `[-1, 1]` where 1 means perfect agreement,
 /// 0 means agreement no better than chance, and negative values
 /// mean worse than chance.
+///
+/// # Panics
+/// Panics if `y_true.len() != y_pred.len()`.
 pub fn cohen_kappa_score(y_true: &[f64], y_pred: &[f64]) -> f64 {
     if y_true.is_empty() {
         return 0.0;
@@ -627,6 +657,26 @@ mod tests {
             kappa.abs() < 1e-10,
             "chance kappa should be ~0, got {kappa}"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "metric input length mismatch")]
+    fn test_accuracy_panics_on_length_mismatch() {
+        let _ = accuracy(&[0.0, 1.0, 2.0], &[0.0, 1.0]);
+    }
+
+    #[test]
+    #[should_panic(expected = "metric input length mismatch")]
+    fn test_log_loss_panics_on_length_mismatch() {
+        let y_true = vec![0.0, 1.0, 2.0];
+        let y_prob = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
+        let _ = log_loss(&y_true, &y_prob);
+    }
+
+    #[test]
+    #[should_panic(expected = "metric input length mismatch")]
+    fn test_confusion_matrix_panics_on_length_mismatch() {
+        let _ = confusion_matrix(&[0.0, 1.0, 0.0], &[0.0]);
     }
 
     #[test]
