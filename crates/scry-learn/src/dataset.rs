@@ -62,6 +62,14 @@ pub struct Dataset {
     pub target_name: String,
     /// Class label mapping (index → label string) for classification tasks.
     pub class_labels: Option<Vec<String>>,
+    /// Per-feature label mappings for columns that were string-valued at
+    /// CSV-load time, indexed by feature column.
+    ///
+    /// `feature_label_maps[i] == None` means feature `i` was numeric (or the
+    /// `Dataset` was constructed from already-encoded features). `Some(labels)`
+    /// means feature `i` was label-encoded as `f64(labels.iter().position(s))`.
+    /// Empty when the dataset was not loaded from CSV.
+    pub feature_label_maps: Vec<Option<Vec<String>>>,
     /// Lazily-computed contiguous column-major feature matrix.
     ///
     /// Built on first access from `features` via [`OnceCell::get_or_init`],
@@ -114,6 +122,7 @@ impl Dataset {
             feature_names,
             target_name: target_name.into(),
             class_labels: None,
+            feature_label_maps: Vec::new(),
             matrix: OnceLock::new(),
             row_major_cache: None,
             storage: Storage::Dense,
@@ -138,6 +147,7 @@ impl Dataset {
             feature_names,
             target_name: target_name.into(),
             class_labels: None,
+            feature_label_maps: Vec::new(),
             matrix: cell,
             row_major_cache: None,
             storage: Storage::Dense,
@@ -158,8 +168,11 @@ impl Dataset {
 
     /// Load a dataset from a CSV file.
     ///
-    /// The `target_column` is extracted as the target; all other numeric
-    /// columns become features. String columns are label-encoded automatically.
+    /// The `target_column` is extracted as the target; all other columns
+    /// become features. String columns (target *or* feature) are label-encoded
+    /// automatically — feature mappings are recorded in
+    /// [`Dataset::feature_label_maps`] so the same encoding can be re-applied
+    /// to test data later.
     ///
     /// Requires the `csv` feature.
     #[cfg(feature = "csv")]
@@ -169,6 +182,9 @@ impl Dataset {
     }
 
     /// Load a dataset from any reader producing CSV data.
+    ///
+    /// String feature columns are label-encoded; see [`Self::from_csv`] for
+    /// details and where the encoding is recorded.
     ///
     /// Requires the `csv` feature.
     #[cfg(feature = "csv")]
@@ -209,22 +225,22 @@ impl Dataset {
         // Determine which columns are features (all except target).
         let feature_indices: Vec<usize> = (0..headers.len()).filter(|&i| i != target_idx).collect();
 
-        let n_samples = rows.len();
         let n_features = feature_indices.len();
 
         // Parse target — try numeric first, fall back to label encoding.
         let (target, class_labels) = parse_target_column(&rows, target_idx);
 
-        // Parse feature columns — try numeric, label-encode strings.
-        let mut features = vec![vec![0.0; n_samples]; n_features];
+        // Parse feature columns — numeric stays numeric, string columns are
+        // label-encoded with the mapping recorded in feature_label_maps.
+        let mut features = Vec::with_capacity(n_features);
         let mut feature_names = Vec::with_capacity(n_features);
+        let mut feature_label_maps: Vec<Option<Vec<String>>> = Vec::with_capacity(n_features);
 
-        for (feat_col, &col_idx) in feature_indices.iter().enumerate() {
+        for &col_idx in &feature_indices {
             feature_names.push(headers[col_idx].clone());
-            for (row_idx, row) in rows.iter().enumerate() {
-                let val = row.get(col_idx).map_or("", std::string::String::as_str);
-                features[feat_col][row_idx] = val.parse::<f64>().unwrap_or(f64::NAN);
-            }
+            let (col_values, label_map) = parse_feature_column(&rows, col_idx);
+            features.push(col_values);
+            feature_label_maps.push(label_map);
         }
 
         Ok(Self {
@@ -233,6 +249,7 @@ impl Dataset {
             feature_names,
             target_name: headers[target_idx].clone(),
             class_labels,
+            feature_label_maps,
             matrix: OnceLock::new(),
             row_major_cache: None,
             storage: Storage::Dense,
@@ -342,6 +359,7 @@ impl Dataset {
                 feature_names: self.feature_names.clone(),
                 target_name: self.target_name.clone(),
                 class_labels: self.class_labels.clone(),
+                feature_label_maps: self.feature_label_maps.clone(),
                 matrix: OnceLock::new(),
                 row_major_cache: None,
                 storage: Storage::Sparse(new_csc),
@@ -359,6 +377,7 @@ impl Dataset {
             feature_names: self.feature_names.clone(),
             target_name: self.target_name.clone(),
             class_labels: self.class_labels.clone(),
+            feature_label_maps: self.feature_label_maps.clone(),
             matrix: OnceLock::new(),
             row_major_cache: None,
             storage: Storage::Dense,
@@ -492,6 +511,7 @@ impl Dataset {
             feature_names,
             target_name: target_name.into(),
             class_labels: None,
+            feature_label_maps: Vec::new(),
             matrix: OnceLock::new(),
             row_major_cache: None,
             storage: Storage::Sparse(csc),
@@ -742,6 +762,54 @@ fn parse_target_column(rows: &[Vec<String>], col_idx: usize) -> (Vec<f64>, Optio
     (encoded, Some(labels))
 }
 
+/// Parse a feature column, label-encoding string values if any cell is non-numeric.
+///
+/// Empty cells in an otherwise-numeric column become `NaN`. Empty cells in a
+/// string column are treated as their own label (consistent with how scikit-learn's
+/// `OrdinalEncoder` treats missing strings).
+///
+/// Returns `(encoded_values, label_map)` where `label_map` is `None` for purely
+/// numeric columns and `Some(Vec<String>)` for label-encoded columns. The label
+/// map index `i` corresponds to encoded value `i as f64`.
+fn parse_feature_column(rows: &[Vec<String>], col_idx: usize) -> (Vec<f64>, Option<Vec<String>>) {
+    // Detect whether *every* non-empty cell parses as f64.
+    let mut all_numeric = true;
+    for row in rows {
+        let s = row.get(col_idx).map_or("", std::string::String::as_str);
+        if s.is_empty() {
+            continue;
+        }
+        if s.parse::<f64>().is_err() {
+            all_numeric = false;
+            break;
+        }
+    }
+
+    if all_numeric {
+        let values: Vec<f64> = rows
+            .iter()
+            .map(|row| {
+                let s = row.get(col_idx).map_or("", std::string::String::as_str);
+                s.parse::<f64>().unwrap_or(f64::NAN)
+            })
+            .collect();
+        return (values, None);
+    }
+
+    // Label-encode the column, building the map in first-seen order.
+    let mut labels: Vec<String> = Vec::new();
+    let mut encoded = Vec::with_capacity(rows.len());
+    for row in rows {
+        let val = row.get(col_idx).map_or("", std::string::String::as_str);
+        let idx = labels.iter().position(|l| l == val).unwrap_or_else(|| {
+            labels.push(val.to_string());
+            labels.len() - 1
+        });
+        encoded.push(idx as f64);
+    }
+    (encoded, Some(labels))
+}
+
 #[cfg(test)]
 #[allow(clippy::float_cmp)]
 mod tests {
@@ -769,6 +837,33 @@ mod tests {
         assert_eq!(
             ds.class_labels,
             Some(vec!["a".to_string(), "b".to_string()])
+        );
+    }
+
+    #[cfg(feature = "csv")]
+    #[test]
+    fn test_dataset_from_csv_label_encodes_string_features() {
+        // f1 is numeric, color is string, target is numeric.
+        let csv = "\
+f1,color,target
+1.0,red,0
+2.0,blue,1
+3.0,red,0
+4.0,green,1
+";
+        let ds = Dataset::from_csv_reader(csv.as_bytes(), "target").unwrap();
+        assert_eq!(ds.n_samples(), 4);
+        assert_eq!(ds.n_features(), 2);
+        // Numeric column passes through unchanged.
+        assert_eq!(ds.features[0], vec![1.0, 2.0, 3.0, 4.0]);
+        // String column is label-encoded (first-seen order).
+        assert_eq!(ds.features[1], vec![0.0, 1.0, 0.0, 2.0]);
+        // No mapping for numeric f1; mapping recorded for color.
+        assert_eq!(ds.feature_label_maps.len(), 2);
+        assert!(ds.feature_label_maps[0].is_none());
+        assert_eq!(
+            ds.feature_label_maps[1],
+            Some(vec!["red".into(), "blue".into(), "green".into()])
         );
     }
 
