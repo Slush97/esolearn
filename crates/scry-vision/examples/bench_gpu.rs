@@ -90,6 +90,18 @@ fn run_resnet18(input: &[f32]) {
     });
     println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
         cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
+
+    // Fold BN into preceding conv before upload — eliminates ~21 BN kernel
+    // launches and HBM passes per forward (one per BasicBlock + stem).
+    let mut gpu_model_fused = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet18(1000));
+    gpu_model_fused.fuse_batchnorms();
+    gpu_model_fused.to_device();
+    let gpu_fused_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+        ScryGpuBackend::synchronize().expect("synchronize");
+    });
+    println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
+        cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
 }
 
 fn run_resnet50(input: &[f32]) {
@@ -122,6 +134,18 @@ fn run_resnet50(input: &[f32]) {
     });
     println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
         cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
+
+    // Fold BN into preceding conv before upload. Bottleneck has 3 conv-bn
+    // pairs per block; ResNet-50 has 16 blocks, so ~49 BN launches vanish.
+    let mut gpu_model_fused = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet50(1000));
+    gpu_model_fused.fuse_batchnorms();
+    gpu_model_fused.to_device();
+    let gpu_fused_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+        ScryGpuBackend::synchronize().expect("synchronize");
+    });
+    println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
+        cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
 }
 
 fn main() {

@@ -37,6 +37,9 @@ pub struct BasicBlock<B: MathBackend> {
     pub bn2: BatchNorm2d<B>,
     /// Downsample skip connection (1×1 conv + BN) when stride > 1 or channels change.
     pub downsample: Option<(Conv2d<B>, BatchNorm2d<B>)>,
+    /// True after [`Self::fuse_batchnorms`] has folded each BN into its
+    /// preceding conv. Forward then skips the BN ops entirely.
+    pub bn_fused: bool,
 }
 
 impl<B: MathBackend> BasicBlock<B> {
@@ -58,6 +61,7 @@ impl<B: MathBackend> BasicBlock<B> {
             conv2: Conv2d::square(out_channels, out_channels, 3, 1, 1),
             bn2: BatchNorm2d::new(out_channels, 1e-5),
             downsample,
+            bn_fused: false,
         }
     }
 
@@ -74,16 +78,40 @@ impl<B: MathBackend> BasicBlock<B> {
         }
     }
 
+    /// Fold each BN into the conv that precedes it (conv1+bn1, conv2+bn2,
+    /// downsample.0+downsample.1) and flip `bn_fused` so forward skips the
+    /// BN ops. Must be called before [`Self::to_device`].
+    pub fn fuse_batchnorms(&mut self) {
+        self.conv1.fold_batchnorm(&self.bn1);
+        self.conv2.fold_batchnorm(&self.bn2);
+        if let Some((ds_conv, ds_bn)) = &mut self.downsample {
+            ds_conv.fold_batchnorm(ds_bn);
+        }
+        self.bn_fused = true;
+    }
+
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
-            Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
+            Some((ref ds_conv, ref ds_bn)) => {
+                let ds_out = ds_conv.forward(input);
+                if self.bn_fused {
+                    ds_out
+                } else {
+                    ds_bn.forward(&ds_out)
+                }
+            }
             // Cheap clone — on ScryGpuBackend this is an Arc bump on the
             // device buffer, not a download.
             None => Tensor::<B>::new(B::clone_storage(&input.data), input.shape.clone()),
         };
 
-        let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
-        let x = self.bn2.forward(&self.conv2.forward(&x));
+        let x = if self.bn_fused {
+            let x = relu(&self.conv1.forward(input));
+            self.conv2.forward(&x)
+        } else {
+            let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
+            self.bn2.forward(&self.conv2.forward(&x))
+        };
 
         // Residual add
         let out_data = B::add(&x.data, &identity.data, &x.shape, &identity.shape, &x.shape);
@@ -106,6 +134,9 @@ pub struct Bottleneck<B: MathBackend> {
     pub conv3: Conv2d<B>,
     pub bn3: BatchNorm2d<B>,
     pub downsample: Option<(Conv2d<B>, BatchNorm2d<B>)>,
+    /// True after [`Self::fuse_batchnorms`] has folded each BN into its
+    /// preceding conv. Forward then skips the BN ops entirely.
+    pub bn_fused: bool,
 }
 
 impl<B: MathBackend> Bottleneck<B> {
@@ -131,6 +162,7 @@ impl<B: MathBackend> Bottleneck<B> {
             conv3: Conv2d::square(mid_channels, out_channels, 1, 1, 0),
             bn3: BatchNorm2d::new(out_channels, 1e-5),
             downsample,
+            bn_fused: false,
         }
     }
 
@@ -149,17 +181,43 @@ impl<B: MathBackend> Bottleneck<B> {
         }
     }
 
+    /// Fold each BN into the conv that precedes it (conv1+bn1, conv2+bn2,
+    /// conv3+bn3, downsample.0+downsample.1) and flip `bn_fused` so forward
+    /// skips the BN ops. Must be called before [`Self::to_device`].
+    pub fn fuse_batchnorms(&mut self) {
+        self.conv1.fold_batchnorm(&self.bn1);
+        self.conv2.fold_batchnorm(&self.bn2);
+        self.conv3.fold_batchnorm(&self.bn3);
+        if let Some((ds_conv, ds_bn)) = &mut self.downsample {
+            ds_conv.fold_batchnorm(ds_bn);
+        }
+        self.bn_fused = true;
+    }
+
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
-            Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
+            Some((ref ds_conv, ref ds_bn)) => {
+                let ds_out = ds_conv.forward(input);
+                if self.bn_fused {
+                    ds_out
+                } else {
+                    ds_bn.forward(&ds_out)
+                }
+            }
             // Cheap clone — on ScryGpuBackend this is an Arc bump on the
             // device buffer, not a download.
             None => Tensor::<B>::new(B::clone_storage(&input.data), input.shape.clone()),
         };
 
-        let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
-        let x = relu(&self.bn2.forward(&self.conv2.forward(&x)));
-        let x = self.bn3.forward(&self.conv3.forward(&x));
+        let x = if self.bn_fused {
+            let x = relu(&self.conv1.forward(input));
+            let x = relu(&self.conv2.forward(&x));
+            self.conv3.forward(&x)
+        } else {
+            let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
+            let x = relu(&self.bn2.forward(&self.conv2.forward(&x)));
+            self.bn3.forward(&self.conv3.forward(&x))
+        };
 
         let out_data = B::add(&x.data, &identity.data, &x.shape, &identity.shape, &x.shape);
         relu(&Tensor::new(out_data, x.shape))
@@ -179,6 +237,15 @@ impl<B: MathBackend> ResNetStage<B> {
         match self {
             Self::Basic(blocks) => blocks.iter_mut().for_each(BasicBlock::to_device),
             Self::Bottleneck(blocks) => blocks.iter_mut().for_each(Bottleneck::to_device),
+        }
+    }
+
+    /// Fold BN into preceding conv on every block in this stage.
+    /// Must be called before [`Self::to_device`].
+    pub fn fuse_batchnorms(&mut self) {
+        match self {
+            Self::Basic(blocks) => blocks.iter_mut().for_each(BasicBlock::fuse_batchnorms),
+            Self::Bottleneck(blocks) => blocks.iter_mut().for_each(Bottleneck::fuse_batchnorms),
         }
     }
 
@@ -264,6 +331,10 @@ pub struct ResNet<B: MathBackend> {
     pub fc_weight: Option<Tensor<B>>,
     pub fc_bias: Option<Tensor<B>>,
     pub config: ResNetConfig,
+    /// True after [`Self::fuse_batchnorms`] has folded the stem BN
+    /// (`bn1`) into `conv1`. Each stage block tracks its own fold state
+    /// in `BasicBlock::bn_fused` / `Bottleneck::bn_fused`.
+    pub stem_bn_fused: bool,
 }
 
 impl<B: MathBackend> ResNet<B> {
@@ -295,6 +366,7 @@ impl<B: MathBackend> ResNet<B> {
             fc_weight,
             fc_bias,
             config,
+            stem_bn_fused: false,
         }
     }
 
@@ -336,6 +408,23 @@ impl<B: MathBackend> ResNet<B> {
         (stages, in_ch)
     }
 
+    /// Fold every BatchNorm into its preceding conv (stem + every block in
+    /// every stage) and flip the corresponding `bn_fused` flags so forward
+    /// skips the BN ops. Inference-only optimization — the math is exact.
+    ///
+    /// Must be called **before** [`Self::to_device`]: folding reads tensor
+    /// values via `B::to_vec`, which on GPU backends would force a download
+    /// after upload. Idempotency note: calling twice would double-fold and
+    /// produce wrong outputs; callers must invoke once. The FC head has no
+    /// BN, so it's untouched.
+    pub fn fuse_batchnorms(&mut self) {
+        self.conv1.fold_batchnorm(&self.bn1);
+        self.stem_bn_fused = true;
+        for stage in &mut self.stages {
+            stage.fuse_batchnorms();
+        }
+    }
+
     /// Pre-upload every parameter tensor to the backend's device-resident
     /// form. Walks the stem (conv1, bn1), all four stages, and the FC layer.
     /// No-op on `CpuBackend`; on `ScryGpuBackend` this turns ~50+ per-call
@@ -367,8 +456,13 @@ impl<B: MathBackend> ResNet<B> {
 
     /// Forward pass: `[3, H, W]` → `[num_classes]` or `[feature_dim]`.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
-        // Stem: conv → bn → relu → maxpool
-        let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
+        // Stem: conv → [bn] → relu → maxpool. BN is skipped when folded.
+        let stem = self.conv1.forward(input);
+        let x = if self.stem_bn_fused {
+            relu(&stem)
+        } else {
+            relu(&self.bn1.forward(&stem))
+        };
         let x = self.maxpool.forward(&x);
 
         // 4 residual stages
@@ -421,6 +515,13 @@ impl<B: MathBackend> ResNet<B> {
     /// If `config.num_classes == 0`, the FC layer is skipped even if the file
     /// contains `fc.weight` / `fc.bias`. This lets you use a classification
     /// checkpoint as a feature extractor.
+    ///
+    /// # Inference perf
+    ///
+    /// For inference, call [`Self::fuse_batchnorms`] after this and before
+    /// [`Self::to_device`] to fold every BN into its preceding conv. The
+    /// math is exact and eliminates one kernel + one full activation pass
+    /// per BN.
     pub fn from_safetensors(config: ResNetConfig, path: &std::path::Path) -> Result<Self> {
         use crate::checkpoint::{
             load_batchnorm2d, load_conv2d, load_tensor, load_tensor_transposed,
@@ -498,6 +599,7 @@ impl<B: MathBackend> ResNet<B> {
             fc_weight,
             fc_bias,
             config,
+            stem_bn_fused: false,
         })
     }
 
@@ -562,6 +664,7 @@ impl<B: MathBackend> ResNet<B> {
             conv2,
             bn2,
             downsample,
+            bn_fused: false,
         })
     }
 
@@ -641,6 +744,7 @@ impl<B: MathBackend> ResNet<B> {
             conv3,
             bn3,
             downsample,
+            bn_fused: false,
         })
     }
 }
@@ -873,6 +977,157 @@ mod tests {
         let image = vec![128u8; 16 * 16 * 3];
         let results = classifier.classify(&image, 16, 16, 5).unwrap();
         assert_eq!(results.len(), 5);
+    }
+
+    // ── BN folding equivalence tests ──
+
+    /// Fill a tensor with deterministic pseudo-random f32 values.
+    fn fill_random(tensor: &mut Tensor<CpuBackend>, seed: f32) {
+        let n = tensor.numel();
+        let v: Vec<f32> = (0..n).map(|i| ((i as f32) * 0.13 + seed).sin()).collect();
+        *tensor = Tensor::from_vec(v, tensor.shape.clone());
+    }
+
+    /// Populate a `BasicBlock` with non-trivial random conv weights and
+    /// non-identity BN params so that BN folding is observable.
+    fn randomize_basic_block(block: &mut BasicBlock<CpuBackend>, seed: f32) {
+        fill_random(&mut block.conv1.weight, seed);
+        fill_random(&mut block.conv1.bias, seed + 1.0);
+        fill_random(&mut block.bn1.weight, seed + 2.0);
+        fill_random(&mut block.bn1.bias, seed + 3.0);
+        fill_random(&mut block.bn1.running_mean, seed + 4.0);
+        // var must stay positive: shift sin into [0.5, 1.5]
+        let n = block.bn1.running_var.numel();
+        block.bn1.running_var = Tensor::from_vec(
+            (0..n).map(|i| 1.0 + ((i as f32) * 0.07 + seed).sin() * 0.4).collect(),
+            block.bn1.running_var.shape.clone(),
+        );
+
+        fill_random(&mut block.conv2.weight, seed + 10.0);
+        fill_random(&mut block.conv2.bias, seed + 11.0);
+        fill_random(&mut block.bn2.weight, seed + 12.0);
+        fill_random(&mut block.bn2.bias, seed + 13.0);
+        fill_random(&mut block.bn2.running_mean, seed + 14.0);
+        let n2 = block.bn2.running_var.numel();
+        block.bn2.running_var = Tensor::from_vec(
+            (0..n2).map(|i| 1.0 + ((i as f32) * 0.07 + seed + 10.0).sin() * 0.4).collect(),
+            block.bn2.running_var.shape.clone(),
+        );
+
+        if let Some((ds_conv, ds_bn)) = &mut block.downsample {
+            fill_random(&mut ds_conv.weight, seed + 20.0);
+            fill_random(&mut ds_conv.bias, seed + 21.0);
+            fill_random(&mut ds_bn.weight, seed + 22.0);
+            fill_random(&mut ds_bn.bias, seed + 23.0);
+            fill_random(&mut ds_bn.running_mean, seed + 24.0);
+            let n3 = ds_bn.running_var.numel();
+            ds_bn.running_var = Tensor::from_vec(
+                (0..n3).map(|i| 1.0 + ((i as f32) * 0.07 + seed + 20.0).sin() * 0.4).collect(),
+                ds_bn.running_var.shape.clone(),
+            );
+        }
+    }
+
+    fn assert_close(a: &[f32], b: &[f32], tol: f32, label: &str) {
+        assert_eq!(a.len(), b.len(), "{label}: length mismatch");
+        let max_err = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+        assert!(max_err < tol, "{label}: max error {max_err:.2e} > tol {tol:.2e}");
+    }
+
+    fn clone_basic_block(block: &BasicBlock<CpuBackend>) -> BasicBlock<CpuBackend> {
+        let in_ch = block.conv1.in_channels;
+        let mid_ch = block.conv1.out_channels;
+        let stride = block.conv1.stride;
+        let mut copy = BasicBlock::<CpuBackend>::new(in_ch, mid_ch, stride);
+        copy.conv1.weight = Tensor::from_vec(block.conv1.weight.to_vec(), block.conv1.weight.shape.clone());
+        copy.conv1.bias = Tensor::from_vec(block.conv1.bias.to_vec(), block.conv1.bias.shape.clone());
+        copy.bn1.weight = Tensor::from_vec(block.bn1.weight.to_vec(), block.bn1.weight.shape.clone());
+        copy.bn1.bias = Tensor::from_vec(block.bn1.bias.to_vec(), block.bn1.bias.shape.clone());
+        copy.bn1.running_mean = Tensor::from_vec(block.bn1.running_mean.to_vec(), block.bn1.running_mean.shape.clone());
+        copy.bn1.running_var = Tensor::from_vec(block.bn1.running_var.to_vec(), block.bn1.running_var.shape.clone());
+        copy.conv2.weight = Tensor::from_vec(block.conv2.weight.to_vec(), block.conv2.weight.shape.clone());
+        copy.conv2.bias = Tensor::from_vec(block.conv2.bias.to_vec(), block.conv2.bias.shape.clone());
+        copy.bn2.weight = Tensor::from_vec(block.bn2.weight.to_vec(), block.bn2.weight.shape.clone());
+        copy.bn2.bias = Tensor::from_vec(block.bn2.bias.to_vec(), block.bn2.bias.shape.clone());
+        copy.bn2.running_mean = Tensor::from_vec(block.bn2.running_mean.to_vec(), block.bn2.running_mean.shape.clone());
+        copy.bn2.running_var = Tensor::from_vec(block.bn2.running_var.to_vec(), block.bn2.running_var.shape.clone());
+        if let (Some((src_dc, src_db)), Some((dst_dc, dst_db))) = (&block.downsample, &mut copy.downsample) {
+            dst_dc.weight = Tensor::from_vec(src_dc.weight.to_vec(), src_dc.weight.shape.clone());
+            dst_dc.bias = Tensor::from_vec(src_dc.bias.to_vec(), src_dc.bias.shape.clone());
+            dst_db.weight = Tensor::from_vec(src_db.weight.to_vec(), src_db.weight.shape.clone());
+            dst_db.bias = Tensor::from_vec(src_db.bias.to_vec(), src_db.bias.shape.clone());
+            dst_db.running_mean = Tensor::from_vec(src_db.running_mean.to_vec(), src_db.running_mean.shape.clone());
+            dst_db.running_var = Tensor::from_vec(src_db.running_var.to_vec(), src_db.running_var.shape.clone());
+        }
+        copy
+    }
+
+    #[test]
+    fn basic_block_fuse_matches_unfused_same_channels() {
+        let mut reference = BasicBlock::<CpuBackend>::new(16, 16, 1);
+        randomize_basic_block(&mut reference, 0.5);
+        let mut fused = clone_basic_block(&reference);
+
+        let input = Tensor::from_vec(
+            (0..16 * 8 * 8).map(|i| ((i as f32) * 0.21).cos()).collect(),
+            Shape::new(&[16, 8, 8]),
+        );
+
+        let ref_out = reference.forward(&input);
+        fused.fuse_batchnorms();
+        assert!(fused.bn_fused);
+        let fused_out = fused.forward(&input);
+
+        assert_eq!(fused_out.shape.dims(), ref_out.shape.dims());
+        assert_close(&fused_out.to_vec(), &ref_out.to_vec(), 1e-3, "BasicBlock 16→16");
+    }
+
+    #[test]
+    fn basic_block_fuse_matches_unfused_with_downsample() {
+        let mut reference = BasicBlock::<CpuBackend>::new(8, 16, 2);
+        randomize_basic_block(&mut reference, 1.5);
+        let mut fused = clone_basic_block(&reference);
+
+        let input = Tensor::from_vec(
+            (0..8 * 14 * 14).map(|i| ((i as f32) * 0.17).sin()).collect(),
+            Shape::new(&[8, 14, 14]),
+        );
+
+        let ref_out = reference.forward(&input);
+        fused.fuse_batchnorms();
+        let fused_out = fused.forward(&input);
+
+        assert_eq!(fused_out.shape.dims(), ref_out.shape.dims());
+        assert_close(
+            &fused_out.to_vec(),
+            &ref_out.to_vec(),
+            2e-3,
+            "BasicBlock 8→16 stride 2 with downsample",
+        );
+    }
+
+    #[test]
+    fn resnet_fuse_matches_unfused_zero_init() {
+        // Zero-init ResNet: weights are 0 but BN running_var=1, eps=1e-5,
+        // so folding produces non-trivial conv weights (still 0) but exercises
+        // the walker on every block — useful as a smoke test that the walk
+        // hits everything without crashing.
+        let reference = ResNet::<CpuBackend>::new(ResNetConfig::resnet18(10));
+        let mut fused = ResNet::<CpuBackend>::new(ResNetConfig::resnet18(10));
+
+        let input = Tensor::from_vec(vec![0.5; 3 * 32 * 32], Shape::new(&[3, 32, 32]));
+        let ref_out = reference.forward(&input);
+        fused.fuse_batchnorms();
+        assert!(fused.stem_bn_fused);
+        let fused_out = fused.forward(&input);
+
+        assert_eq!(fused_out.shape.dims(), ref_out.shape.dims());
+        assert_close(
+            &fused_out.to_vec(),
+            &ref_out.to_vec(),
+            1e-4,
+            "ResNet-18 zero-init pre/post fuse",
+        );
     }
 
     // ── safetensors round-trip tests ──

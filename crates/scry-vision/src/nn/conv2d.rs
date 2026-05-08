@@ -17,6 +17,8 @@ use scry_llm::nn::Module;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
+use crate::nn::batchnorm::BatchNorm2d;
+
 /// Convolution algorithm choice for [`Conv2d`].
 ///
 /// Set once at construction via [`Conv2dStrategy::default_for`] from the
@@ -183,6 +185,56 @@ impl<B: MathBackend> Conv2d<B> {
     pub fn to_device(&mut self) {
         B::to_device_in_place(&mut self.weight.data);
         B::to_device_in_place(&mut self.bias.data);
+    }
+
+    /// Fold the parameters of an immediately-following `BatchNorm2d` into
+    /// this conv's weight and bias. Inference-only optimization: BN at
+    /// inference is `y = (x - μ)/√(σ² + ε) · γ + β`, which is a per-channel
+    /// affine map and can be absorbed into the preceding conv. After folding,
+    /// the BN op can be skipped entirely — typically via the containing
+    /// block's `bn_fused` flag.
+    ///
+    /// Per out-channel `c` with `s = γ[c] / √(σ²[c] + ε)`:
+    ///   - `weight[c, ·, ·, ·] *= s`
+    ///   - `bias[c] = (bias[c] − μ[c]) · s + β[c]`
+    ///
+    /// Must be called **before** [`Self::to_device`] — the fold reads tensor
+    /// values via `B::to_vec`, which on GPU backends would force a download.
+    /// The Winograd weight cache is invalidated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bn.num_features != self.out_channels`.
+    pub fn fold_batchnorm(&mut self, bn: &BatchNorm2d<B>) {
+        assert_eq!(
+            bn.num_features, self.out_channels,
+            "BN channels ({}) must match conv out_channels ({})",
+            bn.num_features, self.out_channels,
+        );
+
+        let gamma = B::to_vec(&bn.weight.data);
+        let beta = B::to_vec(&bn.bias.data);
+        let mean = B::to_vec(&bn.running_mean.data);
+        let var = B::to_vec(&bn.running_var.data);
+        let eps = bn.eps;
+
+        let mut w = B::to_vec(&self.weight.data);
+        let mut b = B::to_vec(&self.bias.data);
+
+        let c_out = self.out_channels;
+        let stride_per_filter = w.len() / c_out;
+        for c in 0..c_out {
+            let s = gamma[c] / (var[c] + eps).sqrt();
+            let base = c * stride_per_filter;
+            for k in 0..stride_per_filter {
+                w[base + k] *= s;
+            }
+            b[c] = (b[c] - mean[c]) * s + beta[c];
+        }
+
+        self.weight = Tensor::from_vec(w, self.weight.shape.clone());
+        self.bias = Tensor::from_vec(b, self.bias.shape.clone());
+        *self.winograd_weight.borrow_mut() = None;
     }
 
     /// Whether this conv qualifies for Winograd F(2×2, 3×3).
@@ -767,5 +819,120 @@ mod tests {
             1e-5,
             "forward() dispatch vs im2col",
         );
+    }
+
+    // ── BN folding tests ──
+
+    /// Build a `BatchNorm2d` with deterministic non-trivial running stats and
+    /// affine params, so folding has something to actually do.
+    fn random_bn(channels: usize) -> BatchNorm2d<CpuBackend> {
+        let gamma: Vec<f32> = (0..channels).map(|i| 0.5 + (i as f32 * 0.31).sin()).collect();
+        let beta: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.17).cos() * 0.7).collect();
+        let mean: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.21).sin() * 0.4).collect();
+        // Variance must be positive; bias the floor up.
+        let var: Vec<f32> = (0..channels)
+            .map(|i| 0.25 + (i as f32 * 0.11).cos().abs())
+            .collect();
+        let mut bn = BatchNorm2d::<CpuBackend>::new(channels, 1e-5);
+        bn.weight = Tensor::from_vec(gamma, Shape::new(&[channels]));
+        bn.bias = Tensor::from_vec(beta, Shape::new(&[channels]));
+        bn.running_mean = Tensor::from_vec(mean, Shape::new(&[channels]));
+        bn.running_var = Tensor::from_vec(var, Shape::new(&[channels]));
+        bn
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_3x3() {
+        let mut conv_folded = random_conv(8, 16);
+        let conv_ref = random_conv(8, 16);
+        let bn = random_bn(16);
+        let input = random_input(8, 14, 14);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_eq!(folded.shape.dims(), reference.shape.dims());
+        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "3×3 conv-bn fold");
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_1x1() {
+        let mut conv_folded = random_conv_1x1(64, 64);
+        let conv_ref = random_conv_1x1(64, 64);
+        let bn = random_bn(64);
+        let input = random_input(64, 7, 7);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "1×1 conv-bn fold");
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_with_stride() {
+        // Stride-2 3×3 (the downsample path between ResNet stages).
+        let mut conv_folded = Conv2d::<CpuBackend>::square(16, 32, 3, 2, 1);
+        let n = 32 * 16 * 9;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 0.7 + 0.3).sin()).collect();
+        let b: Vec<f32> = (0..32).map(|i| (i as f32 * 0.13).cos() * 0.5).collect();
+        conv_folded.weight = Tensor::from_vec(w.clone(), Shape::new(&[32, 16, 3, 3]));
+        conv_folded.bias = Tensor::from_vec(b.clone(), Shape::new(&[32]));
+
+        let mut conv_ref = Conv2d::<CpuBackend>::square(16, 32, 3, 2, 1);
+        conv_ref.weight = Tensor::from_vec(w, Shape::new(&[32, 16, 3, 3]));
+        conv_ref.bias = Tensor::from_vec(b, Shape::new(&[32]));
+
+        let bn = random_bn(32);
+        let input = random_input(16, 14, 14);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "3×3 stride-2 conv-bn fold",
+        );
+    }
+
+    #[test]
+    fn fold_batchnorm_zero_bias_conv() {
+        // Conv2d::new initializes bias to zero — exercises the (0 - μ)·s + β
+        // branch of the bias update, which is the common case for ResNet
+        // (PyTorch ResNet convs are trained with bias=False before BN).
+        let mut conv = Conv2d::<CpuBackend>::square(4, 8, 3, 1, 1);
+        let n = 8 * 4 * 9;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 1.1).cos()).collect();
+        conv.weight = Tensor::from_vec(w, Shape::new(&[8, 4, 3, 3]));
+        // bias stays at zeros from Conv2d::new
+
+        let mut conv_ref = Conv2d::<CpuBackend>::square(4, 8, 3, 1, 1);
+        conv_ref.weight = Tensor::from_vec(conv.weight.to_vec(), conv.weight.shape.clone());
+
+        let bn = random_bn(8);
+        let input = random_input(4, 8, 8);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv.fold_batchnorm(&bn);
+        let folded = conv.forward(&input);
+
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "zero-bias conv-bn fold",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BN channels")]
+    fn fold_batchnorm_channel_mismatch_panics() {
+        let mut conv = Conv2d::<CpuBackend>::square(3, 16, 3, 1, 1);
+        let bn = random_bn(8); // wrong channel count
+        conv.fold_batchnorm(&bn);
     }
 }
