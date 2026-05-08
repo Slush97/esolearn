@@ -47,7 +47,9 @@ pub fn sinusoidal_timestep_embedding<B: MathBackend>(
     max_period: f32,
 ) -> Result<Tensor<B>> {
     if d_model == 0 {
-        return Err(Error::Llm("sinusoidal_timestep_embedding: d_model = 0".into()));
+        return Err(Error::Llm(
+            "sinusoidal_timestep_embedding: d_model = 0".into(),
+        ));
     }
     let half = d_model / 2;
     let mut emb = vec![0.0f32; d_model];
@@ -84,8 +86,7 @@ pub fn upsample_2d_nearest<B: MathBackend>(
     // Spatial-only op: batched input flattens to (batch*channels) planes
     // without any cross-channel mixing.
     let merged_channels = batch * channels;
-    let out_storage =
-        B::upsample_2d_nearest(&input.data, merged_channels, h_in, w_in, scale);
+    let out_storage = B::upsample_2d_nearest(&input.data, merged_channels, h_in, w_in, scale);
     let h_out = h_in * scale;
     let w_out = w_in * scale;
     let shape = if input.shape.dims().len() == 3 {
@@ -135,7 +136,14 @@ pub fn group_norm<B: MathBackend>(
         )));
     }
     let spatial = h * w;
-    let out =
-        B::group_norm(&input.data, &weight.data, &bias.data, num_groups, channels, spatial, eps);
+    let out = B::group_norm(
+        &input.data,
+        &weight.data,
+        &bias.data,
+        num_groups,
+        channels,
+        spatial,
+        eps,
+    );
     Ok(Tensor::new(out, input.shape.clone()))
 }
