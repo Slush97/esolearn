@@ -138,6 +138,46 @@ pub trait MathBackend: DeviceBackend {
         output
     }
 
+    /// 2D batch normalization, inference-only with stored running statistics.
+    ///
+    /// For input shaped `[channels, spatial]` (or `[batch, channels, spatial]`
+    /// flattened to `batch * channels * spatial` elements), computes
+    /// `out[c, i] = (in[c, i] - running_mean[c]) / sqrt(running_var[c] + eps) * weight[c] + bias[c]`.
+    /// `weight`, `bias`, `running_mean`, and `running_var` are all length `channels`.
+    /// `spatial` is `H * W`. The default impl runs on host via `to_vec`/`from_vec`;
+    /// GPU backends override to keep tensors device-resident.
+    fn batchnorm_2d_inference(
+        input: &Self::Storage,
+        weight: &Self::Storage,
+        bias: &Self::Storage,
+        running_mean: &Self::Storage,
+        running_var: &Self::Storage,
+        channels: usize,
+        spatial: usize,
+        eps: f32,
+    ) -> Self::Storage {
+        let input_v = Self::to_vec(input);
+        let weight_v = Self::to_vec(weight);
+        let bias_v = Self::to_vec(bias);
+        let mean_v = Self::to_vec(running_mean);
+        let var_v = Self::to_vec(running_var);
+        let total = input_v.len();
+        let plane = channels * spatial;
+        let mut out = vec![0.0f32; total];
+        let n_batch = if plane == 0 { 0 } else { total / plane };
+        for n in 0..n_batch {
+            for c in 0..channels {
+                let scale = weight_v[c] / (var_v[c] + eps).sqrt();
+                let shift = bias_v[c] - mean_v[c] * scale;
+                let off = (n * channels + c) * spatial;
+                for i in 0..spatial {
+                    out[off + i] = input_v[off + i] * scale + shift;
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[total]))
+    }
+
     /// GELU activation (tanh approximation).
     fn gelu(input: &Self::Storage) -> Self::Storage;
 

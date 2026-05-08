@@ -657,6 +657,59 @@ extern \"C\" __global__ void layernorm_rowwise(
         row_out[i] = norm * gamma[i] + beta[i];
     }
 }";
+
+    /// 2D batch normalization (inference) with stored running stats.
+    ///
+    /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),
+    /// computes `out[n, c, i] = (in[n, c, i] - mean[c]) * rsqrt(var[c] + eps) * weight[c] + bias[c]`
+    /// using fused per-channel `scale = weight[c] * rsqrt(var[c] + eps)` and
+    /// `shift = bias[c] - mean[c] * scale`. No reductions — purely elementwise
+    /// per `(channel, batch_index)` plane.
+    ///
+    /// One block per `(channel, batch)` plane via a 2D grid; threads stride
+    /// over the spatial dimension. The four per-channel constants
+    /// (`weight[c]`, `bias[c]`, `running_mean[c]`, `running_var[c]`) are L1-cached
+    /// since every thread in the block reads the same address — no shared
+    /// memory needed.
+    ///
+    /// `BatchNorm2d` modules with the standard `[channels, h, w]` layout pass
+    /// `batch = 1` and `spatial = h*w`.
+    ///
+    /// **Kernel signature:** `batchnorm_inference(const float* input, const float* weight, const float* bias, const float* running_mean, const float* running_var, float* out, unsigned int channels, unsigned int spatial, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[channels, batch, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const BATCHNORM_INFERENCE_CUDA: &str = "\
+extern \"C\" __global__ void batchnorm_inference(
+    const float* input, const float* weight, const float* bias,
+    const float* running_mean, const float* running_var,
+    float* out,
+    unsigned int channels, unsigned int spatial, float eps
+) {
+    unsigned int c = blockIdx.x;
+    unsigned int n = blockIdx.y;
+    if (c >= channels) return;
+
+    // All threads in this block read the same per-channel constants — the
+    // four loads are broadcast and L1-cached, so the kernel runs at memory
+    // bandwidth on the input/output streams.
+    float w = weight[c];
+    float b = bias[c];
+    float m = running_mean[c];
+    float v = running_var[c];
+    float scale = w * rsqrtf(v + eps);
+    float shift = b - m * scale;
+
+    unsigned int plane = (n * channels + c) * spatial;
+    const float* in_plane = input + plane;
+    float* out_plane = out + plane;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    for (unsigned int i = tid; i < spatial; i += bs) {
+        out_plane[i] = in_plane[i] * scale + shift;
+    }
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.

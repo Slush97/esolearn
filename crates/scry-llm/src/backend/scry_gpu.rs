@@ -136,6 +136,9 @@ struct ScryCtx {
     /// On-device row-wise layernorm with affine gamma/beta. CUDA-only; Vulkan
     /// path is `None` and callers fall back to CPU.
     layernorm: Option<::scry_gpu::Kernel>,
+    /// On-device 2D batch-normalization (inference) with stored running stats.
+    /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
+    batchnorm: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -196,6 +199,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: layernorm_cuda compile: {e}"))?;
+        let batchnorm = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::BATCHNORM_INFERENCE_CUDA,
+                "batchnorm_inference",
+                6,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: batchnorm_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
@@ -203,6 +214,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             gelu: Some(gelu),
             softmax: Some(softmax),
             layernorm: Some(layernorm),
+            batchnorm: Some(batchnorm),
         });
     }
 
@@ -222,6 +234,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         gelu: Some(gelu),
         softmax: None,
         layernorm: None,
+        batchnorm: None,
     })
 }
 
@@ -547,6 +560,78 @@ fn gpu_layernorm_persistent(
             len: n_rows,
         },
     ))
+}
+
+/// Minimum channel count before engaging the GPU batchnorm path. Below this,
+/// CPU rayon parallelism wins; the per-launch grid setup dominates a small
+/// number of channel planes. ResNet's first stage has 64 channels, so this
+/// engages from the network entry onward.
+const GPU_BATCHNORM_MIN_CHANNELS: usize = 16;
+
+/// GPU-resident 2D batchnorm inference with stored running stats. CUDA-only —
+/// the Vulkan path returns `None` so the caller falls back to CPU. Returns
+/// `None` also when the GPU path is unavailable, the workload is below
+/// threshold, the input total doesn't divide evenly into `channels * spatial`
+/// planes, or `weight`/`bias`/`running_mean`/`running_var` lengths don't match
+/// `channels`.
+fn gpu_batchnorm_persistent(
+    input: &ScryGpuStorage,
+    weight: &ScryGpuStorage,
+    bias: &ScryGpuStorage,
+    running_mean: &ScryGpuStorage,
+    running_var: &ScryGpuStorage,
+    channels: usize,
+    spatial: usize,
+    eps: f32,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.batchnorm.as_ref()?;
+    if channels < GPU_BATCHNORM_MIN_CHANNELS || spatial == 0 {
+        return None;
+    }
+    let total = input.len();
+    let plane = channels * spatial;
+    if plane == 0 || total % plane != 0 {
+        return None;
+    }
+    let n_batch = total / plane;
+    if n_batch == 0 {
+        return None;
+    }
+    if weight.len() != channels
+        || bias.len() != channels
+        || running_mean.len() != channels
+        || running_var.len() != channels
+    {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let buf_w = as_gpu_buffer(weight)?;
+    let buf_b = as_gpu_buffer(bias)?;
+    let buf_m = as_gpu_buffer(running_mean)?;
+    let buf_v = as_gpu_buffer(running_var)?;
+
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    // Push constants pack [channels: u32, spatial: u32, eps: f32]. Same f32
+    // bit-pun trick as layernorm — see `dispatch_kernel` and
+    // `crates/scry-gpu/src/backend/cuda.rs::launch_on_stream`.
+    let dims_pc: [u32; 3] = [channels as u32, spatial as u32, eps.to_bits()];
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &*buf_w, &*buf_b, &*buf_m, &*buf_v, &out],
+        [channels as u32, n_batch as u32, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
+    })
 }
 
 /// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
@@ -875,6 +960,40 @@ impl MathBackend for ScryGpuBackend {
         let (out, mean, rstd) =
             CpuBackend::layernorm(&input.as_vec(), &gamma.as_vec(), &beta.as_vec(), shape, eps);
         (cpu(out), cpu(mean), cpu(rstd))
+    }
+
+    fn batchnorm_2d_inference(
+        input: &ScryGpuStorage,
+        weight: &ScryGpuStorage,
+        bias: &ScryGpuStorage,
+        running_mean: &ScryGpuStorage,
+        running_var: &ScryGpuStorage,
+        channels: usize,
+        spatial: usize,
+        eps: f32,
+    ) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_batchnorm_persistent(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            channels,
+            spatial,
+            eps,
+        ) {
+            return gpu_out;
+        }
+        cpu(CpuBackend::batchnorm_2d_inference(
+            &input.as_vec(),
+            &weight.as_vec(),
+            &bias.as_vec(),
+            &running_mean.as_vec(),
+            &running_var.as_vec(),
+            channels,
+            spatial,
+            eps,
+        ))
     }
 
     fn gelu(input: &ScryGpuStorage) -> ScryGpuStorage {
@@ -1330,6 +1449,80 @@ mod tests {
         let storage = ScryGpuStorage::Cpu(input);
         let out = ScryGpuBackend::gelu(&storage);
         assert!(!out.is_gpu(), "small gelu should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_batchnorm_matches_cpu_within_tolerance() {
+        // Channel counts above GPU_BATCHNORM_MIN_CHANNELS, with both small and
+        // larger-than-block spatial dims to exercise the per-thread strided loop.
+        for (channels, spatial) in [(64usize, 49usize), (32, 256), (128, 1024)] {
+            let total = channels * spatial;
+            let input: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.05 - 2.5).collect();
+            let weight: Vec<f32> = (0..channels).map(|c| 0.5 + (c as f32) * 0.01).collect();
+            let bias: Vec<f32> = (0..channels).map(|c| (c as f32) * 0.005 - 0.25).collect();
+            let mean: Vec<f32> = (0..channels).map(|c| (c as f32) * 0.02 - 0.5).collect();
+            let var: Vec<f32> = (0..channels).map(|c| 0.5 + (c as f32) * 0.01).collect();
+            let eps = 1e-5_f32;
+
+            let in_s = ScryGpuStorage::Cpu(input.clone());
+            let w_s = ScryGpuStorage::Cpu(weight.clone());
+            let b_s = ScryGpuStorage::Cpu(bias.clone());
+            let m_s = ScryGpuStorage::Cpu(mean.clone());
+            let v_s = ScryGpuStorage::Cpu(var.clone());
+
+            let gpu_in = match ScryGpuBackend::to_gpu(&in_s) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_batchnorm_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+
+            let out =
+                ScryGpuBackend::batchnorm_2d_inference(&gpu_in, &w_s, &b_s, &m_s, &v_s, channels, spatial, eps);
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                out.is_gpu(),
+                "batchnorm output should stay Gpu on CUDA, got {out:?}"
+            );
+
+            let g_out = ScryGpuBackend::to_vec(&out);
+            let c_out = CpuBackend::batchnorm_2d_inference(
+                &input, &weight, &bias, &mean, &var, channels, spatial, eps,
+            );
+            assert_eq!(g_out.len(), c_out.len());
+
+            // Pure elementwise op — no reductions, so f32 round-off is small
+            // and 1e-5 absolute tolerance holds across the tested ranges.
+            for (i, (gv, cv)) in g_out.iter().zip(c_out.iter()).enumerate() {
+                assert!(
+                    (gv - cv).abs() < 1e-5,
+                    "channels={channels} spatial={spatial} idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_batchnorm_falls_back_to_cpu() {
+        // Below GPU_BATCHNORM_MIN_CHANNELS: result should come back as Cpu variant.
+        let channels = 8;
+        let spatial = 64;
+        let total = channels * spatial;
+        let input: Vec<f32> = (0..total).map(|i| (i as f32) * 0.01).collect();
+        let weight: Vec<f32> = vec![1.0; channels];
+        let bias: Vec<f32> = vec![0.0; channels];
+        let mean: Vec<f32> = vec![0.0; channels];
+        let var: Vec<f32> = vec![1.0; channels];
+        let in_s = ScryGpuStorage::Cpu(input);
+        let w_s = ScryGpuStorage::Cpu(weight);
+        let b_s = ScryGpuStorage::Cpu(bias);
+        let m_s = ScryGpuStorage::Cpu(mean);
+        let v_s = ScryGpuStorage::Cpu(var);
+        let out = ScryGpuBackend::batchnorm_2d_inference(
+            &in_s, &w_s, &b_s, &m_s, &v_s, channels, spatial, 1e-5,
+        );
+        assert!(!out.is_gpu(), "small batchnorm should fall back to Cpu");
     }
 
     #[test]
