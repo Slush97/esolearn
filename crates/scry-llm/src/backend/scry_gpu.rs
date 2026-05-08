@@ -133,6 +133,9 @@ struct ScryCtx {
     /// On-device row-wise softmax. CUDA-only; Vulkan path is `None` and
     /// callers fall back to CPU.
     softmax: Option<::scry_gpu::Kernel>,
+    /// On-device row-wise layernorm with affine gamma/beta. CUDA-only; Vulkan
+    /// path is `None` and callers fall back to CPU.
+    layernorm: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -185,12 +188,21 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: softmax_cuda compile: {e}"))?;
+        let layernorm = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::LAYERNORM_ROWWISE_CUDA,
+                "layernorm_rowwise",
+                6,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: layernorm_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
             transpose: Some(transpose),
             gelu: Some(gelu),
             softmax: Some(softmax),
+            layernorm: Some(layernorm),
         });
     }
 
@@ -209,6 +221,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         transpose: Some(transpose),
         gelu: Some(gelu),
         softmax: None,
+        layernorm: None,
     })
 }
 
@@ -458,6 +471,82 @@ fn gpu_softmax_persistent(input: &ScryGpuStorage, shape: &Shape) -> Option<ScryG
         buf: Arc::new(out),
         len: total,
     })
+}
+
+/// Minimum row count before engaging the GPU layernorm path. Below this, CPU
+/// rayon parallelism wins; the per-launch grid setup dominates a small handful
+/// of rows. Set to match `GPU_SOFTMAX_MIN_ROWS` since the kernel shape is the
+/// same (one block per row, two reductions).
+const GPU_LAYERNORM_MIN_ROWS: usize = 32;
+
+/// GPU-resident row-wise layernorm with affine gamma/beta. CUDA-only — the
+/// Vulkan path returns `None` so the caller falls back to CPU. Returns `None`
+/// also when the GPU path is unavailable, the workload is below threshold,
+/// the input is empty / 1-D with d == 0, or `gamma`/`beta` don't match the
+/// last-dim length.
+fn gpu_layernorm_persistent(
+    input: &ScryGpuStorage,
+    gamma: &ScryGpuStorage,
+    beta: &ScryGpuStorage,
+    shape: &Shape,
+    eps: f32,
+) -> Option<(ScryGpuStorage, ScryGpuStorage, ScryGpuStorage)> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.layernorm.as_ref()?;
+    let dims = shape.dims();
+    let d = *dims.last()?;
+    if d == 0 {
+        return None;
+    }
+    let total = input.len();
+    if total == 0 || total % d != 0 {
+        return None;
+    }
+    let n_rows = total / d;
+    if n_rows < GPU_LAYERNORM_MIN_ROWS {
+        return None;
+    }
+    if gamma.len() != d || beta.len() != d {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let buf_g = as_gpu_buffer(gamma)?;
+    let buf_b = as_gpu_buffer(beta)?;
+
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    let means = ctx.dev.alloc_uninit::<f32>(n_rows).ok()?;
+    let rstds = ctx.dev.alloc_uninit::<f32>(n_rows).ok()?;
+
+    // Push constants pack [n_rows: u32, d: u32, eps: f32]. The CUDA dispatch
+    // path treats push-constant bytes as a stream of u32 kernel args, so the
+    // f32 bits are passed transparently and the kernel reads them per its
+    // signature. See `crates/scry-gpu/src/backend/cuda.rs::launch_on_stream`.
+    let dims_pc: [u32; 3] = [n_rows as u32, d as u32, eps.to_bits()];
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &*buf_g, &*buf_b, &out, &means, &rstds],
+        [n_rows as u32, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some((
+        ScryGpuStorage::Gpu {
+            buf: Arc::new(out),
+            len: total,
+        },
+        ScryGpuStorage::Gpu {
+            buf: Arc::new(means),
+            len: n_rows,
+        },
+        ScryGpuStorage::Gpu {
+            buf: Arc::new(rstds),
+            len: n_rows,
+        },
+    ))
 }
 
 /// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
@@ -780,6 +869,9 @@ impl MathBackend for ScryGpuBackend {
         shape: &Shape,
         eps: f32,
     ) -> (ScryGpuStorage, ScryGpuStorage, ScryGpuStorage) {
+        if let Some(triple) = gpu_layernorm_persistent(input, gamma, beta, shape, eps) {
+            return triple;
+        }
         let (out, mean, rstd) =
             CpuBackend::layernorm(&input.as_vec(), &gamma.as_vec(), &beta.as_vec(), shape, eps);
         (cpu(out), cpu(mean), cpu(rstd))
@@ -1111,6 +1203,111 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn gpu_layernorm_matches_cpu_within_tolerance() {
+        // Sized above GPU_LAYERNORM_MIN_ROWS so the kernel engages, with d
+        // both small (=64) and larger-than-block (=512) cases.
+        for (rows, d) in [(64usize, 64usize), (32, 512)] {
+            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let gamma: Vec<f32> = (0..d).map(|i| 1.0 + (i as f32) * 0.01).collect();
+            let beta: Vec<f32> = (0..d).map(|i| (i as f32) * 0.005 - 0.5).collect();
+            let shape = Shape::new(&[rows, d]);
+            let eps = 1e-5_f32;
+
+            let in_storage = ScryGpuStorage::Cpu(input.clone());
+            let g_storage = ScryGpuStorage::Cpu(gamma.clone());
+            let b_storage = ScryGpuStorage::Cpu(beta.clone());
+
+            let gpu_in = match ScryGpuBackend::to_gpu(&in_storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_layernorm_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+
+            let (out, means, rstds) =
+                ScryGpuBackend::layernorm(&gpu_in, &g_storage, &b_storage, &shape, eps);
+            // On CUDA the kernel must engage; falling back to CPU here means
+            // the kernel compile or dispatch failed silently.
+            #[cfg(feature = "scry-gpu-cuda")]
+            {
+                assert!(
+                    out.is_gpu(),
+                    "layernorm output should stay Gpu on CUDA, got {out:?}"
+                );
+                assert!(
+                    means.is_gpu(),
+                    "layernorm means should stay Gpu on CUDA, got {means:?}"
+                );
+                assert!(
+                    rstds.is_gpu(),
+                    "layernorm rstds should stay Gpu on CUDA, got {rstds:?}"
+                );
+            }
+
+            let g_out = ScryGpuBackend::to_vec(&out);
+            let g_means = ScryGpuBackend::to_vec(&means);
+            let g_rstds = ScryGpuBackend::to_vec(&rstds);
+
+            let (c_out, c_means, c_rstds) =
+                CpuBackend::layernorm(&input, &gamma, &beta, &shape, eps);
+
+            assert_eq!(g_out.len(), c_out.len());
+            assert_eq!(g_means.len(), rows);
+            assert_eq!(g_rstds.len(), rows);
+
+            // Per-row mean and rstd: f32 sums vs CPU's f64 reductions.
+            // 1e-3 absolute easily holds for both d values (mean magnitudes
+            // are ~few units; rstd ~O(1)).
+            for r in 0..rows {
+                let dm = (g_means[r] - c_means[r]).abs();
+                let dr = (g_rstds[r] - c_rstds[r]).abs();
+                assert!(
+                    dm < 1e-3,
+                    "rows={rows} d={d} row {r} mean mismatch: gpu={} cpu={} delta={dm}",
+                    g_means[r],
+                    c_means[r]
+                );
+                assert!(
+                    dr < 1e-3,
+                    "rows={rows} d={d} row {r} rstd mismatch: gpu={} cpu={} delta={dr}",
+                    g_rstds[r],
+                    c_rstds[r]
+                );
+            }
+
+            // Output: relative tolerance — the affine scale lets row values
+            // grow with gamma/beta, and f32 accumulation drift in the
+            // reductions feeds through to every output element.
+            for (i, (gv, cv)) in g_out.iter().zip(c_out.iter()).enumerate() {
+                let tol = 1e-4 * cv.abs().max(1.0);
+                assert!(
+                    (gv - cv).abs() < tol,
+                    "rows={rows} d={d} idx={i}: gpu={gv} cpu={cv} (tol={tol})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_layernorm_falls_back_to_cpu() {
+        // Below GPU_LAYERNORM_MIN_ROWS: result should come back as Cpu variant.
+        let rows = 4;
+        let d = 32;
+        let input: Vec<f32> = (0..rows * d).map(|i| (i as f32) * 0.01).collect();
+        let gamma: Vec<f32> = vec![1.0; d];
+        let beta: Vec<f32> = vec![0.0; d];
+        let shape = Shape::new(&[rows, d]);
+        let in_s = ScryGpuStorage::Cpu(input);
+        let g_s = ScryGpuStorage::Cpu(gamma);
+        let b_s = ScryGpuStorage::Cpu(beta);
+        let (out, means, rstds) = ScryGpuBackend::layernorm(&in_s, &g_s, &b_s, &shape, 1e-5);
+        assert!(!out.is_gpu(), "small layernorm output should fall back to Cpu");
+        assert!(!means.is_gpu(), "small layernorm means should fall back to Cpu");
+        assert!(!rstds.is_gpu(), "small layernorm rstds should fall back to Cpu");
     }
 
     #[test]

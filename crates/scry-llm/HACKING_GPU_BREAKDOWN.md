@@ -478,6 +478,54 @@ GELU dispatch carried a wasted `cuMemsetD8Async` (now skipped) and a
 per-call `stream.synchronize()` (now async). Breakdown bench unchanged
 across all three sizes (within noise).
 
+## M2 layernorm CUDA kernel (2026-05-08)
+
+Third M2 kernel landed: row-wise layernorm with affine gamma/beta.
+`LAYERNORM_ROWWISE_CUDA` in `crates/scry-gpu/src/shaders.rs::elementwise`.
+One block per row, 256 threads, two block-wide reductions sharing a single
+256-float static-shared-memory scratchpad — pass 1 computes the row sum →
+mean, pass 2 computes the sum of squared deviations → variance →
+`rsqrtf(var + eps)`, pass 3 normalizes and applies `gamma * x + beta`.
+`d > blockDim.x` falls through to a strided per-thread loop, so any
+last-dim length works without recompile.
+
+Kernel signature:
+
+```c
+layernorm_rowwise(
+    const float* input, const float* gamma, const float* beta,
+    float* out, float* means, float* rstds,
+    unsigned int n_rows, unsigned int d, float eps
+)
+```
+
+Wired into `MathBackend::layernorm` via `gpu_layernorm_persistent`. Returns
+the `(out, means, rstds)` triple GPU-resident; the per-row stats stay on
+device for an eventual backward pass. `GPU_LAYERNORM_MIN_ROWS = 32`
+matches the softmax threshold (same kernel shape, same per-launch grid
+overhead).
+
+The push-constant tuple is `[n_rows: u32, d: u32, eps: f32]` packed via
+`eps.to_bits()` since the CUDA dispatch path treats push-constant bytes
+as a stream of `u32` kernel args (`crates/scry-gpu/src/backend/cuda.rs::launch_on_stream`).
+The `f32` bits are passed transparently and the kernel reads them per
+its signature.
+
+Tests: `gpu_layernorm_matches_cpu_within_tolerance` covers d=64 and d=512,
+asserts `is_gpu()` on all three output storages under `--features
+scry-gpu-cuda` so silent fallback fails the test. Per-row mean/rstd hold
+within 1e-3 absolute; output values within `1e-4 * |cpu|` relative.
+`small_layernorm_falls_back_to_cpu` verifies sub-threshold rows return
+Cpu storage on every output.
+
+`gpu_breakdown` unchanged across small/medium/large within bench noise
+(25.77 / 85.95 / 1240 µs). The kernel doesn't enter the bench's
+matmul+gelu chain — closing this out is purely M2 progress, not a chain
+optimization.
+
+M2 status: **3/6 kernels done** (GELU, softmax, layernorm). Remaining:
+batchnorm, pool, conv2d.
+
 ## Source
 
 - Bench: `crates/scry-llm/benches/gpu_breakdown.rs`

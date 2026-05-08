@@ -574,6 +574,89 @@ extern \"C\" __global__ void softmax_rowwise(
         row_out[i] *= inv;
     }
 }";
+
+    /// Row-wise layer normalization with affine gamma/beta.
+    ///
+    /// For an input tensor reshaped as `[n_rows, d]`, computes
+    /// `out[r, j] = ((in[r, j] - mean_r) * rstd_r) * gamma[j] + beta[j]`,
+    /// where `mean_r = sum(in[r, *]) / d`, `var_r = sum((in[r, *] - mean_r)^2) / d`,
+    /// and `rstd_r = 1 / sqrt(var_r + eps)`. Per-row `mean_r` and `rstd_r` are
+    /// also written to the output `means` and `rstds` buffers (one entry per
+    /// row) so the backward pass can reuse them.
+    ///
+    /// One block per row, 256 threads, two block-wide reductions (sum → mean,
+    /// then sum-of-squares → variance) sharing a single static-shared-memory
+    /// scratchpad. `d > blockDim.x` is handled by a strided per-thread loop, so
+    /// any last-dim length works without recompile.
+    ///
+    /// **Kernel signature:** `layernorm_rowwise(const float* input, const float* gamma, const float* beta, float* out, float* means, float* rstds, unsigned int n_rows, unsigned int d, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[n_rows, 1, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const LAYERNORM_ROWWISE_CUDA: &str = "\
+extern \"C\" __global__ void layernorm_rowwise(
+    const float* input, const float* gamma, const float* beta,
+    float* out, float* means, float* rstds,
+    unsigned int n_rows, unsigned int d, float eps
+) {
+    __shared__ float smem[256];
+
+    unsigned int row = blockIdx.x;
+    if (row >= n_rows) return;
+
+    const float* row_in = input + row * d;
+    float* row_out = out + row * d;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial sum, block-wide reduction → mean.
+    float local_sum = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        local_sum += row_in[i];
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float inv_d = 1.0f / (float)d;
+    float mean = smem[0] * inv_d;
+    __syncthreads();
+
+    // Pass 2: per-thread partial sum of squared deviations, block-reduce → var.
+    float local_sq = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float diff = row_in[i] - mean;
+        local_sq += diff * diff;
+    }
+    smem[tid] = local_sq;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float var = smem[0] * inv_d;
+    float rstd = rsqrtf(var + eps);
+
+    // Thread 0 writes the per-row stats; other threads can race ahead to pass 3
+    // since pass 3 doesn't depend on smem and each thread writes its own
+    // output indices.
+    if (tid == 0) {
+        means[row] = mean;
+        rstds[row] = rstd;
+    }
+
+    // Pass 3: normalize, scale, shift.
+    for (unsigned int i = tid; i < d; i += bs) {
+        float norm = (row_in[i] - mean) * rstd;
+        row_out[i] = norm * gamma[i] + beta[i];
+    }
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.

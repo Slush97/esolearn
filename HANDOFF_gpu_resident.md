@@ -1,10 +1,47 @@
-# GPU-Resident scry-llm — Session Handoff (Round 5, 2026-05-08)
+# GPU-Resident scry-llm — Session Handoff (Round 6, 2026-05-08)
 
-You are continuing work on branch `gpu-resident/scry-vision`. Round 5 closed the threshold-tuning closeout the previous handoff called for and started M2 with a CUDA softmax kernel. Read in this order:
+You are continuing work on branch `gpu-resident/scry-vision`. Round 6 added the M2 layernorm CUDA kernel; Round 5 closed the threshold-tuning closeout and shipped the CUDA softmax. Read in this order:
 
-1. This doc — Round 5 section first, then Round 4 below for prior context.
+1. This doc — Round 6 section first, then Round 5 below, then Round 4 for prior context.
 2. Memory entry `project_scry_vision_gpu_residency.md` (durable cross-session context).
-3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research + post-cuBLAS + post-async + threshold-tuning sections at the bottom).
+3. `crates/scry-llm/HACKING_GPU_BREAKDOWN.md` (research + post-cuBLAS + post-async + threshold-tuning + M2-layernorm sections at the bottom).
+
+## Round 6 (2026-05-08) — what's new
+
+```
+<this commit>  feat(scry-gpu, scry-llm): M2 — CUDA row-wise layernorm kernel
+```
+
+**M2 layernorm (CUDA).** `LAYERNORM_ROWWISE_CUDA` in `crates/scry-gpu/src/shaders.rs::elementwise`. Same shape as softmax — one block per row, 256 threads, but two reductions instead of one (sum → mean, then sum-of-squared-deviations → variance), sharing a single static-shared-memory scratchpad. Pass 3 normalizes and applies `gamma * x + beta`. `rsqrtf` is a CUDA built-in math fn (no `<math.h>` needed; same NVRTC gotcha class as the softmax sentinel). Kernel signature takes 6 buffers (`input, gamma, beta, out, means, rstds`) + 3 scalars (`n_rows: u32, d: u32, eps: f32`).
+
+Wired into `MathBackend::layernorm` via `gpu_layernorm_persistent` through the existing `dispatch_kernel` helper (async on CUDA). Returns the `(out, means, rstds)` triple GPU-resident — per-row stats stay on device, ready for backward when that work begins. `GPU_LAYERNORM_MIN_ROWS = 32` matches the softmax threshold (same kernel shape, same per-launch grid overhead).
+
+Push constants pack `[n_rows: u32, d: u32, eps: f32]` via `eps.to_bits()` — the CUDA dispatch path (`crates/scry-gpu/src/backend/cuda.rs::launch_on_stream`) treats push-constant bytes as a stream of `u32` kernel args, so the f32 bits flow through transparently and the kernel reads them per its signature.
+
+Tests: `gpu_layernorm_matches_cpu_within_tolerance` covers d=64 and d=512, asserts `is_gpu()` on all three outputs under `--features scry-gpu-cuda` so silent fallback fails. Mean/rstd hold within 1e-3 absolute; output within `1e-4 * |cpu|` relative. `small_layernorm_falls_back_to_cpu` verifies sub-threshold rows return Cpu storage on every output.
+
+`gpu_breakdown` unchanged across all three sizes within bench noise (25.77 / 85.95 / 1240 µs). The kernel doesn't enter the matmul+gelu chain — closing this out is M2 progress, not a chain optimization.
+
+M2 status: **3/6 kernels done** (GELU, softmax, layernorm). Remaining: batchnorm, pool, conv2d.
+
+## Round 6 — next work, pick ONE
+
+(A) **Extend `gpu_breakdown` with attention-shape softmax + layernorm stages, then real-model bench.** With softmax + layernorm both GPU-resident on CUDA, BERT-base and ViT-small are now fully expressible without conv2d. The merge-to-main gate (HACKING_GPU_BREAKDOWN.md item #6) is end-to-end vs PyTorch on a real model. This is the closeout path for the branch — operator-level wins don't count until they show up in a forward pass.
+
+(B) **M2 batchnorm (CUDA)**. Inference-mode batchnorm is essentially layernorm with running stats — even simpler kernel (no reductions in inference; one block per channel during training). ResNet's blocker is conv2d more than batchnorm, so this is lower leverage than (A) unless you want a clean kernel landing first.
+
+(C) **Conv2d (the hard one).** Im2col blows up memory at 7×7 ResNet stem (49× expansion). Direct conv2d is the right answer for ResNet but multi-day; talk through the design call per Round 4 stop conditions before committing.
+
+Run benches with: `CUDARC_CUDA_VERSION=13010 cargo bench -p scry-llm --features scry-gpu-cuda --bench gpu_breakdown`. Tests with `cargo test`. CUDA-first remains; don't invest in Vulkan-specific wins.
+
+## Round 6 — gotchas (additive to Round 5)
+
+- **Push-constant f32 packing.** scry-gpu's CUDA dispatch path treats push-constant bytes as a `u32` stream and binds each chunk via `launch_builder.arg::<u32>`. For a kernel arg typed `float`, pack with `f32::to_bits()` into the push-constant array so the bytes match. The kernel reads them per its declared parameter type — f32 bits in a u32 slot is just a 4-byte transparent pun. Mixed-type push constants are clean as long as every value is exactly 4 bytes.
+- **Scaling layernorm beyond 256 threads/block.** The kernel uses static `__shared__ float smem[256]` sized to `blockDim.x = 256`. If you ever bump the block size, bump the smem array too — the tree reduction reads `smem[tid + s]` for all `tid < bs/2`. Larger d does NOT need a bigger block; the strided per-thread loop already handles it.
+
+---
+
+# Round 5 (2026-05-08)  *(prior context — Round 6 supersedes the "next work" section)*
 
 ## Round 5 (2026-05-08) — what's new
 
