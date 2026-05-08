@@ -10,19 +10,28 @@
 //! This module uses `unsafe` in the hot-path prediction methods
 //! (`predict_sample`, `predict_proba_sample`, `apply_sample`) to elide
 //! bounds checks on the node and prediction arrays. The invariants that
-//! make this safe are established at construction time by
-//! `FlatTree::from_tree_node`:
+//! make this safe split into two groups:
+//!
+//! **Established at construction by `FlatTree::from_tree_node`:**
 //!
 //! - **Node indices**: every `right` field and every implicit left index
 //!   (`idx + 1`) produced by the DFS flattening is guaranteed to be
 //!   in-bounds of `self.nodes`.
-//! - **Feature indices**: every `feature_idx` in a split node corresponds
-//!   to a valid feature column validated during `fit()`.
 //! - **Leaf data indices**: every leaf node's `feature_idx` (repurposed as
 //!   a leaf data index) is a valid index into `self.predictions` and, when
 //!   applicable, into the `self.leaf_probas` stride.
 //!
-//! These invariants are additionally checked by `debug_assert!` in debug
+//! **Required of the caller:**
+//!
+//! - **Feature indices**: every `feature_idx` in a split node was a valid
+//!   index at fit time, but only into the *training* feature matrix. The
+//!   caller of `predict_sample` / `predict_proba_sample` / `apply_sample`
+//!   MUST ensure each `sample` has length `>= n_features_at_fit`. Public
+//!   model APIs (`DecisionTree*::predict`, `RandomForest*::predict`) do this
+//!   via [`crate::error::ensure_row_widths`] before calling into this
+//!   module — internal callers must do the same.
+//!
+//! All invariants are additionally checked by `debug_assert!` in debug
 //! builds. The unchecked accesses avoid branch-predictor pollution in the
 //! inner prediction loop, which is critical for ensemble models that
 //! evaluate hundreds of trees per sample.

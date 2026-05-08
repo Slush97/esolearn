@@ -92,3 +92,21 @@ impl From<std::io::Error> for ScryLearnError {
 
 /// Convenience type alias.
 pub type Result<T> = std::result::Result<T, ScryLearnError>;
+
+/// Validate that every row of `features` has length equal to `expected`.
+///
+/// Used by predict APIs to enforce the row-width contract before entering
+/// hot prediction paths (some of which use unchecked indexing). Returns
+/// `Err(ShapeMismatch)` on the first row whose width differs.
+#[inline]
+pub(crate) fn ensure_row_widths(features: &[Vec<f64>], expected: usize) -> Result<()> {
+    for row in features {
+        if row.len() != expected {
+            return Err(ScryLearnError::ShapeMismatch {
+                expected,
+                got: row.len(),
+            });
+        }
+    }
+    Ok(())
+}

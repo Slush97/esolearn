@@ -366,4 +366,52 @@ mod tests {
         eprintln!("Pruning path: {} steps", alphas.len());
         eprintln!("Alphas: {:?}", &alphas[..alphas.len().min(5)]);
     }
+
+    #[test]
+    fn test_predict_rejects_short_rows() {
+        let data = make_linearly_separable();
+        let mut dt = DecisionTreeClassifier::new();
+        dt.fit(&data).unwrap();
+
+        // Trained on 1 feature; pass an empty row.
+        let bad: Vec<Vec<f64>> = vec![vec![]];
+        let err = dt.predict(&bad).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                crate::error::ScryLearnError::ShapeMismatch {
+                    expected: 1,
+                    got: 0
+                }
+            ),
+            "expected ShapeMismatch, got {err:?}"
+        );
+
+        let err = dt.predict_proba(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::ScryLearnError::ShapeMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn test_regressor_predict_rejects_short_rows() {
+        // Train a regressor on 2 features.
+        let f0: Vec<f64> = (0..20).map(|i| i as f64).collect();
+        let f1: Vec<f64> = (0..20).map(|i| (i * 2) as f64).collect();
+        let target: Vec<f64> = (0..20).map(|i| i as f64 + (i * 2) as f64).collect();
+        let data = Dataset::new(vec![f0, f1], target, vec!["a".into(), "b".into()], "y");
+        let mut dt = DecisionTreeRegressor::new();
+        dt.fit(&data).unwrap();
+
+        let bad: Vec<Vec<f64>> = vec![vec![1.0]]; // 1 column, model expects 2
+        let err = dt.predict(&bad).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::ScryLearnError::ShapeMismatch {
+                expected: 2,
+                got: 1
+            }
+        ));
+    }
 }
