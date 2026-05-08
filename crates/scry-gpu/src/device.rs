@@ -775,6 +775,39 @@ impl Device {
         backend.cublas_matmul_bf16_in_f32_out_async(a_buf, b_buf, c_buf, m, n, k)
     }
 
+    /// Run cuBLAS strided batched SGEMM without synchronizing.
+    ///
+    /// Computes `C[i] = op_a(A[i]) · op_b(B[i])` for `i in 0..batch`. Single
+    /// cuBLAS launch covers all batches; row-major buffers with the natural
+    /// strides (`m*k`, `k*n`, `m*n`). Storage shapes:
+    /// - A: `[batch, m, k]` if `!trans_a` else `[batch, k, m]`
+    /// - B: `[batch, k, n]` if `!trans_b` else `[batch, n, k]`
+    /// - C: `[batch, m, n]`
+    ///
+    /// Replaces an N-loop over [`Self::cublas_matmul_async`] for transformer
+    /// attention paths where each "batch" is a head and N is small (12–16).
+    /// Stream-ordered against subsequent stream work — chained operators
+    /// see consistent state without a fence.
+    #[allow(clippy::too_many_arguments)]
+    pub fn cublas_strided_batched_matmul_async(
+        &self,
+        a: &Buffer<f32>,
+        b: &Buffer<f32>,
+        c: &mut Buffer<f32>,
+        batch: u32,
+        m: u32,
+        n: u32,
+        k: u32,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_strided_batched_matmul_async(
+            a_buf, b_buf, c_buf, batch, m, n, k, trans_a, trans_b,
+        )
+    }
+
     /// Run a cuDNN 2D convolution forward pass without synchronizing.
     ///
     /// Implicit-GEMM (or Winograd/FFT — cuDNN heuristic picks per shape) fused

@@ -22,6 +22,7 @@ use std::time::Instant;
 
 use scry_llm::backend::cpu::CpuBackend;
 use scry_llm::backend::scry_gpu::ScryGpuBackend;
+use scry_llm::backend::DeviceBackend;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 use scry_vision::models::vit::{Vit, VitConfig};
@@ -74,18 +75,37 @@ fn run_vit_b16(input: &[f32]) {
         cpu_ms / gpu_lazy_ms
     );
 
+    // Pre-upload weights + input. With 86M f32 params (≈340 MB), per-forward
+    // upload is the largest single cost; sticking weights in
+    // `ScryGpuStorage::Gpu` lets `as_gpu_buffer` hit the cached Arc instead.
+    let mut gpu_model = Vit::<ScryGpuBackend>::new(VitConfig::vit_b16());
+    gpu_model.to_device();
+    let mut input_storage = ScryGpuBackend::from_vec(input.to_vec(), &Shape::new(&[3, 224, 224]));
+    ScryGpuBackend::to_device_in_place(&mut input_storage);
+    let gpu_input_resident =
+        Tensor::<ScryGpuBackend>::new(input_storage, Shape::new(&[3, 224, 224]));
+    let gpu_resident_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
+        ScryGpuBackend::synchronize().expect("synchronize");
+    });
+    println!(
+        "  ScryGpuBackend (pre-upload) : {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+        cpu_ms / gpu_resident_ms,
+        gpu_lazy_ms / gpu_resident_ms,
+    );
+
     #[cfg(feature = "scry-gpu-bf16")]
     {
         ScryGpuBackend::set_bf16_matmul(true).expect("toggle bf16");
         let gpu_bf16_ms = time_ms(2, 5, || {
-            let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
+            let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
             ScryGpuBackend::synchronize().expect("synchronize");
         });
         ScryGpuBackend::set_bf16_matmul(false).expect("toggle bf16");
         println!(
-            "  ScryGpuBackend (bf16 matmul): {gpu_bf16_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+            "  ScryGpuBackend (bf16 matmul): {gpu_bf16_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
             cpu_ms / gpu_bf16_ms,
-            gpu_lazy_ms / gpu_bf16_ms,
+            gpu_resident_ms / gpu_bf16_ms,
         );
     }
 }

@@ -110,6 +110,14 @@ impl<B: MathBackend> VitAttention<B> {
         }
     }
 
+    /// Upload all four weight/bias tensors to device storage.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.qkv_weight.data);
+        B::to_device_in_place(&mut self.qkv_bias.data);
+        B::to_device_in_place(&mut self.proj_weight.data);
+        B::to_device_in_place(&mut self.proj_bias.data);
+    }
+
     /// Forward: `[seq_len, d_model]` → `[seq_len, d_model]`.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let seq = input.shape.dims()[0];
@@ -200,6 +208,14 @@ impl<B: MathBackend> VitMlp<B> {
         }
     }
 
+    /// Upload all four weight/bias tensors to device storage.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.fc1_weight.data);
+        B::to_device_in_place(&mut self.fc1_bias.data);
+        B::to_device_in_place(&mut self.fc2_weight.data);
+        B::to_device_in_place(&mut self.fc2_bias.data);
+    }
+
     /// Forward: `[seq, d_model]` → `[seq, d_model]`.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let seq = input.shape.dims()[0];
@@ -277,6 +293,16 @@ impl<B: MathBackend> VitBlock<B> {
         }
     }
 
+    /// Upload LN params, attention, and MLP weights to device storage.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.ln1_gamma.data);
+        B::to_device_in_place(&mut self.ln1_beta.data);
+        self.attn.to_device();
+        B::to_device_in_place(&mut self.ln2_gamma.data);
+        B::to_device_in_place(&mut self.ln2_beta.data);
+        self.mlp.to_device();
+    }
+
     /// Forward: `[seq, d_model]` → `[seq, d_model]`.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let shape = input.shape.clone();
@@ -347,6 +373,25 @@ impl<B: MathBackend> Vit<B> {
             ln_post_beta: Tensor::from_vec(vec![0.0; d], Shape::new(&[d])),
             config,
         }
+    }
+
+    /// Upload every parameter tensor to device storage. Call once before
+    /// benchmarking to skip per-forward weight uploads.
+    pub fn to_device(&mut self) {
+        self.patch_embed.to_device();
+        B::to_device_in_place(&mut self.cls_token.data);
+        B::to_device_in_place(&mut self.pos_embed.data);
+        if let Some(g) = self.ln_pre_gamma.as_mut() {
+            B::to_device_in_place(&mut g.data);
+        }
+        if let Some(b) = self.ln_pre_beta.as_mut() {
+            B::to_device_in_place(&mut b.data);
+        }
+        for block in &mut self.blocks {
+            block.to_device();
+        }
+        B::to_device_in_place(&mut self.ln_post_gamma.data);
+        B::to_device_in_place(&mut self.ln_post_beta.data);
     }
 
     /// Forward pass: `[3, H, W]` → `[embed_dim]`.

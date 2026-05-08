@@ -197,6 +197,15 @@ struct ScryCtx {
     /// On-device adaptive 2D average-pool to a fixed `[h_out, w_out]`.
     /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
     adaptive_avg_pool: Option<::scry_gpu::Kernel>,
+    /// On-device fused-QKV split + per-head reshape for transformer
+    /// attention. CUDA-only; Vulkan path is `None`.
+    split_qkv_heads: Option<::scry_gpu::Kernel>,
+    /// On-device reshape `[n_heads, seq, d_head]` → `[seq, n_heads*d_head]`.
+    /// CUDA-only; Vulkan path is `None`.
+    reshape_from_heads: Option<::scry_gpu::Kernel>,
+    /// On-device elementwise scale `out[i] = in[i] * alpha`. Used to keep
+    /// `scaled_softmax`'s pre-softmax scale step on-device. CUDA-only.
+    scale: Option<::scry_gpu::Kernel>,
     /// f32 → bf16 elementwise cast. Used to feed the bf16 GemmEx fast-path.
     /// CUDA + `scry-gpu-bf16` only. The reverse (bf16 → f32) cast is no
     /// longer needed on the matmul path — `cublas_matmul_bf16_in_f32_out_async`
@@ -332,6 +341,30 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: adaptive_avg_pool_2d_cuda compile: {e}"))?;
+        let split_qkv_heads = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::SPLIT_QKV_RESHAPE_HEADS_CUDA,
+                "split_qkv_reshape_heads",
+                4,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: split_qkv_reshape_heads_cuda compile: {e}"))?;
+        let reshape_from_heads = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::RESHAPE_FROM_HEADS_CUDA,
+                "reshape_from_heads",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: reshape_from_heads_cuda compile: {e}"))?;
+        let scale = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::backward::SCALE_CUDA,
+                "scale_fwd",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: scale_cuda compile: {e}"))?;
         #[cfg(feature = "scry-gpu-bf16")]
         let cast_f32_bf16 = dev
             .compile_cuda(
@@ -360,6 +393,9 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             add_elementwise: Some(add_elementwise),
             max_pool: Some(max_pool),
             adaptive_avg_pool: Some(adaptive_avg_pool),
+            split_qkv_heads: Some(split_qkv_heads),
+            reshape_from_heads: Some(reshape_from_heads),
+            scale: Some(scale),
             #[cfg(feature = "scry-gpu-bf16")]
             cast_f32_bf16: Some(cast_f32_bf16),
             #[cfg(feature = "scry-gpu-bf16")]
@@ -392,6 +428,9 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         add_elementwise: None,
         max_pool: None,
         adaptive_avg_pool: None,
+        split_qkv_heads: None,
+        reshape_from_heads: None,
+        scale: None,
         #[cfg(feature = "scry-gpu-bf16")]
         cast_f32_bf16: None,
         #[cfg(feature = "scry-gpu-bf16")]
@@ -931,6 +970,142 @@ fn gpu_im2col_persistent(
     })
 }
 
+/// Minimum element count for the GPU scale path. ViT attention scores at
+/// 12×197×197 = 466K easily clear it; tiny tensors just keep using CPU.
+const GPU_SCALE_MIN: usize = 2_048;
+
+/// GPU-resident elementwise scale: `out[i] = a[i] * scalar`. Keeps the
+/// pre-softmax scale step in `scaled_softmax` on-device for transformer
+/// attention.
+fn gpu_scale_persistent(a: &ScryGpuStorage, scalar: f32) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.scale.as_ref()?;
+    let total = a.len();
+    if total < GPU_SCALE_MIN {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(a)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    // Push constants: u32 N, f32 alpha. The dispatcher packs each 4-byte
+    // value as a u32; the kernel reads `alpha` as `f32` (transparent pun).
+    let mut pc = [0u32; 2];
+    pc[0] = total as u32;
+    pc[1] = scalar.to_bits();
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
+/// Minimum output element count for the GPU split_qkv path. ViT-B/16 has
+/// 12 heads × 197 tokens × 64 d_head = 151_296 per output → well above; even
+/// tiny test configs of 4 heads × 32 × 16 = 2_048 hit it.
+const GPU_SPLIT_QKV_MIN: usize = 2_048;
+
+/// GPU-resident fused-QKV split into per-head Q/K/V. Reads `[seq, 3*d_model]`,
+/// writes three `[n_heads, seq, d_head]` tensors via a single kernel launch.
+/// Replaces the trait default's full host round-trip in transformer
+/// attention.
+fn gpu_split_qkv_persistent(
+    qkv: &ScryGpuStorage,
+    seq: usize,
+    n_heads: usize,
+    d_head: usize,
+) -> Option<(ScryGpuStorage, ScryGpuStorage, ScryGpuStorage)> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.split_qkv_heads.as_ref()?;
+    let d_model = n_heads.checked_mul(d_head)?;
+    let total = seq.checked_mul(n_heads)?.checked_mul(d_head)?;
+    if total < GPU_SPLIT_QKV_MIN {
+        return None;
+    }
+    if qkv.len() != seq * 3 * d_model {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(qkv)?;
+    let q_out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    let k_out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    let v_out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 3] = [seq as u32, n_heads as u32, d_head as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &q_out, &k_out, &v_out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some((
+        ScryGpuStorage::Gpu {
+            buf: GpuTensorStorage::from_owned(q_out),
+            len: total,
+        },
+        ScryGpuStorage::Gpu {
+            buf: GpuTensorStorage::from_owned(k_out),
+            len: total,
+        },
+        ScryGpuStorage::Gpu {
+            buf: GpuTensorStorage::from_owned(v_out),
+            len: total,
+        },
+    ))
+}
+
+/// GPU-resident reshape `[n_heads, seq, d_head]` → `[seq, n_heads*d_head]`.
+/// Single kernel launch, one thread per output element.
+fn gpu_reshape_from_heads_persistent(
+    input: &ScryGpuStorage,
+    seq: usize,
+    n_heads: usize,
+    d_head: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.reshape_from_heads.as_ref()?;
+    let total = seq.checked_mul(n_heads)?.checked_mul(d_head)?;
+    if total < GPU_SPLIT_QKV_MIN {
+        return None;
+    }
+    if input.len() != total {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 3] = [seq as u32, n_heads as u32, d_head as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
 /// Minimum total output element count before engaging the cuDNN conv path.
 /// Same scale as the im2col threshold — at smaller sizes, cuDNN's per-call
 /// dispatch overhead (~30–50 µs) is comparable to a small CPU conv. ResNet
@@ -1303,6 +1478,64 @@ fn gpu_matmul_persistent(
     Some(ScryGpuStorage::Gpu {
         buf: GpuTensorStorage::from_owned(out),
         len: m * n,
+    })
+}
+
+/// GPU-resident strided batched matmul via cuBLAS `sgemm_strided_batched`.
+///
+/// Single launch covers all `batch` per-head matmuls — vs the default impl
+/// which downloads to CPU, loops with `from_vec`/`to_vec` per iteration, and
+/// re-uploads the result. ViT attention hits this twice per block (Q@Kᵀ
+/// and attn@V); 12 blocks × 2 = 24 calls per forward where this matters.
+///
+/// CUDA-only — Vulkan and pre-cuBLAS paths return `None` and the caller
+/// falls back to the trait default.
+#[cfg(feature = "scry-gpu-cuda")]
+#[allow(clippy::too_many_arguments)]
+fn gpu_matmul_strided_batched_persistent(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    batch: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    if !matches!(ctx.matmul, MatmulStrategy::CuBlas) {
+        return None;
+    }
+    let total_a = batch * m * k;
+    let total_b = batch * k * n;
+    let total_c = batch * m * n;
+    if total_a == 0 || total_b == 0 || total_c == 0 {
+        return None;
+    }
+    if a.len() != total_a || b.len() != total_b {
+        return None;
+    }
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+    let mut out = ctx.dev.alloc_uninit::<f32>(total_c).ok()?;
+
+    ctx.dev
+        .cublas_strided_batched_matmul_async(
+            &buf_a,
+            &buf_b,
+            &mut out,
+            batch as u32,
+            m as u32,
+            n as u32,
+            k as u32,
+            trans_a,
+            trans_b,
+        )
+        .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total_c,
     })
 }
 
@@ -1701,6 +1934,128 @@ impl MathBackend for ScryGpuBackend {
         cpu(matmul_gpu_or_cpu(&av, &bv, m, k, n, trans_a, trans_b))
     }
 
+    fn split_qkv_reshape_heads(
+        qkv: &ScryGpuStorage,
+        seq: usize,
+        n_heads: usize,
+        d_head: usize,
+    ) -> (ScryGpuStorage, ScryGpuStorage, ScryGpuStorage) {
+        if let Some(triple) = gpu_split_qkv_persistent(qkv, seq, n_heads, d_head) {
+            return triple;
+        }
+        // Fallback to default impl (CPU-bouncing). Default expects qkv as
+        // a Storage, so just call through.
+        let (q, k, v) = {
+            let d_model = n_heads * d_head;
+            let head_len = n_heads * seq * d_head;
+            let data = Self::to_vec(qkv);
+            let mut q = vec![0.0f32; head_len];
+            let mut k = vec![0.0f32; head_len];
+            let mut v = vec![0.0f32; head_len];
+            for s in 0..seq {
+                let row = s * 3 * d_model;
+                for h in 0..n_heads {
+                    for d in 0..d_head {
+                        let dst = (h * seq + s) * d_head + d;
+                        let src_col = h * d_head + d;
+                        q[dst] = data[row + src_col];
+                        k[dst] = data[row + d_model + src_col];
+                        v[dst] = data[row + 2 * d_model + src_col];
+                    }
+                }
+            }
+            let shape = Shape::new(&[n_heads, seq, d_head]);
+            (
+                Self::from_vec(q, &shape),
+                Self::from_vec(k, &shape),
+                Self::from_vec(v, &shape),
+            )
+        };
+        (q, k, v)
+    }
+
+    fn reshape_from_heads(
+        storage: &ScryGpuStorage,
+        batch: usize,
+        seq: usize,
+        n_heads: usize,
+        d_head: usize,
+    ) -> ScryGpuStorage {
+        // GPU path is `batch=1` only — that's the ViT shape. Anything else
+        // (multi-batch transformers, future) falls back to the default
+        // host impl until the kernel grows a batch dim.
+        if batch == 1 {
+            if let Some(out) = gpu_reshape_from_heads_persistent(storage, seq, n_heads, d_head) {
+                return out;
+            }
+        }
+        // Default impl (CPU bouncing).
+        let data = Self::to_vec(storage);
+        let d_model = n_heads * d_head;
+        let total = batch * seq * d_model;
+        let mut out = vec![0.0f32; total];
+        for b in 0..batch {
+            for h in 0..n_heads {
+                for s in 0..seq {
+                    for d in 0..d_head {
+                        out[(b * seq + s) * d_model + h * d_head + d] =
+                            data[(b * n_heads + h) * seq * d_head + s * d_head + d];
+                    }
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[batch * seq, d_model]))
+    }
+
+    fn matmul_strided_batched(
+        a: &ScryGpuStorage,
+        b: &ScryGpuStorage,
+        batch_count: usize,
+        m: usize,
+        k: usize,
+        n: usize,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> ScryGpuStorage {
+        // Try cuBLAS strided batched first. Falls through to the trait
+        // default (per-batch loop with to_vec/from_vec) on Vulkan, sub-
+        // threshold workloads, or shape mismatches.
+        #[cfg(feature = "scry-gpu-cuda")]
+        if let Some(gpu_out) = gpu_matmul_strided_batched_persistent(
+            a,
+            b,
+            batch_count,
+            m,
+            k,
+            n,
+            trans_a,
+            trans_b,
+        ) {
+            return gpu_out;
+        }
+        let a_stride = m * k;
+        let b_stride = k * n;
+        let c_stride = m * n;
+        let total = batch_count * c_stride;
+        let av = Self::to_vec(a);
+        let bv = Self::to_vec(b);
+        let mut cv = vec![0.0f32; total];
+        for i in 0..batch_count {
+            let a_slice = Self::from_vec(
+                av[i * a_stride..(i + 1) * a_stride].to_vec(),
+                &Shape::new(&[m, k]),
+            );
+            let b_slice = Self::from_vec(
+                bv[i * b_stride..(i + 1) * b_stride].to_vec(),
+                &Shape::new(&[k, n]),
+            );
+            let c_slice = Self::matmul(&a_slice, &b_slice, m, k, n, trans_a, trans_b);
+            let c_data = Self::to_vec(&c_slice);
+            cv[i * c_stride..(i + 1) * c_stride].copy_from_slice(&c_data);
+        }
+        Self::from_vec(cv, &Shape::new(&[batch_count * m, n]))
+    }
+
     fn add(
         a: &ScryGpuStorage,
         b: &ScryGpuStorage,
@@ -1984,6 +2339,9 @@ impl MathBackend for ScryGpuBackend {
     }
 
     fn scale(a: &ScryGpuStorage, scalar: f32) -> ScryGpuStorage {
+        if let Some(out) = gpu_scale_persistent(a, scalar) {
+            return out;
+        }
         cpu(CpuBackend::scale(&a.as_vec(), scalar))
     }
 
@@ -2632,6 +2990,121 @@ mod tests {
         let storage = ScryGpuStorage::Cpu(input);
         let out = ScryGpuBackend::im2col_2d(&storage, c_in, h, w, k, k, stride, padding);
         assert!(!out.is_gpu(), "small im2col should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_split_qkv_reshape_heads_matches_cpu_within_tolerance() {
+        // ViT-B/16 attention shape: seq=197 (CLS + 14×14 patches),
+        // n_heads=12, d_head=64. Total per output = 12*197*64 = 151_296 — well
+        // above GPU_SPLIT_QKV_MIN.
+        let seq = 197;
+        let n_heads = 12;
+        let d_head = 64;
+        let d_model = n_heads * d_head;
+        let total_in = seq * 3 * d_model;
+        let qkv: Vec<f32> = (0..total_in)
+            .map(|i| ((i % 211) as f32 - 100.0) * 0.011)
+            .collect();
+        let storage = ScryGpuStorage::Cpu(qkv.clone());
+        let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_split_qkv test: {e}");
+                return;
+            }
+        };
+
+        let (q, k, v) = ScryGpuBackend::split_qkv_reshape_heads(&gpu_in, seq, n_heads, d_head);
+        #[cfg(feature = "scry-gpu-cuda")]
+        {
+            assert!(q.is_gpu(), "q should stay Gpu on CUDA");
+            assert!(k.is_gpu(), "k should stay Gpu on CUDA");
+            assert!(v.is_gpu(), "v should stay Gpu on CUDA");
+        }
+
+        let (qc, kc, vc) =
+            CpuBackend::split_qkv_reshape_heads(&qkv, seq, n_heads, d_head);
+        let qg = ScryGpuBackend::to_vec(&q);
+        let kg = ScryGpuBackend::to_vec(&k);
+        let vg = ScryGpuBackend::to_vec(&v);
+        // Pure permutation kernel — values must match exactly.
+        for (i, (g, c)) in qg.iter().zip(qc.iter()).enumerate() {
+            assert!((g - c).abs() < 1e-6, "q idx={i}: gpu={g} cpu={c}");
+        }
+        for (i, (g, c)) in kg.iter().zip(kc.iter()).enumerate() {
+            assert!((g - c).abs() < 1e-6, "k idx={i}: gpu={g} cpu={c}");
+        }
+        for (i, (g, c)) in vg.iter().zip(vc.iter()).enumerate() {
+            assert!((g - c).abs() < 1e-6, "v idx={i}: gpu={g} cpu={c}");
+        }
+    }
+
+    #[test]
+    fn gpu_reshape_from_heads_matches_cpu_within_tolerance() {
+        // Same ViT attention shape, batch=1.
+        let seq = 197;
+        let n_heads = 12;
+        let d_head = 64;
+        let d_model = n_heads * d_head;
+        let total = n_heads * seq * d_head;
+        let input: Vec<f32> = (0..total).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_reshape_from_heads test: {e}");
+                return;
+            }
+        };
+        let out = ScryGpuBackend::reshape_from_heads(&gpu_in, 1, seq, n_heads, d_head);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(out.is_gpu(), "reshape_from_heads should stay Gpu on CUDA");
+
+        let cpu_out = CpuBackend::reshape_from_heads(&input, 1, seq, n_heads, d_head);
+        let g = ScryGpuBackend::to_vec(&out);
+        assert_eq!(g.len(), seq * d_model);
+        for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_matmul_strided_batched_matches_cpu_within_tolerance() {
+        // ViT attention shape Q@Kᵀ: batch=12 heads, m=k=197, n=64 (or
+        // permutations thereof). Use a smaller batch+shape to keep the test
+        // quick while clearing the strided-batched path.
+        let batch = 4;
+        let m = 32;
+        let k = 16;
+        let n = 24;
+        let a: Vec<f32> = (0..batch * m * k)
+            .map(|i| ((i % 89) as f32 - 40.0) * 0.013)
+            .collect();
+        let b: Vec<f32> = (0..batch * k * n)
+            .map(|i| ((i % 67) as f32 - 30.0) * 0.011)
+            .collect();
+        let a_storage = ScryGpuStorage::Cpu(a.clone());
+        let b_storage = ScryGpuStorage::Cpu(b.clone());
+        let a_gpu = match ScryGpuBackend::to_gpu(&a_storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_matmul_strided_batched test: {e}");
+                return;
+            }
+        };
+        let b_gpu = ScryGpuBackend::to_gpu(&b_storage).expect("upload b");
+
+        let gpu_out =
+            ScryGpuBackend::matmul_strided_batched(&a_gpu, &b_gpu, batch, m, k, n, false, false);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(gpu_out.is_gpu(), "strided batched output should stay Gpu");
+
+        let cpu_out =
+            CpuBackend::matmul_strided_batched(&a, &b, batch, m, k, n, false, false);
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-3, "idx={i}: gpu={gv} cpu={cv}");
+        }
     }
 
     #[test]

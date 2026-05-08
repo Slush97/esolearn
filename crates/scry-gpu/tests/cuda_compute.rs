@@ -546,6 +546,96 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     assert!(result.is_err(), "WGSL dispatch on CUDA should fail");
 }
 
+// ── cuBLAS strided batched SGEMM ──
+
+fn cpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, trans_a: bool, trans_b: bool) -> Vec<f32> {
+    let mut c = vec![0.0f32; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            let mut acc = 0.0f32;
+            for kk in 0..k {
+                let av = if trans_a { a[kk * m + i] } else { a[i * k + kk] };
+                let bv = if trans_b { b[j * k + kk] } else { b[kk * n + j] };
+                acc += av * bv;
+            }
+            c[i * n + j] = acc;
+        }
+    }
+    c
+}
+
+fn run_strided_batched(trans_a: bool, trans_b: bool) {
+    let gpu = cuda_gpu();
+    let batch = 3usize;
+    let m = 5usize;
+    let k = 7usize;
+    let n = 4usize;
+    let a_shape = if trans_a { (k, m) } else { (m, k) };
+    let b_shape = if trans_b { (n, k) } else { (k, n) };
+    let a_per = a_shape.0 * a_shape.1;
+    let b_per = b_shape.0 * b_shape.1;
+    let c_per = m * n;
+
+    // Distinct floats per batch element so cross-contamination would show.
+    let a_data: Vec<f32> = (0..batch * a_per)
+        .map(|i| ((i % 19) as f32 - 9.0) * 0.13)
+        .collect();
+    let b_data: Vec<f32> = (0..batch * b_per)
+        .map(|i| ((i % 23) as f32 - 11.0) * 0.07)
+        .collect();
+
+    let mut expected = vec![0.0f32; batch * c_per];
+    for bi in 0..batch {
+        let cb = cpu_matmul(
+            &a_data[bi * a_per..(bi + 1) * a_per],
+            &b_data[bi * b_per..(bi + 1) * b_per],
+            m,
+            k,
+            n,
+            trans_a,
+            trans_b,
+        );
+        expected[bi * c_per..(bi + 1) * c_per].copy_from_slice(&cb);
+    }
+
+    let a_buf = gpu.upload(&a_data).unwrap();
+    let b_buf = gpu.upload(&b_data).unwrap();
+    let mut c_buf = gpu.alloc::<f32>(batch * c_per).unwrap();
+
+    gpu.cublas_strided_batched_matmul_async(
+        &a_buf, &b_buf, &mut c_buf, batch as u32, m as u32, n as u32, k as u32, trans_a, trans_b,
+    )
+    .unwrap();
+
+    let result: Vec<f32> = c_buf.download().unwrap();
+    for (i, (got, want)) in result.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-3,
+            "trans_a={trans_a} trans_b={trans_b} idx={i}: got {got}, want {want}"
+        );
+    }
+}
+
+#[test]
+fn cuda_cublas_strided_batched_no_trans() {
+    run_strided_batched(false, false);
+}
+
+#[test]
+fn cuda_cublas_strided_batched_trans_a() {
+    run_strided_batched(true, false);
+}
+
+#[test]
+fn cuda_cublas_strided_batched_trans_b() {
+    run_strided_batched(false, true);
+}
+
+#[test]
+fn cuda_cublas_strided_batched_trans_both() {
+    run_strided_batched(true, true);
+}
+
 // ── cuDNN conv2d forward ──
 
 #[cfg(feature = "cudnn")]
