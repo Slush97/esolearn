@@ -250,8 +250,57 @@ impl CudaBackend {
         n: u32,
         k: u32,
     ) -> Result<()> {
+        self.cublas_gemm_ex_async_inner(a, b, c, m, n, k, /* c_is_f32 */ false)
+    }
+
+    /// Run cuBLAS GemmEx with bf16 inputs and an **fp32** output.
+    ///
+    /// Same compute path as [`Self::cublas_matmul_bf16_async`] (CUDA_R_16BF
+    /// data, CUBLAS_COMPUTE_32F accumulator, tensor-core algo selection),
+    /// but the fp32 accumulator is written directly to `c` without rounding
+    /// down to bf16. Skips the cast-back-to-f32 HBM pass that
+    /// [`Self::cublas_matmul_bf16_async`] would otherwise force on the
+    /// caller, and is bit-exact with "GemmEx then cast-up" up to a single
+    /// rounding step.
+    ///
+    /// `c` must be sized for `m × n` `f32` elements (4 bytes each).
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_gemm_ex_async_inner(a, b, c, m, n, k, /* c_is_f32 */ true)
+    }
+
+    /// Shared body of the two `cublas_matmul_bf16*` variants. The output
+    /// data type is the only thing that varies — both compute via the same
+    /// fp32 accumulator and tensor-core algo selection.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    fn cublas_gemm_ex_async_inner(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+        c_is_f32: bool,
+    ) -> Result<()> {
         use cudarc::cublas::sys;
         use std::ffi::c_void;
+
+        let c_type = if c_is_f32 {
+            sys::cudaDataType_t::CUDA_R_32F
+        } else {
+            sys::cudaDataType_t::CUDA_R_16BF
+        };
 
         #[allow(clippy::cast_possible_wrap)]
         unsafe {
@@ -282,7 +331,7 @@ impl CudaBackend {
                 k as i32,
                 std::ptr::from_ref(&beta).cast::<c_void>(),
                 c_ptr as *mut c_void,
-                sys::cudaDataType_t::CUDA_R_16BF,
+                c_type,
                 n as i32,
                 sys::cublasComputeType_t::CUBLAS_COMPUTE_32F,
                 sys::cublasGemmAlgo_t::CUBLAS_GEMM_DEFAULT,

@@ -739,6 +739,42 @@ impl Device {
         backend.cublas_matmul_bf16_async(a_buf, b_buf, c_buf, m, n, k)
     }
 
+    /// Run cuBLAS GemmEx with bf16 inputs and an `f32` output, no sync.
+    ///
+    /// Same compute path as [`Self::cublas_matmul_bf16_async`] (tensor cores,
+    /// fp32 accumulate) but writes the fp32 accumulator straight to `c`,
+    /// skipping the cast-back-to-fp32 HBM pass that pure-bf16 callers pay.
+    /// Use this when downstream operators want fp32 anyway.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names, clippy::type_complexity)]
+    pub fn cublas_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<f32>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let BackendBuffer::Cuda(a_buf) = &a.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(b_buf) = &b.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(c_buf) = &mut c.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        backend.cublas_matmul_bf16_in_f32_out_async(a_buf, b_buf, c_buf, m, n, k)
+    }
+
     /// Dispatch a precompiled CUDA kernel without synchronizing.
     ///
     /// CUDA-only counterpart to [`Self::run_configured`] that skips the

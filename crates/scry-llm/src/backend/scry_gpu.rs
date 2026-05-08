@@ -18,6 +18,8 @@
 use std::borrow::Cow;
 #[cfg(feature = "scry-gpu-bf16")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "scry-gpu-bf16")]
+use std::sync::OnceLock as BufOnceLock;
 use std::sync::{Arc, OnceLock};
 
 use scry_gpu::Buffer;
@@ -44,8 +46,37 @@ const MAX_GPU_BUFFER_BYTES: u64 = 128 * 1024 * 1024;
 // Storage enum — CPU Vec or GPU-resident buffer
 // ---------------------------------------------------------------------------
 
+/// GPU tensor storage: an `Arc<Buffer<f32>>` plus an optional lazily-cached
+/// bf16 shadow.
+///
+/// The bf16 shadow is materialized on first access via
+/// [`as_gpu_buffer_bf16`] and reused on subsequent calls — this is what
+/// keeps weight tensors from being re-cast on every matmul once the bf16
+/// fast-path is engaged. For activation tensors, the shadow is created
+/// once per Buffer and dropped when the surrounding Arc drops; cost is
+/// the same as the per-call cast we'd otherwise do.
+pub struct GpuTensorStorage {
+    pub(crate) f32: Arc<Buffer<f32>>,
+    #[cfg(feature = "scry-gpu-bf16")]
+    pub(crate) bf16: BufOnceLock<Arc<Buffer<half::bf16>>>,
+}
+
+impl GpuTensorStorage {
+    fn from_owned(buf: Buffer<f32>) -> Arc<Self> {
+        Self::from_arc(Arc::new(buf))
+    }
+
+    fn from_arc(buf: Arc<Buffer<f32>>) -> Arc<Self> {
+        Arc::new(Self {
+            f32: buf,
+            #[cfg(feature = "scry-gpu-bf16")]
+            bf16: BufOnceLock::new(),
+        })
+    }
+}
+
 /// Storage for [`ScryGpuBackend`] tensors. Either a CPU `Vec<f32>` or a
-/// reference-counted GPU buffer.
+/// reference-counted GPU buffer (with optional bf16 shadow).
 ///
 /// `Clone` on the GPU variant is cheap (`Arc::clone`); on the CPU variant
 /// it clones the underlying `Vec`.
@@ -54,8 +85,12 @@ pub enum ScryGpuStorage {
     /// Host-resident data.
     Cpu(Vec<f32>),
     /// Device-resident buffer. The Arc lets multiple tensors share the
-    /// same allocation (e.g. after a clone) without re-uploading.
-    Gpu { buf: Arc<Buffer<f32>>, len: usize },
+    /// same allocation (e.g. after a clone) without re-uploading, and
+    /// carries the optional bf16 shadow alongside.
+    Gpu {
+        buf: Arc<GpuTensorStorage>,
+        len: usize,
+    },
 }
 
 impl ScryGpuStorage {
@@ -82,6 +117,7 @@ impl ScryGpuStorage {
         match self {
             Self::Cpu(v) => v.clone(),
             Self::Gpu { buf, .. } => buf
+                .f32
                 .download()
                 .expect("scry-gpu: download failed in materialize"),
         }
@@ -162,13 +198,12 @@ struct ScryCtx {
     /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
     adaptive_avg_pool: Option<::scry_gpu::Kernel>,
     /// f32 → bf16 elementwise cast. Used to feed the bf16 GemmEx fast-path.
-    /// CUDA + `scry-gpu-bf16` only.
+    /// CUDA + `scry-gpu-bf16` only. The reverse (bf16 → f32) cast is no
+    /// longer needed on the matmul path — `cublas_matmul_bf16_in_f32_out_async`
+    /// writes the fp32 accumulator directly. The CAST_BF16_F32_CUDA shader
+    /// is still in scry-gpu for future bf16-storage paths.
     #[cfg(feature = "scry-gpu-bf16")]
     cast_f32_bf16: Option<::scry_gpu::Kernel>,
-    /// bf16 → f32 elementwise cast. Brings GemmEx output back into the f32
-    /// activation stream. CUDA + `scry-gpu-bf16` only.
-    #[cfg(feature = "scry-gpu-bf16")]
-    cast_bf16_f32: Option<::scry_gpu::Kernel>,
     /// Opt-in flag for routing every matmul through the bf16 GemmEx fast-path
     /// (cast→GemmEx→cast). Initialized from `SCRY_GPU_MATMUL_BF16` and
     /// runtime-flippable via [`ScryGpuBackend::set_bf16_matmul`] for
@@ -301,15 +336,6 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             )
             .map_err(|e| format!("scry-gpu: cast_f32_bf16 compile: {e}"))?;
         #[cfg(feature = "scry-gpu-bf16")]
-        let cast_bf16_f32 = dev
-            .compile_cuda(
-                ::scry_gpu::shaders::elementwise::CAST_BF16_F32_CUDA,
-                "cast_bf16_f32",
-                2,
-                [256, 1, 1],
-            )
-            .map_err(|e| format!("scry-gpu: cast_bf16_f32 compile: {e}"))?;
-        #[cfg(feature = "scry-gpu-bf16")]
         let bf16_matmul_enabled = std::env::var("SCRY_GPU_MATMUL_BF16")
             .ok()
             .as_deref()
@@ -330,8 +356,6 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             adaptive_avg_pool: Some(adaptive_avg_pool),
             #[cfg(feature = "scry-gpu-bf16")]
             cast_f32_bf16: Some(cast_f32_bf16),
-            #[cfg(feature = "scry-gpu-bf16")]
-            cast_bf16_f32: Some(cast_bf16_f32),
             #[cfg(feature = "scry-gpu-bf16")]
             bf16_matmul_enabled: AtomicBool::new(bf16_matmul_enabled),
         });
@@ -362,8 +386,6 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         adaptive_avg_pool: None,
         #[cfg(feature = "scry-gpu-bf16")]
         cast_f32_bf16: None,
-        #[cfg(feature = "scry-gpu-bf16")]
-        cast_bf16_f32: None,
         #[cfg(feature = "scry-gpu-bf16")]
         bf16_matmul_enabled: AtomicBool::new(false),
     })
@@ -495,12 +517,58 @@ fn matmul_gpu_or_cpu(
 /// Returns `None` if the GPU is unavailable.
 fn as_gpu_buffer(storage: &ScryGpuStorage) -> Option<Arc<Buffer<f32>>> {
     match storage {
-        ScryGpuStorage::Gpu { buf, .. } => Some(Arc::clone(buf)),
+        ScryGpuStorage::Gpu { buf, .. } => Some(Arc::clone(&buf.f32)),
         ScryGpuStorage::Cpu(v) => {
             let ctx = get_ctx()?;
             let buf = ctx.dev.upload::<f32>(v).ok()?;
             Some(Arc::new(buf))
         }
+    }
+}
+
+/// Acquire a bf16 GPU buffer view of `storage`, lazily materializing the
+/// shadow on first call and reusing it on subsequent calls.
+///
+/// This is what makes weight tensors free in the bf16 fast-path: once a
+/// `Conv2d::weight` has been cast to bf16, the shadow is cached on the
+/// `GpuTensorStorage` Arc and every later forward pass picks it up via
+/// `OnceLock::get`. Activation buffers also benefit (their cast happens
+/// once per buffer rather than per matmul) but the win is single-use:
+/// the next forward allocates fresh activations.
+///
+/// Returns `None` if scry-gpu, the bf16 feature, or the cast kernel is
+/// unavailable, or if `storage` is `Cpu`-resident (callers should upload
+/// to a `Gpu` variant first).
+#[cfg(feature = "scry-gpu-bf16")]
+fn as_gpu_buffer_bf16(storage: &ScryGpuStorage) -> Option<Arc<Buffer<half::bf16>>> {
+    let ScryGpuStorage::Gpu { buf, .. } = storage else {
+        return None;
+    };
+    if let Some(cached) = buf.bf16.get() {
+        return Some(Arc::clone(cached));
+    }
+    let ctx = get_ctx()?;
+    let cast_down = ctx.cast_f32_bf16.as_ref()?;
+
+    let n = buf.f32.len();
+    let bf16_buf = ctx.dev.alloc_uninit::<half::bf16>(n).ok()?;
+    let n_pc: u32 = n as u32;
+    dispatch_kernel(
+        ctx,
+        cast_down,
+        &[&*buf.f32, &bf16_buf],
+        [n_pc.div_ceil(256), 1, 1],
+        Some(bytemuck::bytes_of(&n_pc)),
+    )
+    .ok()?;
+    let bf16_arc = Arc::new(bf16_buf);
+
+    // OnceLock::set returns Err if another thread won the race; in that
+    // case our freshly-cast bf16 buffer drops, and we use theirs (the
+    // contents are identical up to bit-exact casting).
+    match buf.bf16.set(Arc::clone(&bf16_arc)) {
+        Ok(()) => Some(bf16_arc),
+        Err(_) => Some(Arc::clone(buf.bf16.get().expect("just lost a race; cache populated"))),
     }
 }
 
@@ -570,7 +638,7 @@ fn gpu_gelu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
     let buf_in = as_gpu_buffer(input)?;
     let out = run_unary_elementwise(kernel, &buf_in, n)?;
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: n,
     })
 }
@@ -588,7 +656,7 @@ fn gpu_relu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
     let buf_in = as_gpu_buffer(input)?;
     let out = run_unary_elementwise(kernel, &buf_in, n)?;
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: n,
     })
 }
@@ -630,7 +698,7 @@ fn gpu_softmax_persistent(input: &ScryGpuStorage, shape: &Shape) -> Option<ScryG
     )
     .ok()?;
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -697,15 +765,15 @@ fn gpu_layernorm_persistent(
 
     Some((
         ScryGpuStorage::Gpu {
-            buf: Arc::new(out),
+            buf: GpuTensorStorage::from_owned(out),
             len: total,
         },
         ScryGpuStorage::Gpu {
-            buf: Arc::new(means),
+            buf: GpuTensorStorage::from_owned(means),
             len: n_rows,
         },
         ScryGpuStorage::Gpu {
-            buf: Arc::new(rstds),
+            buf: GpuTensorStorage::from_owned(rstds),
             len: n_rows,
         },
     ))
@@ -778,7 +846,7 @@ fn gpu_batchnorm_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -848,7 +916,7 @@ fn gpu_im2col_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -905,7 +973,7 @@ fn gpu_add_row_bias_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -945,7 +1013,7 @@ fn gpu_add_elementwise_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: n,
     })
 }
@@ -1014,7 +1082,7 @@ fn gpu_max_pool_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -1066,7 +1134,7 @@ fn gpu_adaptive_avg_pool_persistent(
     .ok()?;
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: total,
     })
 }
@@ -1143,19 +1211,18 @@ fn gpu_matmul_persistent(
     }
 
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: m * n,
     })
 }
 
-/// GPU-resident matmul through cuBLAS GemmEx (bf16 inputs, fp32 accumulate).
+/// GPU-resident matmul through cuBLAS GemmEx (bf16 inputs, fp32 accumulate,
+/// fp32 output).
 ///
-/// f32 inputs are cast to bf16 on-device, the GEMM runs on tensor cores via
-/// `cublasGemmEx` with `CUBLAS_COMPUTE_32F`, and the bf16 output is cast back
-/// to f32 so the rest of the network operates on f32 storage unchanged. The
-/// two cast HBM passes are the cost we pay for matmul-only mixed precision;
-/// at ResNet shapes the fp16/bf16 tensor-core throughput dwarfs the cast
-/// cost.
+/// f32 inputs are cast down to bf16, the GEMM runs on tensor cores, and the
+/// fp32 accumulator is written **directly** to the output buffer via
+/// `cublasGemmEx` with `C_type = CUDA_R_32F` — no cast-back kernel needed.
+/// The downstream graph sees fp32 storage exactly as before.
 ///
 /// Returns `None` if scry-gpu, the bf16 feature, or the cast/matmul kernels
 /// are unavailable — caller should fall through to the f32 path.
@@ -1171,84 +1238,78 @@ fn gpu_matmul_persistent_bf16(
     trans_b: bool,
 ) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
-    let cast_down = ctx.cast_f32_bf16.as_ref()?;
-    let cast_up = ctx.cast_bf16_f32.as_ref()?;
 
-    let buf_a = as_gpu_buffer(a)?;
-    let buf_b = as_gpu_buffer(b)?;
-
-    // f32-side transpose first; we keep the existing transpose helper rather
-    // than carry trans flags through to GemmEx (CUDA_OP_T would also work but
-    // means another path to test). Cost is one extra HBM pass on the matrix
-    // being transposed; same as the f32 path pays.
-    let a_t;
-    let buf_a_ref: &Buffer<f32> = if trans_a {
-        a_t = gpu_transpose(&buf_a, k, m)?;
-        &a_t
+    // Transpose first if requested. Transpose returns a fresh `Buffer<f32>`
+    // with no `GpuTensorStorage` wrapper, so the bf16 cache only fires for
+    // the un-transposed (typical) case. Conv2d weights and activations
+    // are both passed `trans_a=trans_b=false`, so this is the hot path.
+    let a_bf16: Arc<Buffer<half::bf16>> = if trans_a {
+        let src = as_gpu_buffer(a)?;
+        let tmp = gpu_transpose(&src, k, m)?;
+        Arc::new(cast_f32_to_bf16(ctx, &tmp, m * k)?)
+    } else if let Some(cached) = as_gpu_buffer_bf16(a) {
+        cached
     } else {
-        &buf_a
-    };
-    let b_t;
-    let buf_b_ref: &Buffer<f32> = if trans_b {
-        b_t = gpu_transpose(&buf_b, n, k)?;
-        &b_t
-    } else {
-        &buf_b
+        // Fallback: storage was Cpu-resident. Upload, then cast — no
+        // shadow caching since we don't have a `GpuTensorStorage` to
+        // attach to. Caller should `to_device` for free caching.
+        let a_buf = as_gpu_buffer(a)?;
+        Arc::new(cast_f32_to_bf16(ctx, &a_buf, m * k)?)
     };
 
-    // Cast A (m·k) and B (k·n) into bf16 device buffers.
-    let a_bf16 = ctx.dev.alloc_uninit::<half::bf16>(m * k).ok()?;
-    let b_bf16 = ctx.dev.alloc_uninit::<half::bf16>(k * n).ok()?;
-    {
-        let n_a: u32 = (m * k) as u32;
-        dispatch_kernel(
-            ctx,
-            cast_down,
-            &[buf_a_ref, &a_bf16],
-            [n_a.div_ceil(256), 1, 1],
-            Some(bytemuck::bytes_of(&n_a)),
-        )
-        .ok()?;
-        let n_b: u32 = (k * n) as u32;
-        dispatch_kernel(
-            ctx,
-            cast_down,
-            &[buf_b_ref, &b_bf16],
-            [n_b.div_ceil(256), 1, 1],
-            Some(bytemuck::bytes_of(&n_b)),
-        )
-        .ok()?;
-    }
+    let b_bf16: Arc<Buffer<half::bf16>> = if trans_b {
+        let src = as_gpu_buffer(b)?;
+        let tmp = gpu_transpose(&src, n, k)?;
+        Arc::new(cast_f32_to_bf16(ctx, &tmp, k * n)?)
+    } else if let Some(cached) = as_gpu_buffer_bf16(b) {
+        cached
+    } else {
+        let b_buf = as_gpu_buffer(b)?;
+        Arc::new(cast_f32_to_bf16(ctx, &b_buf, k * n)?)
+    };
 
-    // GemmEx: bf16 × bf16 → bf16, fp32 accumulate, tensor-core algo.
-    let mut c_bf16 = ctx.dev.alloc_uninit::<half::bf16>(m * n).ok()?;
+    // GemmEx: bf16 × bf16 → fp32 (directly, no cast-up). Same tensor-core
+    // path as the bf16-output variant; the fp32 accumulator is dropped to
+    // the output buffer in one kernel.
+    let mut out = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
     ctx.dev
-        .cublas_matmul_bf16_async(
+        .cublas_matmul_bf16_in_f32_out_async(
             &a_bf16,
             &b_bf16,
-            &mut c_bf16,
+            &mut out,
             m as u32,
             n as u32,
             k as u32,
         )
         .ok()?;
 
-    // Cast result back to f32 so downstream ops see f32 storage as before.
-    let out = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
-    let n_c: u32 = (m * n) as u32;
-    dispatch_kernel(
-        ctx,
-        cast_up,
-        &[&c_bf16, &out],
-        [n_c.div_ceil(256), 1, 1],
-        Some(bytemuck::bytes_of(&n_c)),
-    )
-    .ok()?;
-
     Some(ScryGpuStorage::Gpu {
-        buf: Arc::new(out),
+        buf: GpuTensorStorage::from_owned(out),
         len: m * n,
     })
+}
+
+/// Allocate a bf16 buffer of `n` elements and dispatch the f32→bf16 cast
+/// kernel. Used for the transpose-then-cast slow path and the Cpu-fallback
+/// path; the hot path goes through [`as_gpu_buffer_bf16`]'s OnceLock cache.
+#[cfg(feature = "scry-gpu-bf16")]
+fn cast_f32_to_bf16(
+    ctx: &ScryCtx,
+    src: &Buffer<f32>,
+    n: usize,
+) -> Option<Buffer<half::bf16>> {
+    let cast_down = ctx.cast_f32_bf16.as_ref()?;
+    let dst = ctx.dev.alloc_uninit::<half::bf16>(n).ok()?;
+    let n_pc: u32 = n as u32;
+    dispatch_kernel(
+        ctx,
+        cast_down,
+        &[src, &dst],
+        [n_pc.div_ceil(256), 1, 1],
+        Some(bytemuck::bytes_of(&n_pc)),
+    )
+    .ok()?;
+    Some(dst)
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,7 +1337,7 @@ impl ScryGpuBackend {
                     .map_err(|e| format!("scry-gpu upload: {e}"))?;
                 let len = v.len();
                 Ok(ScryGpuStorage::Gpu {
-                    buf: Arc::new(buf),
+                    buf: GpuTensorStorage::from_owned(buf),
                     len,
                 })
             }
@@ -1306,7 +1367,10 @@ impl ScryGpuBackend {
         match storage {
             ScryGpuStorage::Cpu(_) => storage.clone(),
             ScryGpuStorage::Gpu { buf, .. } => {
-                let v = buf.download().expect("scry-gpu: download failed in to_cpu");
+                let v = buf
+                    .f32
+                    .download()
+                    .expect("scry-gpu: download failed in to_cpu");
                 ScryGpuStorage::Cpu(v)
             }
         }
@@ -1362,7 +1426,7 @@ impl ScryGpuBackend {
         let buf_in = as_gpu_buffer(input)?;
         let out = run_unary_elementwise(kernel, &buf_in, n)?;
         Some(ScryGpuStorage::Gpu {
-            buf: Arc::new(out),
+            buf: GpuTensorStorage::from_owned(out),
             len: n,
         })
     }
@@ -1428,7 +1492,7 @@ impl ScryGpuBackend {
         batch.submit().ok()?;
 
         Some(ScryGpuStorage::Gpu {
-            buf: Arc::new(g_buf),
+            buf: GpuTensorStorage::from_owned(g_buf),
             len: m * n,
         })
     }
@@ -1465,6 +1529,7 @@ impl DeviceBackend for ScryGpuBackend {
         match storage {
             ScryGpuStorage::Cpu(v) => v,
             ScryGpuStorage::Gpu { buf, .. } => buf
+                .f32
                 .download()
                 .expect("scry-gpu: download failed in into_vec"),
         }
