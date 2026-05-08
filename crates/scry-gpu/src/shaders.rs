@@ -501,6 +501,79 @@ extern \"C\" __global__ void gelu(
     float inner = SQRT_2_OVER_PI * (x + 0.044715f * x * x * x);
     out[i] = 0.5f * x * (1.0f + tanhf(inner));
 }";
+
+    /// Row-wise softmax over the last dimension (numerically stable).
+    ///
+    /// For an input tensor reshaped as `[n_rows, d]`, computes
+    /// `out[r, j] = exp(in[r, j] - max(in[r, *])) / sum_k exp(in[r, k] - max(in[r, *]))`.
+    /// Three passes per row: max-reduce, exp+sum-reduce, normalize.
+    /// Threads in a block cooperate via static shared memory for both reductions,
+    /// so each block processes one row independently and any `d > blockDim.x` is
+    /// handled by a strided per-thread loop.
+    ///
+    /// **Kernel signature:** `softmax_rowwise(const float* input, float* out, unsigned int n_rows, unsigned int d)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[n_rows, 1, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const SOFTMAX_ROWWISE_CUDA: &str = "\
+extern \"C\" __global__ void softmax_rowwise(
+    const float* input, float* out,
+    unsigned int n_rows, unsigned int d
+) {
+    __shared__ float smem[256];
+
+    unsigned int row = blockIdx.x;
+    if (row >= n_rows) return;
+
+    const float* row_in = input + row * d;
+    float* row_out = out + row * d;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial max, then block-wide reduction.
+    // Use -FLT_MAX as the sentinel; NVRTC does not include <math.h> by
+    // default, so INFINITY / FLT_MAX macros aren't in scope.
+    float local_max = -3.402823466e38f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float v = row_in[i];
+        if (v > local_max) local_max = v;
+    }
+    smem[tid] = local_max;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            float a = smem[tid];
+            float b = smem[tid + s];
+            smem[tid] = a > b ? a : b;
+        }
+        __syncthreads();
+    }
+    float row_max = smem[0];
+    __syncthreads();
+
+    // Pass 2: write exp(x - max), accumulate per-thread sum, block-reduce.
+    float local_sum = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float e = expf(row_in[i] - row_max);
+        row_out[i] = e;
+        local_sum += e;
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float row_sum = smem[0];
+
+    // Pass 3: normalize. row_sum > 0 by construction (at least one exp(0) = 1).
+    float inv = 1.0f / row_sum;
+    for (unsigned int i = tid; i < d; i += bs) {
+        row_out[i] *= inv;
+    }
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.

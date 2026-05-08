@@ -130,6 +130,9 @@ struct ScryCtx {
     transpose: Option<::scry_gpu::Kernel>,
     /// On-device GELU (tanh approximation). Populated for both paths.
     gelu: Option<::scry_gpu::Kernel>,
+    /// On-device row-wise softmax. CUDA-only; Vulkan path is `None` and
+    /// callers fall back to CPU.
+    softmax: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -174,11 +177,20 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: gelu_cuda compile: {e}"))?;
+        let softmax = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::SOFTMAX_ROWWISE_CUDA,
+                "softmax_rowwise",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: softmax_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
             transpose: Some(transpose),
             gelu: Some(gelu),
+            softmax: Some(softmax),
         });
     }
 
@@ -196,6 +208,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         matmul: MatmulStrategy::Wgsl(matmul),
         transpose: Some(transpose),
         gelu: Some(gelu),
+        softmax: None,
     })
 }
 
@@ -402,6 +415,48 @@ fn gpu_gelu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
     Some(ScryGpuStorage::Gpu {
         buf: Arc::new(out),
         len: n,
+    })
+}
+
+/// Minimum row count before engaging the GPU softmax path. Below this, CPU
+/// rayon parallelism + cache locality wins; the per-launch grid setup
+/// dominates a small handful of rows.
+const GPU_SOFTMAX_MIN_ROWS: usize = 32;
+
+/// GPU-resident row-wise softmax over the last dimension. CUDA-only — the
+/// Vulkan path returns `None` so the caller falls back to CPU. Returns `None`
+/// also when the GPU path is unavailable, the workload is below threshold,
+/// or the input is empty / 1-D with d == 0.
+fn gpu_softmax_persistent(input: &ScryGpuStorage, shape: &Shape) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.softmax.as_ref()?;
+    let dims = shape.dims();
+    let d = *dims.last()?;
+    if d == 0 {
+        return None;
+    }
+    let total = input.len();
+    if total == 0 || total % d != 0 {
+        return None;
+    }
+    let n_rows = total / d;
+    if n_rows < GPU_SOFTMAX_MIN_ROWS {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    let dims_pc: [u32; 2] = [n_rows as u32, d as u32];
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [n_rows as u32, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
     })
 }
 
@@ -712,6 +767,9 @@ impl MathBackend for ScryGpuBackend {
     }
 
     fn softmax(input: &ScryGpuStorage, shape: &Shape) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_softmax_persistent(input, shape) {
+            return gpu_out;
+        }
         cpu(CpuBackend::softmax(&input.as_vec(), shape))
     }
 
@@ -1007,6 +1065,64 @@ mod tests {
             // GPU runs in f32, CPU in f64-then-cast. Allow 1e-5 absolute.
             assert!((gv - cv).abs() < 1e-5, "mismatch at {i}: gpu={gv} cpu={cv}");
         }
+    }
+
+    #[test]
+    fn gpu_softmax_matches_cpu_within_tolerance() {
+        // Sized above GPU_SOFTMAX_MIN_ROWS so the kernel engages, with d
+        // both small (=64) and larger-than-block (=512) cases.
+        for (rows, d) in [(64usize, 64usize), (32, 512)] {
+            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let shape = Shape::new(&[rows, d]);
+            let storage = ScryGpuStorage::Cpu(input.clone());
+            let gpu = match ScryGpuBackend::to_gpu(&storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_softmax_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+            let gpu_out = ScryGpuBackend::softmax(&gpu, &shape);
+            // On CUDA the kernel must engage; falling back to CPU here means
+            // the kernel compile or dispatch failed silently.
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                gpu_out.is_gpu(),
+                "softmax over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+            );
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            let c = CpuBackend::softmax(&input, &shape);
+            assert_eq!(g.len(), c.len());
+            for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+                // CPU softmax accumulates in f64 then casts; GPU runs entirely in
+                // f32 with a 256-thread tree reduction. 1e-5 absolute holds for
+                // the tested ranges.
+                assert!(
+                    (gv - cv).abs() < 1e-5,
+                    "rows={rows} d={d} idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+            // Each row should sum to 1.
+            for r in 0..rows {
+                let s: f32 = g[r * d..(r + 1) * d].iter().sum();
+                assert!(
+                    (s - 1.0).abs() < 1e-4,
+                    "row {r} did not sum to 1: got {s}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_softmax_falls_back_to_cpu() {
+        // Below GPU_SOFTMAX_MIN_ROWS: result should come back as Cpu variant.
+        let rows = 4;
+        let d = 32;
+        let input: Vec<f32> = (0..rows * d).map(|i| (i as f32) * 0.01).collect();
+        let shape = Shape::new(&[rows, d]);
+        let storage = ScryGpuStorage::Cpu(input);
+        let out = ScryGpuBackend::softmax(&storage, &shape);
+        assert!(!out.is_gpu(), "small softmax should fall back to Cpu");
     }
 
     #[test]
