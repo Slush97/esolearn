@@ -16,10 +16,18 @@ forward pass selects the fastest kernel for the given shape — this is
 the standard PyTorch inference baseline.
 """
 
+import argparse
 import time
 
 import torch
 import torchvision.models as models
+
+
+DTYPES = {
+    "fp32": torch.float32,
+    "bf16": torch.bfloat16,
+    "fp16": torch.float16,
+}
 
 
 def time_ms(warmup: int, runs: int, fn) -> float:
@@ -40,37 +48,48 @@ def time_ms(warmup: int, runs: int, fn) -> float:
     return times[len(times) // 2]
 
 
-def bench_model(name: str, ctor) -> None:
+def bench_model(name: str, ctor, dtype: torch.dtype) -> None:
     device = torch.device("cuda")
     # `weights=None` keeps the default (random) init — matches our zero/
     # default-init Rust path at the kernel level. Numerics don't matter
     # for forward-pass timing; kernel dispatch does.
-    model = ctor(weights=None).to(device).eval()
-    x = torch.randn(1, 3, 224, 224, device=device)
+    model = ctor(weights=None).to(device=device, dtype=dtype).eval()
+    x = torch.randn(1, 3, 224, 224, device=device, dtype=dtype)
 
     with torch.inference_mode():
         ms = time_ms(5, 20, lambda: model(x))
     print(f"--- {name} (1000-class, 1×3×224×224) ---")
-    print(f"  PyTorch + cuDNN : {ms:7.1f} ms/image")
+    print(f"  PyTorch + cuDNN : {ms:7.2f} ms/image")
     print()
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--precision",
+        choices=list(DTYPES),
+        default="fp32",
+        help="Precision for weights, activations, and convolutions (default: fp32).",
+    )
+    args = parser.parse_args()
+
     if not torch.cuda.is_available():
         raise SystemExit("CUDA not available — aborting.")
 
     # cuDNN benchmark mode picks the fastest kernel per shape during warmup.
     torch.backends.cudnn.benchmark = True
 
+    dtype = DTYPES[args.precision]
+
     print("=== PyTorch ResNet bench ===")
     print(f"PyTorch  : {torch.__version__}")
     print(f"cuDNN    : {torch.backends.cudnn.version()}")
     print(f"Device   : {torch.cuda.get_device_name(0)}")
-    print(f"Mode     : fp32, eager, inference_mode, cudnn.benchmark=True")
+    print(f"Mode     : {args.precision}, eager, inference_mode, cudnn.benchmark=True")
     print()
 
-    bench_model("ResNet-18", models.resnet18)
-    bench_model("ResNet-50", models.resnet50)
+    bench_model("ResNet-18", models.resnet18, dtype)
+    bench_model("ResNet-50", models.resnet50, dtype)
 
 
 if __name__ == "__main__":
