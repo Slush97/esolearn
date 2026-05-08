@@ -242,6 +242,101 @@ pub trait MathBackend: DeviceBackend {
         Self::from_vec(col, &Shape::new(&[col_rows, spatial_out]))
     }
 
+    /// 2D max-pooling over a `[channels, h_in, w_in]` input.
+    ///
+    /// Output is `[channels, h_out, w_out]` flattened to `channels*h_out*w_out`
+    /// elements where `h_out = (h_in + 2*padding - kernel) / stride + 1` (and
+    /// likewise for `w_out`). Stride and padding are symmetric. Padded
+    /// positions don't contribute to the max; if every position in a window
+    /// is padding the output is `0.0` (matches PyTorch).
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn max_pool_2d(
+        input: &Self::Storage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        kernel: usize,
+        stride: usize,
+        padding: usize,
+    ) -> Self::Storage {
+        let h_out = (h_in + 2 * padding - kernel) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel) / stride + 1;
+        let input_v = Self::to_vec(input);
+        let mut out = vec![0.0f32; channels * h_out * w_out];
+        for c in 0..channels {
+            let plane = c * h_in * w_in;
+            let out_plane = c * h_out * w_out;
+            for oh in 0..h_out {
+                for ow in 0..w_out {
+                    let mut m = f32::NEG_INFINITY;
+                    let mut any = false;
+                    for kh in 0..kernel {
+                        for kw in 0..kernel {
+                            let ih = oh * stride + kh;
+                            let iw = ow * stride + kw;
+                            if ih >= padding
+                                && ih < padding + h_in
+                                && iw >= padding
+                                && iw < padding + w_in
+                            {
+                                let v = input_v[plane + (ih - padding) * w_in + (iw - padding)];
+                                if !any || v > m {
+                                    m = v;
+                                }
+                                any = true;
+                            }
+                        }
+                    }
+                    out[out_plane + oh * w_out + ow] = if any { m } else { 0.0 };
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
+    }
+
+    /// Adaptive 2D average pooling: `[channels, h_in, w_in]` →
+    /// `[channels, h_out, w_out]` with per-output regions
+    /// `h_start = oh*h_in/h_out`, `h_end = (oh+1)*h_in/h_out` (matches
+    /// PyTorch's `AdaptiveAvgPool2d`). Global average pooling is the
+    /// `h_out=w_out=1` special case.
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn adaptive_avg_pool_2d(
+        input: &Self::Storage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        h_out: usize,
+        w_out: usize,
+    ) -> Self::Storage {
+        let input_v = Self::to_vec(input);
+        let mut out = vec![0.0f32; channels * h_out * w_out];
+        for c in 0..channels {
+            let plane = c * h_in * w_in;
+            let out_plane = c * h_out * w_out;
+            for oh in 0..h_out {
+                let h_start = oh * h_in / h_out;
+                let h_end = (oh + 1) * h_in / h_out;
+                for ow in 0..w_out {
+                    let w_start = ow * w_in / w_out;
+                    let w_end = (ow + 1) * w_in / w_out;
+                    let mut sum = 0.0f32;
+                    for h in h_start..h_end {
+                        for w in w_start..w_end {
+                            sum += input_v[plane + h * w_in + w];
+                        }
+                    }
+                    let count = (h_end - h_start) * (w_end - w_start);
+                    out[out_plane + oh * w_out + ow] = sum / count as f32;
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
+    }
+
     /// Embedding lookup: gather rows by indices.
     fn embedding(
         weight: &Self::Storage,

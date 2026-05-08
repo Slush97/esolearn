@@ -145,6 +145,12 @@ struct ScryCtx {
     /// On-device column-broadcast bias add (`out[r,c] = a[r,c] + bias[r]`).
     /// Used to keep Conv2d's bias add GPU-resident after the matmul. CUDA-only.
     add_row_bias: Option<::scry_gpu::Kernel>,
+    /// On-device 2D max-pool with fixed kernel/stride/padding. CUDA-only;
+    /// Vulkan path is `None` and callers fall back to CPU.
+    max_pool: Option<::scry_gpu::Kernel>,
+    /// On-device adaptive 2D average-pool to a fixed `[h_out, w_out]`.
+    /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
+    adaptive_avg_pool: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -229,6 +235,22 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: add_row_bias_cuda compile: {e}"))?;
+        let max_pool = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::MAXPOOL_2D_CUDA,
+                "maxpool_2d",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: maxpool_2d_cuda compile: {e}"))?;
+        let adaptive_avg_pool = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::ADAPTIVE_AVG_POOL_2D_CUDA,
+                "adaptive_avg_pool_2d",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: adaptive_avg_pool_2d_cuda compile: {e}"))?;
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
@@ -239,6 +261,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             batchnorm: Some(batchnorm),
             im2col: Some(im2col),
             add_row_bias: Some(add_row_bias),
+            max_pool: Some(max_pool),
+            adaptive_avg_pool: Some(adaptive_avg_pool),
         });
     }
 
@@ -261,6 +285,8 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         batchnorm: None,
         im2col: None,
         add_row_bias: None,
+        max_pool: None,
+        adaptive_avg_pool: None,
     })
 }
 
@@ -780,6 +806,127 @@ fn gpu_add_row_bias_persistent(
     })
 }
 
+/// Minimum number of output elements before engaging the GPU pool path. Below
+/// this, CPU rayon parallelism plus warm-cache locality wins; the per-launch
+/// grid setup dominates a small handful of output elements. Same scale as
+/// `GPU_IM2COL_MIN_OUTPUT_ELEMENTS`. ResNet's 56×56 stem max-pool produces
+/// 64*56*56 = 200K output elements, well above; global avg pool at the end
+/// produces only `channels` outputs (e.g. 2048) so it falls back to CPU there
+/// — fine, that work is cheap on host.
+const GPU_POOL_MIN_OUTPUT_ELEMENTS: usize = 32_768;
+
+/// GPU-resident 2D max-pool. CUDA-only — the Vulkan path returns `None` so the
+/// caller falls back to CPU. Returns `None` also when the GPU path is
+/// unavailable, the workload is below threshold, or any dimension is zero.
+#[allow(clippy::too_many_arguments)]
+fn gpu_max_pool_persistent(
+    input: &ScryGpuStorage,
+    channels: usize,
+    h_in: usize,
+    w_in: usize,
+    kernel_sz: usize,
+    stride: usize,
+    padding: usize,
+    h_out: usize,
+    w_out: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.max_pool.as_ref()?;
+    if channels == 0 || h_out == 0 || w_out == 0 || kernel_sz == 0 || stride == 0 {
+        return None;
+    }
+    let total = channels.checked_mul(h_out)?.checked_mul(w_out)?;
+    if total < GPU_POOL_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if input.len() != channels * h_in * w_in {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    // 9 u32s = 36 bytes, well under the 128-byte push-constant limit.
+    let dims_pc: [u32; 9] = [
+        channels as u32,
+        h_in as u32,
+        w_in as u32,
+        kernel_sz as u32,
+        kernel_sz as u32,
+        stride as u32,
+        padding as u32,
+        h_out as u32,
+        w_out as u32,
+    ];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
+    })
+}
+
+/// GPU-resident adaptive 2D average-pool. CUDA-only — the Vulkan path returns
+/// `None` so the caller falls back to CPU. Returns `None` also when the GPU
+/// path is unavailable, the workload is below threshold, or any dimension is
+/// zero.
+fn gpu_adaptive_avg_pool_persistent(
+    input: &ScryGpuStorage,
+    channels: usize,
+    h_in: usize,
+    w_in: usize,
+    h_out: usize,
+    w_out: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.adaptive_avg_pool.as_ref()?;
+    if channels == 0 || h_out == 0 || w_out == 0 || h_in == 0 || w_in == 0 {
+        return None;
+    }
+    let total = channels.checked_mul(h_out)?.checked_mul(w_out)?;
+    if total < GPU_POOL_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if input.len() != channels * h_in * w_in {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 5] = [
+        channels as u32,
+        h_in as u32,
+        w_in as u32,
+        h_out as u32,
+        w_out as u32,
+    ];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: total,
+    })
+}
+
 /// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
 /// output without round-tripping through CPU. Returns `None` if the GPU path
 /// is unavailable for the given inputs (caller should fall back to CPU).
@@ -1204,6 +1351,56 @@ impl MathBackend for ScryGpuBackend {
             return gpu_out;
         }
         cpu(CpuBackend::gelu(&input.as_vec()))
+    }
+
+    fn max_pool_2d(
+        input: &ScryGpuStorage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        kernel: usize,
+        stride: usize,
+        padding: usize,
+    ) -> ScryGpuStorage {
+        let h_out = (h_in + 2 * padding - kernel) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel) / stride + 1;
+        if let Some(gpu_out) = gpu_max_pool_persistent(
+            input, channels, h_in, w_in, kernel, stride, padding, h_out, w_out,
+        ) {
+            return gpu_out;
+        }
+        cpu(CpuBackend::max_pool_2d(
+            &input.as_vec(),
+            channels,
+            h_in,
+            w_in,
+            kernel,
+            stride,
+            padding,
+        ))
+    }
+
+    fn adaptive_avg_pool_2d(
+        input: &ScryGpuStorage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        h_out: usize,
+        w_out: usize,
+    ) -> ScryGpuStorage {
+        if let Some(gpu_out) =
+            gpu_adaptive_avg_pool_persistent(input, channels, h_in, w_in, h_out, w_out)
+        {
+            return gpu_out;
+        }
+        cpu(CpuBackend::adaptive_avg_pool_2d(
+            &input.as_vec(),
+            channels,
+            h_in,
+            w_in,
+            h_out,
+            w_out,
+        ))
     }
 
     fn embedding(
@@ -1797,6 +1994,107 @@ mod tests {
         for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
             assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
         }
+    }
+
+    #[test]
+    fn gpu_max_pool_matches_cpu_within_tolerance() {
+        // Two cases: ResNet stem (64×112×112 → 64×56×56 with k=3, s=2, p=1)
+        // and a no-padding case (32×64×64 → 32×32×32 with k=2, s=2, p=0).
+        // Both produce >> GPU_POOL_MIN_OUTPUT_ELEMENTS so the kernel engages.
+        let cases: [(usize, usize, usize, usize, usize, usize); 2] = [
+            (64, 112, 112, 3, 2, 1),
+            (32, 64, 64, 2, 2, 0),
+        ];
+        for (c, h, w, k, stride, padding) in cases {
+            let total_in = c * h * w;
+            // Use a deterministic non-monotonic pattern so max isn't trivially
+            // the corner element.
+            let input: Vec<f32> = (0..total_in)
+                .map(|i| ((i * 1664525 + 1013904223) as u32 as f32 / u32::MAX as f32) * 4.0 - 2.0)
+                .collect();
+            let storage = ScryGpuStorage::Cpu(input.clone());
+            let gpu = match ScryGpuBackend::to_gpu(&storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_max_pool_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+            let gpu_out = ScryGpuBackend::max_pool_2d(&gpu, c, h, w, k, stride, padding);
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                gpu_out.is_gpu(),
+                "case ({c},{h},{w},{k},{stride},{padding}): max_pool over Gpu input should stay Gpu, got {gpu_out:?}"
+            );
+
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            let cref = CpuBackend::max_pool_2d(&input, c, h, w, k, stride, padding);
+            assert_eq!(g.len(), cref.len());
+            for (i, (gv, cv)) in g.iter().zip(cref.iter()).enumerate() {
+                // Pure max: bit-equality expected.
+                assert!(
+                    (gv - cv).abs() < 1e-6,
+                    "case ({c},{h},{w},{k},{stride},{padding}) idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_adaptive_avg_pool_matches_cpu_within_tolerance() {
+        // ResNet's spatial-7×7 → global-1×1 produces only `channels` outputs
+        // (e.g. 2048), so the global case below threshold is correct
+        // behaviour — exercise a downsample case instead, sized above
+        // GPU_POOL_MIN_OUTPUT_ELEMENTS. 64 channels × 28×28 → 64 × 14×14
+        // = 12,544 outputs is below threshold; 256 × 28×28 → 256 × 14×14
+        // = 50,176 clears it.
+        let (c, h, w, ho, wo) = (256usize, 28usize, 28usize, 14usize, 14usize);
+        let total_in = c * h * w;
+        let input: Vec<f32> = (0..total_in)
+            .map(|i| ((i % 113) as f32) * 0.07 - 3.5)
+            .collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_adaptive_avg_pool_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_out = ScryGpuBackend::adaptive_avg_pool_2d(&gpu, c, h, w, ho, wo);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "adaptive_avg_pool over Gpu input should stay Gpu, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let cref = CpuBackend::adaptive_avg_pool_2d(&input, c, h, w, ho, wo);
+        assert_eq!(g.len(), cref.len());
+        for (i, (gv, cv)) in g.iter().zip(cref.iter()).enumerate() {
+            // Sum/divide of a few cells per output — f32 accumulation order
+            // differs slightly. 1e-5 absolute tolerance is plenty.
+            assert!(
+                (gv - cv).abs() < 1e-5,
+                "idx={i}: gpu={gv} cpu={cv}"
+            );
+        }
+    }
+
+    #[test]
+    fn small_pool_falls_back_to_cpu() {
+        // Below GPU_POOL_MIN_OUTPUT_ELEMENTS: max-pool 8×16×16 → 8×8×8 = 512
+        // outputs; adaptive-avg-pool 4×16×16 → 4×1×1 = 4 outputs. Both fall
+        // back to CPU.
+        let max_input: Vec<f32> = (0..8 * 16 * 16).map(|i| (i as f32) * 0.01).collect();
+        let max_s = ScryGpuStorage::Cpu(max_input);
+        let max_out = ScryGpuBackend::max_pool_2d(&max_s, 8, 16, 16, 2, 2, 0);
+        assert!(!max_out.is_gpu(), "small max_pool should fall back to Cpu");
+
+        let avg_input: Vec<f32> = (0..4 * 16 * 16).map(|i| (i as f32) * 0.01).collect();
+        let avg_s = ScryGpuStorage::Cpu(avg_input);
+        let avg_out = ScryGpuBackend::adaptive_avg_pool_2d(&avg_s, 4, 16, 16, 1, 1);
+        assert!(!avg_out.is_gpu(), "small adaptive_avg_pool should fall back to Cpu");
     }
 
     #[test]

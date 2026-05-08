@@ -794,6 +794,111 @@ extern \"C\" __global__ void batchnorm_inference(
         out_plane[i] = in_plane[i] * scale + shift;
     }
 }";
+
+    /// 2D max-pooling over a `[channels, h_in, w_in]` input with fixed kernel
+    /// size, stride, and zero padding (PyTorch / ResNet semantics — windows
+    /// that would draw exclusively from padding produce 0.0 rather than
+    /// `-inf`).
+    ///
+    /// One thread per output element across the full `(channel, oh, ow)`
+    /// grid; each thread scans the `kh*kw` window with bounds checks. The
+    /// per-channel input plane stays in L2 for ResNet-class layers, so the
+    /// kernel runs memory-bound.
+    ///
+    /// **Kernel signature:** `maxpool_2d(const float* input, float* out,
+    /// unsigned int channels, unsigned int h_in, unsigned int w_in,
+    /// unsigned int kh, unsigned int kw,
+    /// unsigned int stride, unsigned int padding,
+    /// unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const MAXPOOL_2D_CUDA: &str = "\
+extern \"C\" __global__ void maxpool_2d(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int kh, unsigned int kw,
+    unsigned int stride, unsigned int padding,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    const float* plane = input + c * h_in * w_in;
+    float m = -3.402823466e38f;
+    bool any = false;
+    for (unsigned int khi = 0; khi < kh; khi++) {
+        int ih = (int)(oh * stride + khi) - (int)padding;
+        if (ih < 0 || ih >= (int)h_in) continue;
+        for (unsigned int kwi = 0; kwi < kw; kwi++) {
+            int iw = (int)(ow * stride + kwi) - (int)padding;
+            if (iw < 0 || iw >= (int)w_in) continue;
+            float v = plane[(unsigned int)ih * w_in + (unsigned int)iw];
+            if (!any || v > m) m = v;
+            any = true;
+        }
+    }
+    out[idx] = any ? m : 0.0f;
+}";
+
+    /// Adaptive 2D average pooling: `[channels, h_in, w_in]` →
+    /// `[channels, h_out, w_out]` with per-output regions
+    /// `h_start = oh*h_in/h_out`, `h_end = (oh+1)*h_in/h_out` (and likewise
+    /// for w). Matches PyTorch's `AdaptiveAvgPool2d` integer-rounded
+    /// regions; global average pooling is the `h_out=w_out=1` special
+    /// case.
+    ///
+    /// One thread per output element. For global pooling each thread
+    /// reduces `h_in*w_in` inputs serially — fine for ResNet-class
+    /// channels (≤2048) where the SM count gives plenty of parallelism;
+    /// no shared-memory reduction needed.
+    ///
+    /// **Kernel signature:** `adaptive_avg_pool_2d(const float* input,
+    /// float* out, unsigned int channels, unsigned int h_in,
+    /// unsigned int w_in, unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const ADAPTIVE_AVG_POOL_2D_CUDA: &str = "\
+extern \"C\" __global__ void adaptive_avg_pool_2d(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    unsigned int h_start = oh * h_in / h_out;
+    unsigned int h_end = (oh + 1) * h_in / h_out;
+    unsigned int w_start = ow * w_in / w_out;
+    unsigned int w_end = (ow + 1) * w_in / w_out;
+
+    const float* plane = input + c * h_in * w_in;
+    float sum = 0.0f;
+    for (unsigned int h = h_start; h < h_end; h++) {
+        for (unsigned int w = w_start; w < w_end; w++) {
+            sum += plane[h * w_in + w];
+        }
+    }
+    unsigned int count = (h_end - h_start) * (w_end - w_start);
+    out[idx] = sum / (float)count;
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.
