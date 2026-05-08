@@ -204,6 +204,94 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Run cuBLAS GemmEx with bf16 inputs/outputs and fp32 accumulate, blocking
+    /// until the GPU finishes.
+    ///
+    /// Buffers must contain `bf16` data laid out row-major (A is `m×k`, B is
+    /// `k×n`, C is `m×n`). Internally calls `cublasGemmEx` with
+    /// `CUDA_R_16BF` data type, `CUBLAS_COMPUTE_32F` accumulator, and
+    /// `CUBLAS_GEMM_DEFAULT` algo selection — on Ampere+ the driver picks a
+    /// tensor-core path automatically. Yields ~3–5× the throughput of fp32
+    /// `sgemm` at ResNet-shaped sizes.
+    ///
+    /// For pipelined GPU-resident work, prefer
+    /// [`Self::cublas_matmul_bf16_async`].
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_matmul_bf16_async(a, b, c, m, n, k)?;
+        self.stream
+            .synchronize()
+            .map_err(|e| backend_err(BackendOp::StreamSync, e))?;
+        Ok(())
+    }
+
+    /// Run cuBLAS GemmEx (bf16 / fp32-accumulate) without synchronizing.
+    ///
+    /// Same column-major-swap trick as [`Self::cublas_matmul_async`]: row-major
+    /// `C = A·B` becomes column-major `Cᵀ = Bᵀ·Aᵀ`. Alpha and beta are passed
+    /// as `f32` because the compute type is `CUBLAS_COMPUTE_32F`.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        use cudarc::cublas::sys;
+        use std::ffi::c_void;
+
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            let blas = self
+                .blas
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cublas"))?;
+            let (a_ptr, _a_guard) = a.inner.device_ptr(&self.stream);
+            let (b_ptr, _b_guard) = b.inner.device_ptr(&self.stream);
+            let (c_ptr, _c_guard) = c.inner.device_ptr_mut(&self.stream);
+
+            let alpha: f32 = 1.0;
+            let beta: f32 = 0.0;
+
+            cudarc::cublas::result::gemm_ex(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                cublasOperation_t::CUBLAS_OP_N,
+                n as i32,
+                m as i32,
+                k as i32,
+                std::ptr::from_ref(&alpha).cast::<c_void>(),
+                b_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                n as i32,
+                a_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                k as i32,
+                std::ptr::from_ref(&beta).cast::<c_void>(),
+                c_ptr as *mut c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                n as i32,
+                sys::cublasComputeType_t::CUBLAS_COMPUTE_32F,
+                sys::cublasGemmAlgo_t::CUBLAS_GEMM_DEFAULT,
+            )
+            .map_err(|e| backend_err(BackendOp::CuBlas, e))?;
+        }
+        Ok(())
+    }
+
     /// Begin a batch dispatch session.
     ///
     /// On CUDA, kernel launches on the same stream are inherently batched

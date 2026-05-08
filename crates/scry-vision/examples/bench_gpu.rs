@@ -102,6 +102,23 @@ fn run_resnet18(input: &[f32]) {
     });
     println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
         cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
+
+    #[cfg(feature = "scry-gpu-bf16")]
+    {
+        // bf16 / fp32-accumulate matmul via cuBLAS GemmEx (tensor cores).
+        // Same fused, pre-uploaded model — only the matmul routing changes.
+        ScryGpuBackend::set_bf16_matmul(true).expect("toggle bf16");
+        let gpu_bf16_ms = time_ms(2, 5, || {
+            let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+            ScryGpuBackend::synchronize().expect("synchronize");
+        });
+        ScryGpuBackend::set_bf16_matmul(false).expect("toggle bf16");
+        println!(
+            "  ScryGpuBackend (bf16 matmul): {gpu_bf16_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× BN-fused)",
+            cpu_ms / gpu_bf16_ms,
+            gpu_fused_ms / gpu_bf16_ms
+        );
+    }
 }
 
 fn run_resnet50(input: &[f32]) {
@@ -146,6 +163,21 @@ fn run_resnet50(input: &[f32]) {
     });
     println!("  ScryGpuBackend (BN-fused)  : {gpu_fused_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× pre-upload)",
         cpu_ms / gpu_fused_ms, gpu_resident_ms / gpu_fused_ms);
+
+    #[cfg(feature = "scry-gpu-bf16")]
+    {
+        ScryGpuBackend::set_bf16_matmul(true).expect("toggle bf16");
+        let gpu_bf16_ms = time_ms(2, 5, || {
+            let _ = std::hint::black_box(gpu_model_fused.forward(&gpu_input_resident));
+            ScryGpuBackend::synchronize().expect("synchronize");
+        });
+        ScryGpuBackend::set_bf16_matmul(false).expect("toggle bf16");
+        println!(
+            "  ScryGpuBackend (bf16 matmul): {gpu_bf16_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× BN-fused)",
+            cpu_ms / gpu_bf16_ms,
+            gpu_fused_ms / gpu_bf16_ms
+        );
+    }
 }
 
 fn main() {
@@ -153,7 +185,8 @@ fn main() {
     println!("(zero-init weights — kernel dispatch timing only)\n");
 
     let scry_gpu_cuda = cfg!(feature = "scry-gpu-cuda");
-    println!("Features: scry-gpu-cuda={scry_gpu_cuda}");
+    let scry_gpu_bf16 = cfg!(feature = "scry-gpu-bf16");
+    println!("Features: scry-gpu-cuda={scry_gpu_cuda}, scry-gpu-bf16={scry_gpu_bf16}");
     println!(
         "Threads:  RAYON_NUM_THREADS={}",
         rayon::current_num_threads()

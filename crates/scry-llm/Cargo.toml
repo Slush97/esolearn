@@ -19,6 +19,10 @@ mkl = ["dep:cblas-sys"]
 dnnl = []
 scry-gpu = ["dep:scry-gpu", "dep:bytemuck"]
 scry-gpu-cuda = ["scry-gpu", "scry-gpu/cuda"]
+# bf16 / fp32-accumulate matmul through cuBLAS GemmEx on the scry-gpu path.
+# Independent of the existing `bf16` feature (which gates the legacy cudarc
+# direct backend's bf16 weight loading); both can coexist.
+scry-gpu-bf16 = ["scry-gpu-cuda", "scry-gpu/bf16", "dep:half"]
 auto = ["blas", "scry-gpu"]
 quantize = []
 
@@ -61,6 +65,10 @@ required-features = ["scry-gpu"]
 name = "threshold_sweep"
 harness = false
 required-features = ["scry-gpu"]
+
+[[example]]
+name = "bench_bf16_matmul"
+required-features = ["scry-gpu-bf16"]
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

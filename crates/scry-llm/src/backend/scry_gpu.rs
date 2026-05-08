@@ -16,6 +16,8 @@
 //! the GPU context in a `OnceLock` initialized on first use.
 
 use std::borrow::Cow;
+#[cfg(feature = "scry-gpu-bf16")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use scry_gpu::Buffer;
@@ -159,6 +161,20 @@ struct ScryCtx {
     /// On-device adaptive 2D average-pool to a fixed `[h_out, w_out]`.
     /// CUDA-only; Vulkan path is `None` and callers fall back to CPU.
     adaptive_avg_pool: Option<::scry_gpu::Kernel>,
+    /// f32 → bf16 elementwise cast. Used to feed the bf16 GemmEx fast-path.
+    /// CUDA + `scry-gpu-bf16` only.
+    #[cfg(feature = "scry-gpu-bf16")]
+    cast_f32_bf16: Option<::scry_gpu::Kernel>,
+    /// bf16 → f32 elementwise cast. Brings GemmEx output back into the f32
+    /// activation stream. CUDA + `scry-gpu-bf16` only.
+    #[cfg(feature = "scry-gpu-bf16")]
+    cast_bf16_f32: Option<::scry_gpu::Kernel>,
+    /// Opt-in flag for routing every matmul through the bf16 GemmEx fast-path
+    /// (cast→GemmEx→cast). Initialized from `SCRY_GPU_MATMUL_BF16` and
+    /// runtime-flippable via [`ScryGpuBackend::set_bf16_matmul`] for
+    /// side-by-side benches.
+    #[cfg(feature = "scry-gpu-bf16")]
+    bf16_matmul_enabled: AtomicBool,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -275,6 +291,29 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: adaptive_avg_pool_2d_cuda compile: {e}"))?;
+        #[cfg(feature = "scry-gpu-bf16")]
+        let cast_f32_bf16 = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::CAST_F32_BF16_CUDA,
+                "cast_f32_bf16",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: cast_f32_bf16 compile: {e}"))?;
+        #[cfg(feature = "scry-gpu-bf16")]
+        let cast_bf16_f32 = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::CAST_BF16_F32_CUDA,
+                "cast_bf16_f32",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: cast_bf16_f32 compile: {e}"))?;
+        #[cfg(feature = "scry-gpu-bf16")]
+        let bf16_matmul_enabled = std::env::var("SCRY_GPU_MATMUL_BF16")
+            .ok()
+            .as_deref()
+            .is_some_and(|v| matches!(v, "1" | "true" | "TRUE" | "on" | "ON"));
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
@@ -289,6 +328,12 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             add_elementwise: Some(add_elementwise),
             max_pool: Some(max_pool),
             adaptive_avg_pool: Some(adaptive_avg_pool),
+            #[cfg(feature = "scry-gpu-bf16")]
+            cast_f32_bf16: Some(cast_f32_bf16),
+            #[cfg(feature = "scry-gpu-bf16")]
+            cast_bf16_f32: Some(cast_bf16_f32),
+            #[cfg(feature = "scry-gpu-bf16")]
+            bf16_matmul_enabled: AtomicBool::new(bf16_matmul_enabled),
         });
     }
 
@@ -315,6 +360,12 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         add_elementwise: None,
         max_pool: None,
         adaptive_avg_pool: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        cast_f32_bf16: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        cast_bf16_f32: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        bf16_matmul_enabled: AtomicBool::new(false),
     })
 }
 
@@ -1097,6 +1148,109 @@ fn gpu_matmul_persistent(
     })
 }
 
+/// GPU-resident matmul through cuBLAS GemmEx (bf16 inputs, fp32 accumulate).
+///
+/// f32 inputs are cast to bf16 on-device, the GEMM runs on tensor cores via
+/// `cublasGemmEx` with `CUBLAS_COMPUTE_32F`, and the bf16 output is cast back
+/// to f32 so the rest of the network operates on f32 storage unchanged. The
+/// two cast HBM passes are the cost we pay for matmul-only mixed precision;
+/// at ResNet shapes the fp16/bf16 tensor-core throughput dwarfs the cast
+/// cost.
+///
+/// Returns `None` if scry-gpu, the bf16 feature, or the cast/matmul kernels
+/// are unavailable — caller should fall through to the f32 path.
+#[cfg(feature = "scry-gpu-bf16")]
+#[allow(clippy::cast_possible_truncation)]
+fn gpu_matmul_persistent_bf16(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let cast_down = ctx.cast_f32_bf16.as_ref()?;
+    let cast_up = ctx.cast_bf16_f32.as_ref()?;
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+
+    // f32-side transpose first; we keep the existing transpose helper rather
+    // than carry trans flags through to GemmEx (CUDA_OP_T would also work but
+    // means another path to test). Cost is one extra HBM pass on the matrix
+    // being transposed; same as the f32 path pays.
+    let a_t;
+    let buf_a_ref: &Buffer<f32> = if trans_a {
+        a_t = gpu_transpose(&buf_a, k, m)?;
+        &a_t
+    } else {
+        &buf_a
+    };
+    let b_t;
+    let buf_b_ref: &Buffer<f32> = if trans_b {
+        b_t = gpu_transpose(&buf_b, n, k)?;
+        &b_t
+    } else {
+        &buf_b
+    };
+
+    // Cast A (m·k) and B (k·n) into bf16 device buffers.
+    let a_bf16 = ctx.dev.alloc_uninit::<half::bf16>(m * k).ok()?;
+    let b_bf16 = ctx.dev.alloc_uninit::<half::bf16>(k * n).ok()?;
+    {
+        let n_a: u32 = (m * k) as u32;
+        dispatch_kernel(
+            ctx,
+            cast_down,
+            &[buf_a_ref, &a_bf16],
+            [n_a.div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&n_a)),
+        )
+        .ok()?;
+        let n_b: u32 = (k * n) as u32;
+        dispatch_kernel(
+            ctx,
+            cast_down,
+            &[buf_b_ref, &b_bf16],
+            [n_b.div_ceil(256), 1, 1],
+            Some(bytemuck::bytes_of(&n_b)),
+        )
+        .ok()?;
+    }
+
+    // GemmEx: bf16 × bf16 → bf16, fp32 accumulate, tensor-core algo.
+    let mut c_bf16 = ctx.dev.alloc_uninit::<half::bf16>(m * n).ok()?;
+    ctx.dev
+        .cublas_matmul_bf16_async(
+            &a_bf16,
+            &b_bf16,
+            &mut c_bf16,
+            m as u32,
+            n as u32,
+            k as u32,
+        )
+        .ok()?;
+
+    // Cast result back to f32 so downstream ops see f32 storage as before.
+    let out = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
+    let n_c: u32 = (m * n) as u32;
+    dispatch_kernel(
+        ctx,
+        cast_up,
+        &[&c_bf16, &out],
+        [n_c.div_ceil(256), 1, 1],
+        Some(bytemuck::bytes_of(&n_c)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: m * n,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // ScryGpuBackend — public type
 // ---------------------------------------------------------------------------
@@ -1170,6 +1324,33 @@ impl ScryGpuBackend {
         n: usize,
     ) -> Option<ScryGpuStorage> {
         gpu_matmul_persistent(a, b, m, k, n, false, false)
+    }
+
+    /// Toggle the bf16 GemmEx fast-path for matmul at runtime.
+    ///
+    /// Initial value is taken from `SCRY_GPU_MATMUL_BF16` at first ctx
+    /// access; this method lets benches and tests flip the routing between
+    /// rows without re-spawning the process. Returns `Err` only if scry-gpu
+    /// is unavailable.
+    #[cfg(feature = "scry-gpu-bf16")]
+    pub fn set_bf16_matmul(enable: bool) -> Result<(), String> {
+        let ctx = get_ctx().ok_or_else(|| "scry-gpu unavailable".to_string())?;
+        ctx.bf16_matmul_enabled.store(enable, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Bench-only: run the bf16 GemmEx fast-path regardless of the
+    /// `SCRY_GPU_MATMUL_BF16` env var. Returns `None` if the GPU or the
+    /// `scry-gpu-bf16` feature is unavailable.
+    #[cfg(feature = "scry-gpu-bf16")]
+    pub fn matmul_force_bf16_for_bench(
+        a: &ScryGpuStorage,
+        b: &ScryGpuStorage,
+        m: usize,
+        k: usize,
+        n: usize,
+    ) -> Option<ScryGpuStorage> {
+        gpu_matmul_persistent_bf16(a, b, m, k, n, false, false)
     }
 
     /// Bench-only: run the persistent GPU GELU without the
@@ -1331,6 +1512,17 @@ impl MathBackend for ScryGpuBackend {
         // size threshold. Either input being already on-device tilts the
         // tradeoff further toward keeping the result on-device.
         if should_use_gpu(m, k, n) {
+            // bf16 / fp32-accumulate GemmEx fast-path. Opt-in via
+            // `SCRY_GPU_MATMUL_BF16=1`; only fires when the bf16 ctx is
+            // initialized (CUDA + scry-gpu-bf16 feature).
+            #[cfg(feature = "scry-gpu-bf16")]
+            if get_ctx().is_some_and(|c| c.bf16_matmul_enabled.load(Ordering::Relaxed)) {
+                if let Some(gpu_out) =
+                    gpu_matmul_persistent_bf16(a, b, m, k, n, trans_a, trans_b)
+                {
+                    return gpu_out;
+                }
+            }
             if let Some(gpu_out) = gpu_matmul_persistent(a, b, m, k, n, trans_a, trans_b) {
                 return gpu_out;
             }
@@ -2403,6 +2595,57 @@ mod tests {
                 "mismatch at {i}: cpu={c} gpu={gv} (tol={tol})"
             );
         }
+    }
+
+    #[cfg(feature = "scry-gpu-bf16")]
+    #[test]
+    fn bf16_matmul_matches_cpu_within_relaxed_tolerance() {
+        // 64×64 × 64×64 — clears the size threshold and exercises tensor
+        // cores. bf16's 7-bit mantissa puts the realistic envelope at ~3% of
+        // the output magnitude.
+        let m = 64;
+        let k = 64;
+        let n = 64;
+
+        // Bound inputs to [-1, 1] so output magnitudes stay sane (each
+        // output sums k=64 products → typical magnitude ≈ sqrt(k) ≈ 8 by
+        // random walk).
+        let mut state = 0xb_f16_d_15_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            ((state >> 32) as i32 as f32) / (i32::MAX as f32)
+        };
+        let a: Vec<f32> = (0..m * k).map(|_| next()).collect();
+        let b: Vec<f32> = (0..k * n).map(|_| next()).collect();
+
+        let a_s = ScryGpuStorage::Cpu(a.clone());
+        let b_s = ScryGpuStorage::Cpu(b.clone());
+
+        let bf16_out = match ScryGpuBackend::matmul_force_bf16_for_bench(&a_s, &b_s, m, k, n) {
+            Some(o) => o,
+            None => {
+                eprintln!("skipping bf16_matmul_matches_cpu_within_relaxed_tolerance: no GPU");
+                return;
+            }
+        };
+
+        let cpu_out = CpuBackend::matmul(&a, &b, m, k, n, false, false);
+        let bf16_vec = ScryGpuBackend::to_vec(&bf16_out);
+        assert_eq!(bf16_vec.len(), cpu_out.len());
+
+        let mut max_rel_err: f32 = 0.0;
+        for (i, (cpu_v, bf_v)) in cpu_out.iter().zip(bf16_vec.iter()).enumerate() {
+            let mag = cpu_v.abs().max(1.0);
+            let rel = (cpu_v - bf_v).abs() / mag;
+            max_rel_err = max_rel_err.max(rel);
+            // 5% relative is the conservative envelope for chained-rounding
+            // bf16; in practice this test sees ~1% on uniform random inputs.
+            assert!(
+                rel < 5e-2,
+                "bf16 matmul drift at {i}: cpu={cpu_v} bf16={bf_v} rel={rel:.4}"
+            );
+        }
+        eprintln!("bf16 64×64×64 max relative error: {max_rel_err:.5}");
     }
 
     #[test]

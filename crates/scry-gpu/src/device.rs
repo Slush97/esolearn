@@ -697,6 +697,48 @@ impl Device {
         backend.cublas_matmul_async(a_buf, b_buf, c_buf, m, n, k)
     }
 
+    /// Run cuBLAS GemmEx with bf16 inputs/outputs and fp32 accumulate.
+    ///
+    /// Row-major `C = A × B`, A is `m×k`, B is `k×n`, C is `m×n`. Mirrors
+    /// [`Self::cublas_matmul`] but routes through `cublasGemmEx` so the driver
+    /// can pick a tensor-core path. Blocks until the GPU finishes; for chained
+    /// pipelines prefer [`Self::cublas_matmul_bf16_async`].
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<half::bf16>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul_bf16(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Run cuBLAS GemmEx (bf16 / fp32-accumulate) without synchronizing.
+    ///
+    /// Stream-ordered against subsequent kernels and matmuls — chained
+    /// operators see consistent state without a host fence.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_async(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<half::bf16>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul_bf16_async(a_buf, b_buf, c_buf, m, n, k)
+    }
+
     /// Dispatch a precompiled CUDA kernel without synchronizing.
     ///
     /// CUDA-only counterpart to [`Self::run_configured`] that skips the
@@ -757,10 +799,10 @@ impl Device {
 
 #[cfg(feature = "cuda")]
 #[allow(clippy::type_complexity, irrefutable_let_patterns)]
-fn unwrap_cuda_matmul_buffers<'a>(
-    a: &'a Buffer<f32>,
-    b: &'a Buffer<f32>,
-    c: &'a mut Buffer<f32>,
+fn unwrap_cuda_matmul_buffers<'a, T: bytemuck::Pod>(
+    a: &'a Buffer<T>,
+    b: &'a Buffer<T>,
+    c: &'a mut Buffer<T>,
 ) -> Result<(
     &'a crate::backend::cuda::CudaBuffer,
     &'a crate::backend::cuda::CudaBuffer,

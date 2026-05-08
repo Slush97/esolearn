@@ -938,6 +938,54 @@ extern \"C\" __global__ void adaptive_avg_pool_2d(
     unsigned int count = (h_end - h_start) * (w_end - w_start);
     out[idx] = sum / (float)count;
 }";
+
+    /// f32 → bf16 elementwise cast: `out[i] = (bf16) in[i]` with RNE rounding.
+    ///
+    /// bf16 is the high 16 bits of fp32 with round-to-nearest-even — no
+    /// header required. We avoid `#include <cuda_bf16.h>` because NVRTC's
+    /// default include path does not cover CUDA toolkit headers, and the
+    /// cast is a one-liner in raw bits anyway. The buffer type on the device
+    /// side is `unsigned short` (16 bits, matching `half::bf16`'s layout).
+    ///
+    /// RNE bias: `+0x7FFF + (mantissa_lsb_after_truncate ? 1 : 0)`. NaN
+    /// inputs propagate as bf16 NaN provided the high mantissa bits are set
+    /// (which they are for canonical fp32 NaNs); subnormal NaNs are not
+    /// handled specially. Activation tensors should never carry NaN/Inf in
+    /// practice, so the naive form suffices.
+    ///
+    /// **Kernel signature:** `cast_f32_bf16(const float* input, unsigned short* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
+    #[cfg(feature = "bf16")]
+    pub const CAST_F32_BF16_CUDA: &str = "\
+extern \"C\" __global__ void cast_f32_bf16(
+    const float* input, unsigned short* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    unsigned int u = __float_as_uint(input[i]);
+    unsigned int lsb = (u >> 16) & 1u;
+    u += 0x7FFFu + lsb;
+    out[i] = (unsigned short)(u >> 16);
+}";
+
+    /// bf16 → f32 elementwise cast: `out[i] = (float) in[i]`.
+    ///
+    /// Lossless: bf16 is a strict subset of fp32, so we just shift the 16
+    /// bits up into the high half. No header needed.
+    ///
+    /// **Kernel signature:** `cast_bf16_f32(const unsigned short* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
+    #[cfg(feature = "bf16")]
+    pub const CAST_BF16_F32_CUDA: &str = "\
+extern \"C\" __global__ void cast_bf16_f32(
+    const unsigned short* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = __uint_as_float(((unsigned int)input[i]) << 16);
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.
