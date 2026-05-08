@@ -222,6 +222,55 @@ pub trait MathBackend: DeviceBackend {
         Self::from_vec(out, &Shape::new(&[n]))
     }
 
+    /// Forward 2D convolution: lowers + multiplies in one call.
+    ///
+    /// Input is `[in_channels, h_in, w_in]`, weight is `[out_channels,
+    /// in_channels, kernel_h, kernel_w]` (flattened to one row-major
+    /// tensor). Output is `[out_channels, h_out*w_out]` row-major where
+    /// `h_out = (h_in + 2*padding - kernel_h) / stride + 1` (and likewise
+    /// for w). **No bias** — the caller adds bias separately.
+    ///
+    /// The default impl is `im2col_2d` + `matmul` (same composition the call
+    /// site used to do explicitly). GPU backends override to use a fused
+    /// path — `ScryGpuBackend` with the `scry-gpu-cudnn` feature routes
+    /// through cuDNN's implicit-GEMM, skipping the lowering kernel + its
+    /// HBM round-trip.
+    #[allow(clippy::too_many_arguments)]
+    fn conv2d_forward(
+        input: &Self::Storage,
+        weight: &Self::Storage,
+        in_channels: usize,
+        h_in: usize,
+        w_in: usize,
+        out_channels: usize,
+        kernel_h: usize,
+        kernel_w: usize,
+        stride: usize,
+        padding: usize,
+    ) -> Self::Storage {
+        let h_out = (h_in + 2 * padding - kernel_h) / stride + 1;
+        let w_out = (w_in + 2 * padding - kernel_w) / stride + 1;
+        let lowered = Self::im2col_2d(
+            input,
+            in_channels,
+            h_in,
+            w_in,
+            kernel_h,
+            kernel_w,
+            stride,
+            padding,
+        );
+        Self::matmul(
+            weight,
+            &lowered,
+            out_channels,
+            in_channels * kernel_h * kernel_w,
+            h_out * w_out,
+            false,
+            false,
+        )
+    }
+
     /// Im2col lowering for a 2D convolution.
     ///
     /// Input is `[in_channels, h_in, w_in]`; output is

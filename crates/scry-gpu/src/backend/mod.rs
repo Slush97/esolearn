@@ -10,6 +10,9 @@ pub mod vulkan;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+#[cfg(feature = "cudnn")]
+pub(crate) mod cuda_cudnn;
+
 use crate::error::Result;
 
 /// Trait implemented by each GPU backend.

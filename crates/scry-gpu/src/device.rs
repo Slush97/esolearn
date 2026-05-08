@@ -775,6 +775,56 @@ impl Device {
         backend.cublas_matmul_bf16_in_f32_out_async(a_buf, b_buf, c_buf, m, n, k)
     }
 
+    /// Run a cuDNN 2D convolution forward pass without synchronizing.
+    ///
+    /// Implicit-GEMM (or Winograd/FFT — cuDNN heuristic picks per shape) fused
+    /// conv. Skips the im2col→cuBLAS round-trip that the default path uses.
+    /// Layout is `NCHW`; filters are `[c_out, c_in, k_h, k_w]`. The output
+    /// spatial dims are computed from the standard floor formula and returned.
+    ///
+    /// Stream-ordered against subsequent kernels and matmuls — chained
+    /// operators see consistent state without a host fence.
+    #[cfg(feature = "cudnn")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn cudnn_conv2d_forward_async(
+        &self,
+        input: &Buffer<f32>,
+        filter: &Buffer<f32>,
+        output: &mut Buffer<f32>,
+        n: u32,
+        c_in: u32,
+        h_in: u32,
+        w_in: u32,
+        c_out: u32,
+        k_h: u32,
+        k_w: u32,
+        pad_h: u32,
+        pad_w: u32,
+        stride_h: u32,
+        stride_w: u32,
+    ) -> Result<(u32, u32)> {
+        let backend = self.cuda_backend()?;
+        let BackendBuffer::Cuda(in_buf) = &input.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(filt_buf) = &filter.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(out_buf) = &mut output.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        backend.cudnn_conv2d_forward_async(
+            in_buf, filt_buf, out_buf, n, c_in, h_in, w_in, c_out, k_h, k_w, pad_h, pad_w,
+            stride_h, stride_w,
+        )
+    }
+
     /// Dispatch a precompiled CUDA kernel without synchronizing.
     ///
     /// CUDA-only counterpart to [`Self::run_configured`] that skips the

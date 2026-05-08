@@ -47,6 +47,7 @@ pub enum BackendOp {
     RecordEvent,
     DeviceQuery,
     CuBlas,
+    CuDnn,
 }
 
 /// Helper to build a [`GpuError::Backend`] concisely.

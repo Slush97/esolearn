@@ -20,6 +20,10 @@ cuda = ["dep:cudarc"]
 # Note: cudarc gates *both* fp16 and bf16 behind its `f16` feature flag —
 # the name is historical; enabling it brings in `half::bf16` too.
 bf16 = ["cuda", "cudarc/f16", "dep:half"]
+# cuDNN convolution forward path. Requires libcudnn.so on the link path
+# (Arch: `pacman -S cudnn`). Picks an algo per shape via cuDNN heuristics
+# and caches descriptors + workspace for repeat calls.
+cudnn = ["cuda", "cudarc/cudnn"]
 bench-wgpu = ["dep:wgpu"]
 # metal = []  # future
 

@@ -314,12 +314,14 @@ impl<B: MathBackend> Conv2d<B> {
         Tensor::<B>::new(result, Shape::new(&[self.out_channels, h_in, w_in]))
     }
 
-    /// Im2col + matmul convolution (general case, also used as test reference).
+    /// Conv forward via the backend's `conv2d_forward` (im2col + matmul or a
+    /// fused alternative), followed by the per-channel bias add.
     ///
-    /// Lowers the convolution to a GEMM via `B::im2col_2d`, then multiplies by
-    /// the flattened weight matrix and adds the per-channel bias. Backends
-    /// with on-device im2col + matmul + row-bias-add kernels (e.g.
-    /// `ScryGpuBackend` on CUDA) keep the entire chain GPU-resident.
+    /// CPU and Vulkan backends decompose `conv2d_forward` to `im2col_2d` +
+    /// `matmul`. `ScryGpuBackend` with the `scry-gpu-cudnn` feature routes
+    /// through cuDNN's implicit-GEMM (or Winograd / FFT — picked per shape
+    /// by the cuDNN heuristic), skipping the lowering kernel entirely.
+    /// Without the cuDNN feature it still falls through to im2col + cuBLAS.
     pub fn forward_im2col(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let h_in = dims[1];
@@ -328,39 +330,27 @@ impl<B: MathBackend> Conv2d<B> {
         let h_out = (h_in + 2 * self.padding - self.kernel_h) / self.stride + 1;
         let w_out = (w_in + 2 * self.padding - self.kernel_w) / self.stride + 1;
         let spatial_out = h_out * w_out;
-        let col_rows = self.in_channels * self.kernel_h * self.kernel_w;
 
-        let col_storage = B::im2col_2d(
+        let out_data = B::conv2d_forward(
             &input.data,
+            &self.weight.data,
             self.in_channels,
             h_in,
             w_in,
+            self.out_channels,
             self.kernel_h,
             self.kernel_w,
             self.stride,
             self.padding,
         );
 
-        // Weight [out_ch, in_ch, kH, kW] has same flat layout as [out_ch, in_ch*kH*kW]
-        let out_data = B::matmul(
-            &self.weight.data,
-            &col_storage,
-            self.out_channels,
-            col_rows,
-            spatial_out,
-            false,
-            false,
-        );
-
         // Bias add: bias[out_ch] broadcast across spatial dims as a [C_out, 1]
         // column vector. ScryGpuBackend's add detects this row-bias broadcast
         // and routes to the on-device add_row_bias kernel.
-        let bias_col =
-            Tensor::<B>::new(B::clone_storage(&self.bias.data), Shape::new(&[self.out_channels, 1]));
         let out_shape = Shape::new(&[self.out_channels, spatial_out]);
         let result = B::add(
             &out_data,
-            &bias_col.data,
+            &self.bias.data,
             &out_shape,
             &Shape::new(&[self.out_channels, 1]),
             &out_shape,
