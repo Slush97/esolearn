@@ -53,6 +53,10 @@ name = "bench_gpu"
 required-features = ["scry-gpu-cuda"]
 
 [[example]]
+name = "bench_vit"
+required-features = ["scry-gpu-cuda"]
+
+[[example]]
 name = "inspect_keys"
 required-features = ["safetensors"]
 
