@@ -207,6 +207,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)] // intentional: the snap produces literal 0.0
     fn near_zero_tick_drift_snapped_to_zero() {
         // Reproduces the basic_line/multi_line drift artifact: a domain
         // straddling zero where step accumulation lands on something like

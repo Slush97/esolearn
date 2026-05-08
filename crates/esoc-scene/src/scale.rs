@@ -716,6 +716,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)] // intentional: the snap produces literal 0.0
     fn nice_ticks_snap_near_zero() {
         // Domain straddling zero — accumulator drift previously produced
         // values like -2.78e-16 that bypass the `value == 0.0` short-circuit.

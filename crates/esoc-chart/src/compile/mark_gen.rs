@@ -1224,10 +1224,7 @@ mod tests {
         let line_marks: Vec<_> = scene
             .iter()
             .filter_map(|(_, n)| match &n.content {
-                esoc_scene::node::NodeContent::Mark(m) => match m {
-                    Mark::Line(lm) => Some(lm),
-                    _ => None,
-                },
+                esoc_scene::node::NodeContent::Mark(Mark::Line(lm)) => Some(lm),
                 _ => None,
             })
             .collect();
