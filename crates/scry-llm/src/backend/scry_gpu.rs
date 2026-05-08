@@ -117,6 +117,10 @@ enum MatmulStrategy {
 struct ScryCtx {
     dev: ::scry_gpu::Device,
     matmul: MatmulStrategy,
+    /// On-device transpose kernel — populated only on the WGSL path.
+    /// cuBLAS dispatch transposes on CPU until a CUDA transpose kernel
+    /// is wired up.
+    transpose: Option<::scry_gpu::Kernel>,
 }
 
 // Safety: scry_gpu::Device and Kernel are Send+Sync
@@ -147,15 +151,20 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
+            transpose: None,
         });
     }
 
     let matmul = dev
         .compile(::scry_gpu::shaders::matmul::COARSE_64X64)
         .map_err(|e| format!("scry-gpu: shader compile: {e}"))?;
+    let transpose = dev
+        .compile(::scry_gpu::shaders::backward::TRANSPOSE)
+        .map_err(|e| format!("scry-gpu: transpose compile: {e}"))?;
     Ok(ScryCtx {
         dev,
         matmul: MatmulStrategy::Wgsl(matmul),
+        transpose: Some(transpose),
     })
 }
 
@@ -252,6 +261,102 @@ fn matmul_gpu_or_cpu(
 
     gpu_matmul(a_data, b_data, m, k, n)
         .unwrap_or_else(|| CpuBackend::matmul(&a.to_vec(), &b.to_vec(), m, k, n, trans_a, trans_b))
+}
+
+// ---------------------------------------------------------------------------
+// GPU-resident matmul — keeps result on device when possible
+// ---------------------------------------------------------------------------
+
+/// Acquire a GPU buffer view of `storage`. Uploads if currently CPU-resident.
+/// Returns `None` if the GPU is unavailable.
+fn as_gpu_buffer(storage: &ScryGpuStorage) -> Option<Arc<Buffer<f32>>> {
+    match storage {
+        ScryGpuStorage::Gpu { buf, .. } => Some(Arc::clone(buf)),
+        ScryGpuStorage::Cpu(v) => {
+            let ctx = get_ctx()?;
+            let buf = ctx.dev.upload::<f32>(v).ok()?;
+            Some(Arc::new(buf))
+        }
+    }
+}
+
+/// Run the on-device transpose kernel. Returns a fresh buffer of shape `[cols, rows]`.
+fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer<f32>> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.transpose.as_ref()?;
+    let out = ctx.dev.alloc::<f32>(rows * cols).ok()?;
+    let dims: [u32; 2] = [rows as u32, cols as u32];
+    let groups = ((rows * cols) as u32).div_ceil(256);
+    ctx.dev
+        .run_configured(
+            kernel,
+            &[input, &out],
+            [groups, 1, 1],
+            Some(bytemuck::bytes_of(&dims)),
+        )
+        .ok()?;
+    Some(out)
+}
+
+/// GPU-resident matmul: takes `ScryGpuStorage` inputs, returns a `Gpu`-variant
+/// output without round-tripping through CPU. Returns `None` if the GPU path
+/// is unavailable for the given inputs (caller should fall back to CPU).
+///
+/// Preconditions enforced by caller via [`should_use_gpu`].
+fn gpu_matmul_persistent(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    // cuBLAS path doesn't have a CUDA transpose kernel wired yet; defer to
+    // the legacy materialize-and-download path for now.
+    // Single-arm without scry-gpu-cuda — clippy doesn't see the cfg arm.
+    #[allow(clippy::infallible_destructuring_match)]
+    let kernel = match &ctx.matmul {
+        MatmulStrategy::Wgsl(k) => k,
+        #[cfg(feature = "scry-gpu-cuda")]
+        MatmulStrategy::CuBlas => return None,
+    };
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+
+    // Transpose on-device when needed. The shader expects row-major M×K and K×N.
+    let a_t;
+    let buf_a_ref: &Buffer<f32> = if trans_a {
+        a_t = gpu_transpose(&buf_a, k, m)?;
+        &a_t
+    } else {
+        &buf_a
+    };
+    let b_t;
+    let buf_b_ref: &Buffer<f32> = if trans_b {
+        b_t = gpu_transpose(&buf_b, n, k)?;
+        &b_t
+    } else {
+        &buf_b
+    };
+
+    let out = ctx.dev.alloc::<f32>(m * n).ok()?;
+    let dims: [u32; 3] = [m as u32, n as u32, k as u32];
+    ctx.dev
+        .run_configured(
+            kernel,
+            &[buf_a_ref, buf_b_ref, &out],
+            [(n as u32).div_ceil(64), (m as u32).div_ceil(64), 1],
+            Some(bytemuck::bytes_of(&dims)),
+        )
+        .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: m * n,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +464,15 @@ impl MathBackend for ScryGpuBackend {
         trans_a: bool,
         trans_b: bool,
     ) -> ScryGpuStorage {
+        // Try the GPU-resident path first when the workload clears the
+        // size threshold. Either input being already on-device tilts the
+        // tradeoff further toward keeping the result on-device.
+        if should_use_gpu(m, k, n) {
+            if let Some(gpu_out) = gpu_matmul_persistent(a, b, m, k, n, trans_a, trans_b) {
+                return gpu_out;
+            }
+        }
+        // Fallback: CPU compute (or cuBLAS via the legacy materialize path).
         let av = a.as_vec();
         let bv = b.as_vec();
         cpu(matmul_gpu_or_cpu(&av, &bv, m, k, n, trans_a, trans_b))
@@ -559,6 +673,121 @@ mod tests {
         let gpu2 = ScryGpuBackend::to_gpu(&gpu).expect("idempotent to_gpu");
         assert!(gpu2.is_gpu());
         assert_eq!(gpu2.len(), 8);
+    }
+
+    #[test]
+    fn large_matmul_returns_gpu_resident_result() {
+        // Big enough to clear should_use_gpu (M*K*N >= 65536).
+        // 64 * 64 * 32 = 131,072 elements.
+        let m = 64;
+        let k = 64;
+        let n = 32;
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.001).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32) * 0.002).collect();
+        let a_storage = ScryGpuStorage::Cpu(a);
+        let b_storage = ScryGpuStorage::Cpu(b);
+
+        // If the GPU is available we expect a Gpu-variant result; if not,
+        // gpu_matmul_persistent returns None and we fall back to Cpu.
+        let result = ScryGpuBackend::matmul(&a_storage, &b_storage, m, k, n, false, false);
+        if get_ctx().is_some() {
+            assert!(
+                result.is_gpu(),
+                "matmul above threshold with GPU available should return Gpu variant, got {result:?}"
+            );
+            assert_eq!(result.len(), m * n);
+        } else {
+            eprintln!("skipping gpu-residency assertion: no GPU");
+        }
+    }
+
+    #[test]
+    fn chained_matmuls_stay_on_gpu() {
+        // Two matmuls in a row: (A @ B) @ C. The intermediate must remain
+        // GPU-resident so we don't pay a download/upload between them.
+        let m = 64;
+        let k = 64;
+        let n = 64;
+        let p = 32;
+        let a: Vec<f32> = (0..m * k).map(|i| (i as f32) * 0.001).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32) * 0.002).collect();
+        let c: Vec<f32> = (0..n * p).map(|i| (i as f32) * 0.003).collect();
+
+        let a_s = ScryGpuStorage::Cpu(a);
+        let b_s = ScryGpuStorage::Cpu(b);
+        let c_s = ScryGpuStorage::Cpu(c);
+
+        let ab = ScryGpuBackend::matmul(&a_s, &b_s, m, k, n, false, false);
+        if get_ctx().is_none() {
+            eprintln!("skipping chained_matmuls_stay_on_gpu: no GPU");
+            return;
+        }
+        assert!(ab.is_gpu(), "intermediate AB should be Gpu-resident");
+
+        let abc = ScryGpuBackend::matmul(&ab, &c_s, m, n, p, false, false);
+        assert!(abc.is_gpu(), "final ABC should also be Gpu-resident");
+        assert_eq!(abc.len(), m * p);
+
+        // Compare against pure CPU baseline.
+        let cpu_ab = CpuBackend::matmul(
+            &ScryGpuBackend::to_vec(&a_s),
+            &ScryGpuBackend::to_vec(&b_s),
+            m,
+            k,
+            n,
+            false,
+            false,
+        );
+        let cpu_abc = CpuBackend::matmul(
+            &cpu_ab,
+            &ScryGpuBackend::to_vec(&c_s),
+            m,
+            n,
+            p,
+            false,
+            false,
+        );
+        let gpu_abc = ScryGpuBackend::to_vec(&abc);
+        assert_eq!(cpu_abc.len(), gpu_abc.len());
+        for (i, (e, g)) in cpu_abc.iter().zip(gpu_abc.iter()).enumerate() {
+            // Relative tolerance: two chained 64×64 matmuls accumulate ~4k
+            // fp32 multiply-adds per output, so absolute differences scale
+            // with magnitude.
+            let tol = 1e-4 * e.abs().max(1.0);
+            assert!(
+                (e - g).abs() < tol,
+                "mismatch at {i}: cpu={e} gpu={g} (tol={tol})"
+            );
+        }
+    }
+
+    #[test]
+    fn matmul_with_transpose_a_on_gpu_matches_cpu() {
+        // Tests that the on-device transpose helper plumbs correctly.
+        let m = 64;
+        let k = 64;
+        let n = 32;
+        // Provide A in transposed layout [k, m]; matmul will transpose to [m, k].
+        let a_transposed: Vec<f32> = (0..k * m).map(|i| (i as f32) * 0.001).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| (i as f32) * 0.002).collect();
+        let a_storage = ScryGpuStorage::Cpu(a_transposed.clone());
+        let b_storage = ScryGpuStorage::Cpu(b.clone());
+
+        let gpu_result = ScryGpuBackend::matmul(&a_storage, &b_storage, m, k, n, true, false);
+        if get_ctx().is_none() {
+            eprintln!("skipping matmul_with_transpose_a_on_gpu_matches_cpu: no GPU");
+            return;
+        }
+        let cpu_result = CpuBackend::matmul(&a_transposed, &b, m, k, n, true, false);
+        let g = ScryGpuBackend::to_vec(&gpu_result);
+        assert_eq!(cpu_result.len(), g.len());
+        for (i, (c, gv)) in cpu_result.iter().zip(g.iter()).enumerate() {
+            let tol = 1e-4 * c.abs().max(1.0);
+            assert!(
+                (c - gv).abs() < tol,
+                "mismatch at {i}: cpu={c} gpu={gv} (tol={tol})"
+            );
+        }
     }
 
     #[test]
