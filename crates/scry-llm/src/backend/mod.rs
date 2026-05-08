@@ -212,6 +212,16 @@ pub trait MathBackend: DeviceBackend {
     /// GELU activation (tanh approximation).
     fn gelu(input: &Self::Storage) -> Self::Storage;
 
+    /// `ReLU` activation: `out[i] = max(0, in[i])`. Default impl runs on
+    /// host via `to_vec`/`from_vec`; GPU backends override to keep tensors
+    /// device-resident.
+    fn relu(input: &Self::Storage) -> Self::Storage {
+        let v = Self::to_vec(input);
+        let n = v.len();
+        let out: Vec<f32> = v.into_iter().map(|x| x.max(0.0)).collect();
+        Self::from_vec(out, &Shape::new(&[n]))
+    }
+
     /// Im2col lowering for a 2D convolution.
     ///
     /// Input is `[in_channels, h_in, w_in]`; output is

@@ -130,6 +130,10 @@ struct ScryCtx {
     transpose: Option<::scry_gpu::Kernel>,
     /// On-device GELU (tanh approximation). Populated for both paths.
     gelu: Option<::scry_gpu::Kernel>,
+    /// On-device ReLU. CUDA-only — Vulkan path is `None` and callers fall
+    /// back to CPU. Used by `scry-vision`'s `relu` to keep ResNet activations
+    /// device-resident between conv layers.
+    relu: Option<::scry_gpu::Kernel>,
     /// On-device row-wise softmax. CUDA-only; Vulkan path is `None` and
     /// callers fall back to CPU.
     softmax: Option<::scry_gpu::Kernel>,
@@ -199,6 +203,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: gelu_cuda compile: {e}"))?;
+        let relu = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::RELU_CUDA,
+                "relu",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: relu_cuda compile: {e}"))?;
         let softmax = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::SOFTMAX_ROWWISE_CUDA,
@@ -268,6 +280,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             matmul: MatmulStrategy::CuBlas,
             transpose: Some(transpose),
             gelu: Some(gelu),
+            relu: Some(relu),
             softmax: Some(softmax),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
@@ -293,6 +306,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         matmul: MatmulStrategy::Wgsl(matmul),
         transpose: Some(transpose),
         gelu: Some(gelu),
+        relu: None,
         softmax: None,
         layernorm: None,
         batchnorm: None,
@@ -498,6 +512,24 @@ fn run_unary_elementwise(
 fn gpu_gelu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
     let kernel = ctx.gelu.as_ref()?;
+    let n = input.len();
+    if n < GPU_ELEMENTWISE_MIN {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = run_unary_elementwise(kernel, &buf_in, n)?;
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: n,
+    })
+}
+
+/// GPU-resident `ReLU`. Returns `None` when the GPU path is unavailable
+/// (e.g. Vulkan, where the kernel slot is `None`) or the workload is below
+/// `GPU_ELEMENTWISE_MIN`, so the caller falls back to CPU.
+fn gpu_relu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.relu.as_ref()?;
     let n = input.len();
     if n < GPU_ELEMENTWISE_MIN {
         return None;
@@ -1455,6 +1487,18 @@ impl MathBackend for ScryGpuBackend {
         cpu(CpuBackend::gelu(&input.as_vec()))
     }
 
+    fn relu(input: &ScryGpuStorage) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_relu_persistent(input) {
+            return gpu_out;
+        }
+        // CpuBackend has no `relu` op — inline the same scalar map the
+        // default trait impl uses, but reuse the borrowed Vec to avoid an
+        // extra allocation when we're already on host.
+        let v = input.as_vec();
+        let out: Vec<f32> = v.iter().map(|x| x.max(0.0)).collect();
+        cpu(out)
+    }
+
     fn max_pool_2d(
         input: &ScryGpuStorage,
         channels: usize,
@@ -1750,6 +1794,58 @@ mod tests {
                 (e - g).abs() < tol,
                 "mismatch at {i}: cpu={e} gpu={g} (tol={tol})"
             );
+        }
+    }
+
+    #[test]
+    fn gpu_relu_matches_reference_within_tolerance() {
+        // Above the elementwise threshold so the GPU path engages. Mix of
+        // negatives, zeros, and positives across the input range.
+        let n = 32_768;
+        let input: Vec<f32> = (0..n).map(|i| (i as f32) * 0.001 - 16.0).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_relu_matches_reference_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_out = ScryGpuBackend::relu(&gpu);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "relu over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let reference: Vec<f32> = input.iter().map(|x| x.max(0.0)).collect();
+        assert_eq!(g.len(), reference.len());
+        for (i, (gv, rv)) in g.iter().zip(reference.iter()).enumerate() {
+            // ReLU is exact in f32 (no transcendentals); equality holds.
+            assert!((gv - rv).abs() == 0.0, "idx={i}: gpu={gv} ref={rv}");
+        }
+    }
+
+    #[test]
+    fn small_relu_falls_back_to_cpu() {
+        // Below GPU_ELEMENTWISE_MIN — same threshold as gelu since both use
+        // `run_unary_elementwise`. Tensor stays/lands on host.
+        let n = 1024;
+        assert!(n < GPU_ELEMENTWISE_MIN);
+        let input: Vec<f32> = (0..n).map(|i| (i as f32) - 512.0).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping small_relu_falls_back_to_cpu: {e}");
+                return;
+            }
+        };
+        let out = ScryGpuBackend::relu(&gpu);
+        assert!(!out.is_gpu(), "small relu should fall back to Cpu");
+        let v = ScryGpuBackend::to_vec(&out);
+        for (i, (got, x)) in v.iter().zip(input.iter()).enumerate() {
+            assert!((got - x.max(0.0)).abs() == 0.0, "idx={i}: got={got} x={x}");
         }
     }
 
