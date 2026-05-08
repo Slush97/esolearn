@@ -189,6 +189,195 @@ fn cuda_cublas_matmul_vs_cpu_reference() {
     }
 }
 
+// ── cuBLAS GemmEx (bf16 / fp32-accumulate) ──
+
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_cublas_matmul_bf16_identity() {
+    use half::bf16;
+
+    let gpu = cuda_gpu();
+
+    // 2x2 identity: I × A = A
+    let identity_f = [1.0f32, 0.0, 0.0, 1.0];
+    let a_f = [5.0f32, 6.0, 7.0, 8.0];
+    let identity: Vec<bf16> = identity_f.iter().map(|x| bf16::from_f32(*x)).collect();
+    let a: Vec<bf16> = a_f.iter().map(|x| bf16::from_f32(*x)).collect();
+
+    let id_buf = gpu.upload(&identity).unwrap();
+    let a_buf = gpu.upload(&a).unwrap();
+    let mut c_buf = gpu.alloc::<bf16>(4).unwrap();
+
+    gpu.cublas_matmul_bf16(&id_buf, &a_buf, &mut c_buf, 2, 2, 2)
+        .unwrap();
+
+    let result: Vec<bf16> = c_buf.download().unwrap();
+    let result_f: Vec<f32> = result.iter().copied().map(half::bf16::to_f32).collect();
+    // bf16 represents these small integers exactly, so check equality.
+    assert_eq!(result_f, vec![5.0, 6.0, 7.0, 8.0]);
+}
+
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_cublas_matmul_bf16_2x3_times_3x2() {
+    use half::bf16;
+
+    let gpu = cuda_gpu();
+
+    // A = [[1, 2, 3], [4, 5, 6]]  (2x3)
+    // B = [[7, 8], [9, 10], [11, 12]]  (3x2)
+    // C = A * B = [[58, 64], [139, 154]]  (2x2) — all exact in bf16.
+    let a_f = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let b_f = [7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0];
+    let a: Vec<bf16> = a_f.iter().map(|x| bf16::from_f32(*x)).collect();
+    let b: Vec<bf16> = b_f.iter().map(|x| bf16::from_f32(*x)).collect();
+
+    let a_buf = gpu.upload(&a).unwrap();
+    let b_buf = gpu.upload(&b).unwrap();
+    let mut c_buf = gpu.alloc::<bf16>(4).unwrap();
+
+    gpu.cublas_matmul_bf16(&a_buf, &b_buf, &mut c_buf, 2, 2, 3)
+        .unwrap();
+
+    let result: Vec<bf16> = c_buf.download().unwrap();
+    let result_f: Vec<f32> = result.iter().copied().map(half::bf16::to_f32).collect();
+    assert_eq!(result_f, vec![58.0, 64.0, 139.0, 154.0]);
+}
+
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_cublas_matmul_bf16_64x64_vs_fp32_reference() {
+    use half::bf16;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
+    let gpu = cuda_gpu();
+
+    let m = 64u32;
+    let k = 64u32;
+    let n = 64u32;
+
+    // Bound inputs in [-1, 1] so the bf16 7-bit mantissa carries the rounding
+    // error and we don't need to model fp32-accumulate dominance over a wide
+    // exponent range.
+    let mut rng = StdRng::seed_from_u64(0xb_f16_d_15);
+    let a_f: Vec<f32> = (0..(m * k)).map(|_| rng.random_range(-1.0..1.0)).collect();
+    let b_f: Vec<f32> = (0..(k * n)).map(|_| rng.random_range(-1.0..1.0)).collect();
+
+    // bf16 inputs round once before the GEMM.
+    let a_bf: Vec<bf16> = a_f.iter().map(|x| bf16::from_f32(*x)).collect();
+    let b_bf: Vec<bf16> = b_f.iter().map(|x| bf16::from_f32(*x)).collect();
+
+    // fp32 reference is computed against the *bf16-rounded* inputs so the
+    // tolerance only has to absorb the per-multiply rounding error inside
+    // the GEMM, not the input-cast error.
+    let a_ref: Vec<f32> = a_bf.iter().copied().map(half::bf16::to_f32).collect();
+    let b_ref: Vec<f32> = b_bf.iter().copied().map(half::bf16::to_f32).collect();
+    let mut expected = vec![0.0f32; (m * n) as usize];
+    for i in 0..m as usize {
+        for j in 0..n as usize {
+            let mut sum = 0.0f32;
+            for kk in 0..k as usize {
+                sum += a_ref[i * k as usize + kk] * b_ref[kk * n as usize + j];
+            }
+            expected[i * n as usize + j] = sum;
+        }
+    }
+
+    let a_buf = gpu.upload(&a_bf).unwrap();
+    let b_buf = gpu.upload(&b_bf).unwrap();
+    let mut c_buf = gpu.alloc::<bf16>((m * n) as usize).unwrap();
+
+    gpu.cublas_matmul_bf16(&a_buf, &b_buf, &mut c_buf, m, n, k)
+        .unwrap();
+
+    let result: Vec<bf16> = c_buf.download().unwrap();
+    let result_f: Vec<f32> = result.iter().copied().map(half::bf16::to_f32).collect();
+
+    // Each output sums k=64 products of values in [-1, 1]; output magnitude
+    // is typically O(sqrt(k)) ≈ 8 by random-walk argument. bf16 has ~3
+    // decimal digits of mantissa; per-element absolute error scales with
+    // output magnitude, so 5e-2 absolute is the realistic envelope after
+    // the final cast back to bf16.
+    let tol = 5e-2_f32;
+    let mut max_err = 0.0_f32;
+    for (i, (got, want)) in result_f.iter().zip(expected.iter()).enumerate() {
+        let err = (got - want).abs();
+        max_err = max_err.max(err);
+        assert!(
+            err < tol,
+            "mismatch at index {i}: got {got}, want {want}, err {err} (tol {tol})"
+        );
+    }
+    eprintln!("bf16 64x64 GemmEx max abs err: {max_err:.5}");
+}
+
+// ── bf16 cast kernels ──
+
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_cast_f32_bf16_roundtrip() {
+    use half::bf16;
+
+    let gpu = cuda_gpu();
+
+    // Compile both directions of the cast.
+    let to_bf16 = gpu
+        .compile_cuda(
+            scry_gpu::shaders::elementwise::CAST_F32_BF16_CUDA,
+            "cast_f32_bf16",
+            2,
+            [256, 1, 1],
+        )
+        .unwrap();
+    let to_f32 = gpu
+        .compile_cuda(
+            scry_gpu::shaders::elementwise::CAST_BF16_F32_CUDA,
+            "cast_bf16_f32",
+            2,
+            [256, 1, 1],
+        )
+        .unwrap();
+
+    // Inputs that exercise both representable values (small ints) and ones
+    // that round (1/3, π, 1e-5).
+    let input = vec![
+        0.0_f32,
+        1.0,
+        -1.0,
+        2.0,
+        0.5,
+        -0.5,
+        1.0 / 3.0,
+        std::f32::consts::PI,
+        1e-5,
+        -1e-5,
+        12345.0,
+        -12345.0,
+    ];
+    let n = input.len() as u32;
+
+    let in_buf = gpu.upload(&input).unwrap();
+    let bf_buf = gpu.alloc::<bf16>(input.len()).unwrap();
+    let out_buf = gpu.alloc::<f32>(input.len()).unwrap();
+
+    gpu.run_with_push_constants(&to_bf16, &[&in_buf, &bf_buf], n, bytemuck::bytes_of(&n))
+        .unwrap();
+    gpu.run_with_push_constants(&to_f32, &[&bf_buf, &out_buf], n, bytemuck::bytes_of(&n))
+        .unwrap();
+
+    let result: Vec<f32> = out_buf.download().unwrap();
+    // Reference: round each input through `bf16::from_f32` on the host. The
+    // kernel must match this bit-for-bit.
+    let expected: Vec<f32> = input.iter().map(|x| bf16::from_f32(*x).to_f32()).collect();
+    for (i, (got, want)) in result.iter().zip(expected.iter()).enumerate() {
+        assert_eq!(
+            got.to_bits(),
+            want.to_bits(),
+            "round-trip mismatch at index {i}: got {got}, want {want}"
+        );
+    }
+}
+
 // ── Built-in CUDA shader: tiled matmul ──
 
 #[test]

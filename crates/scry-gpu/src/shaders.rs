@@ -460,6 +460,532 @@ extern \"C\" __global__ void sigmoid(
     if (i >= N) return;
     out[i] = 1.0f / (1.0f + expf(-input[i]));
 }";
+
+    /// GELU activation (tanh approximation):
+    /// `out[i] = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `input: array<f32>` (read)
+    ///   - `@binding(1)` `out: array<f32>` (`read_write`)
+    pub const GELU: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+const SQRT_2_OVER_PI: f32 = 0.7978845608028654;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    let x = input[i];
+    let inner = SQRT_2_OVER_PI * (x + 0.044715 * x * x * x);
+    out[i] = 0.5 * x * (1.0 + tanh(inner));
+}";
+
+    /// CUDA C equivalent of [`GELU`].
+    #[cfg(feature = "cuda")]
+    pub const GELU_CUDA: &str = "\
+extern \"C\" __global__ void gelu(
+    const float* input, float* out,
+    unsigned int N
+) {
+    const float SQRT_2_OVER_PI = 0.7978845608028654f;
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    float inner = SQRT_2_OVER_PI * (x + 0.044715f * x * x * x);
+    out[i] = 0.5f * x * (1.0f + tanhf(inner));
+}";
+
+    /// Same-shape elementwise add: `out[i] = a[i] + b[i]`.
+    ///
+    /// Distinct from [`BIAS_ADD`] (column-broadcast over a row vector) and
+    /// [`ADD_ROW_BIAS_CUDA`] (column-broadcast over a column vector). Use this
+    /// when both operands have identical shape — e.g. ResNet residual adds.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `a: array<f32>` (read)
+    ///   - `@binding(1)` `b: array<f32>` (read)
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`)
+    pub const ADD_ELEMENTWISE: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> a: array<f32>;
+@group(0) @binding(1) var<storage, read> b: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = a[i] + b[i];
+}";
+
+    /// CUDA C equivalent of [`ADD_ELEMENTWISE`].
+    #[cfg(feature = "cuda")]
+    pub const ADD_ELEMENTWISE_CUDA: &str = "\
+extern \"C\" __global__ void add_elementwise(
+    const float* a, const float* b, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = a[i] + b[i];
+}";
+
+    /// Row-wise softmax over the last dimension (numerically stable).
+    ///
+    /// For an input tensor reshaped as `[n_rows, d]`, computes
+    /// `out[r, j] = exp(in[r, j] - max(in[r, *])) / sum_k exp(in[r, k] - max(in[r, *]))`.
+    /// Three passes per row: max-reduce, exp+sum-reduce, normalize.
+    /// Threads in a block cooperate via static shared memory for both reductions,
+    /// so each block processes one row independently and any `d > blockDim.x` is
+    /// handled by a strided per-thread loop.
+    ///
+    /// **Kernel signature:** `softmax_rowwise(const float* input, float* out, unsigned int n_rows, unsigned int d)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[n_rows, 1, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const SOFTMAX_ROWWISE_CUDA: &str = "\
+extern \"C\" __global__ void softmax_rowwise(
+    const float* input, float* out,
+    unsigned int n_rows, unsigned int d
+) {
+    __shared__ float smem[256];
+
+    unsigned int row = blockIdx.x;
+    if (row >= n_rows) return;
+
+    const float* row_in = input + row * d;
+    float* row_out = out + row * d;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial max, then block-wide reduction.
+    // Use -FLT_MAX as the sentinel; NVRTC does not include <math.h> by
+    // default, so INFINITY / FLT_MAX macros aren't in scope.
+    float local_max = -3.402823466e38f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float v = row_in[i];
+        if (v > local_max) local_max = v;
+    }
+    smem[tid] = local_max;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            float a = smem[tid];
+            float b = smem[tid + s];
+            smem[tid] = a > b ? a : b;
+        }
+        __syncthreads();
+    }
+    float row_max = smem[0];
+    __syncthreads();
+
+    // Pass 2: write exp(x - max), accumulate per-thread sum, block-reduce.
+    float local_sum = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float e = expf(row_in[i] - row_max);
+        row_out[i] = e;
+        local_sum += e;
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float row_sum = smem[0];
+
+    // Pass 3: normalize. row_sum > 0 by construction (at least one exp(0) = 1).
+    float inv = 1.0f / row_sum;
+    for (unsigned int i = tid; i < d; i += bs) {
+        row_out[i] *= inv;
+    }
+}";
+
+    /// Row-wise layer normalization with affine gamma/beta.
+    ///
+    /// For an input tensor reshaped as `[n_rows, d]`, computes
+    /// `out[r, j] = ((in[r, j] - mean_r) * rstd_r) * gamma[j] + beta[j]`,
+    /// where `mean_r = sum(in[r, *]) / d`, `var_r = sum((in[r, *] - mean_r)^2) / d`,
+    /// and `rstd_r = 1 / sqrt(var_r + eps)`. Per-row `mean_r` and `rstd_r` are
+    /// also written to the output `means` and `rstds` buffers (one entry per
+    /// row) so the backward pass can reuse them.
+    ///
+    /// One block per row, 256 threads, two block-wide reductions (sum → mean,
+    /// then sum-of-squares → variance) sharing a single static-shared-memory
+    /// scratchpad. `d > blockDim.x` is handled by a strided per-thread loop, so
+    /// any last-dim length works without recompile.
+    ///
+    /// **Kernel signature:** `layernorm_rowwise(const float* input, const float* gamma, const float* beta, float* out, float* means, float* rstds, unsigned int n_rows, unsigned int d, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[n_rows, 1, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const LAYERNORM_ROWWISE_CUDA: &str = "\
+extern \"C\" __global__ void layernorm_rowwise(
+    const float* input, const float* gamma, const float* beta,
+    float* out, float* means, float* rstds,
+    unsigned int n_rows, unsigned int d, float eps
+) {
+    __shared__ float smem[256];
+
+    unsigned int row = blockIdx.x;
+    if (row >= n_rows) return;
+
+    const float* row_in = input + row * d;
+    float* row_out = out + row * d;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial sum, block-wide reduction → mean.
+    float local_sum = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        local_sum += row_in[i];
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float inv_d = 1.0f / (float)d;
+    float mean = smem[0] * inv_d;
+    __syncthreads();
+
+    // Pass 2: per-thread partial sum of squared deviations, block-reduce → var.
+    float local_sq = 0.0f;
+    for (unsigned int i = tid; i < d; i += bs) {
+        float diff = row_in[i] - mean;
+        local_sq += diff * diff;
+    }
+    smem[tid] = local_sq;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float var = smem[0] * inv_d;
+    float rstd = rsqrtf(var + eps);
+
+    // Thread 0 writes the per-row stats; other threads can race ahead to pass 3
+    // since pass 3 doesn't depend on smem and each thread writes its own
+    // output indices.
+    if (tid == 0) {
+        means[row] = mean;
+        rstds[row] = rstd;
+    }
+
+    // Pass 3: normalize, scale, shift.
+    for (unsigned int i = tid; i < d; i += bs) {
+        float norm = (row_in[i] - mean) * rstd;
+        row_out[i] = norm * gamma[i] + beta[i];
+    }
+}";
+
+    /// `im2col` lowering for a 2D convolution input `[C_in, H_in, W_in]`.
+    ///
+    /// Produces a `[C_in*kH*kW, H_out*W_out]` matrix in row-major layout where
+    /// row `c*kH*kW + kh*kW + kw` and column `oh*W_out + ow` is the input
+    /// pixel at channel `c`, position `(oh*stride + kh - padding,
+    /// ow*stride + kw - padding)`, zero where that position lies outside the
+    /// input. Lowering convolution to a GEMM lets the cuBLAS path do the
+    /// arithmetic; the kernel here is the lowering itself.
+    ///
+    /// One thread per output element; each thread does one bounds check + one
+    /// load + one store. Memory-bound; the input read pattern is strided per
+    /// `(kh, kw)` but the working set is small (one channel plane fits in L2
+    /// for ResNet-class layers), so cache hit rate is high.
+    ///
+    /// **Kernel signature:** `im2col_nchw(const float* input, float* col,
+    /// unsigned int c_in, unsigned int h_in, unsigned int w_in,
+    /// unsigned int kh, unsigned int kw,
+    /// unsigned int stride, unsigned int padding,
+    /// unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(c_in*kh*kw*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const IM2COL_NCHW_CUDA: &str = "\
+extern \"C\" __global__ void im2col_nchw(
+    const float* input, float* col,
+    unsigned int c_in, unsigned int h_in, unsigned int w_in,
+    unsigned int kh, unsigned int kw,
+    unsigned int stride, unsigned int padding,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int khw = kh * kw;
+    unsigned int col_rows = c_in * khw;
+    unsigned int total = col_rows * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int row = idx / spatial_out;
+    unsigned int out_col = idx - row * spatial_out;
+
+    unsigned int c = row / khw;
+    unsigned int rem = row - c * khw;
+    unsigned int khi = rem / kw;
+    unsigned int kwi = rem - khi * kw;
+
+    unsigned int oh = out_col / w_out;
+    unsigned int ow = out_col - oh * w_out;
+
+    int ih = (int)(oh * stride + khi) - (int)padding;
+    int iw = (int)(ow * stride + kwi) - (int)padding;
+
+    float v = 0.0f;
+    if (ih >= 0 && ih < (int)h_in && iw >= 0 && iw < (int)w_in) {
+        v = input[(c * h_in + (unsigned int)ih) * w_in + (unsigned int)iw];
+    }
+    col[idx] = v;
+}";
+
+    /// Column-broadcast bias add: `out[r*cols + c] = a[r*cols + c] + bias[r]`.
+    ///
+    /// Mirrors the `[N, M] + [N, 1]` row-bias broadcast that
+    /// `CpuBackend::add` already handles — used by Conv2d to add a
+    /// `[C_out]` bias to a `[C_out, H_out*W_out]` matmul output without
+    /// rounding through the CPU. One thread per output element; the
+    /// per-row `bias[r]` load is L1-broadcast across the block.
+    ///
+    /// **Kernel signature:** `add_row_bias(const float* a, const float* bias,
+    /// float* out, unsigned int rows, unsigned int cols)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*cols).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const ADD_ROW_BIAS_CUDA: &str = "\
+extern \"C\" __global__ void add_row_bias(
+    const float* a, const float* bias, float* out,
+    unsigned int rows, unsigned int cols
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * cols;
+    if (idx >= total) return;
+    unsigned int r = idx / cols;
+    out[idx] = a[idx] + bias[r];
+}";
+
+    /// 2D batch normalization (inference) with stored running stats.
+    ///
+    /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),
+    /// computes `out[n, c, i] = (in[n, c, i] - mean[c]) * rsqrt(var[c] + eps) * weight[c] + bias[c]`
+    /// using fused per-channel `scale = weight[c] * rsqrt(var[c] + eps)` and
+    /// `shift = bias[c] - mean[c] * scale`. No reductions — purely elementwise
+    /// per `(channel, batch_index)` plane.
+    ///
+    /// One block per `(channel, batch)` plane via a 2D grid; threads stride
+    /// over the spatial dimension. The four per-channel constants
+    /// (`weight[c]`, `bias[c]`, `running_mean[c]`, `running_var[c]`) are L1-cached
+    /// since every thread in the block reads the same address — no shared
+    /// memory needed.
+    ///
+    /// `BatchNorm2d` modules with the standard `[channels, h, w]` layout pass
+    /// `batch = 1` and `spatial = h*w`.
+    ///
+    /// **Kernel signature:** `batchnorm_inference(const float* input, const float* weight, const float* bias, const float* running_mean, const float* running_var, float* out, unsigned int channels, unsigned int spatial, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[channels, batch, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const BATCHNORM_INFERENCE_CUDA: &str = "\
+extern \"C\" __global__ void batchnorm_inference(
+    const float* input, const float* weight, const float* bias,
+    const float* running_mean, const float* running_var,
+    float* out,
+    unsigned int channels, unsigned int spatial, float eps
+) {
+    unsigned int c = blockIdx.x;
+    unsigned int n = blockIdx.y;
+    if (c >= channels) return;
+
+    // All threads in this block read the same per-channel constants — the
+    // four loads are broadcast and L1-cached, so the kernel runs at memory
+    // bandwidth on the input/output streams.
+    float w = weight[c];
+    float b = bias[c];
+    float m = running_mean[c];
+    float v = running_var[c];
+    float scale = w * rsqrtf(v + eps);
+    float shift = b - m * scale;
+
+    unsigned int plane = (n * channels + c) * spatial;
+    const float* in_plane = input + plane;
+    float* out_plane = out + plane;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    for (unsigned int i = tid; i < spatial; i += bs) {
+        out_plane[i] = in_plane[i] * scale + shift;
+    }
+}";
+
+    /// 2D max-pooling over a `[channels, h_in, w_in]` input with fixed kernel
+    /// size, stride, and zero padding (PyTorch / ResNet semantics — windows
+    /// that would draw exclusively from padding produce 0.0 rather than
+    /// `-inf`).
+    ///
+    /// One thread per output element across the full `(channel, oh, ow)`
+    /// grid; each thread scans the `kh*kw` window with bounds checks. The
+    /// per-channel input plane stays in L2 for ResNet-class layers, so the
+    /// kernel runs memory-bound.
+    ///
+    /// **Kernel signature:** `maxpool_2d(const float* input, float* out,
+    /// unsigned int channels, unsigned int h_in, unsigned int w_in,
+    /// unsigned int kh, unsigned int kw,
+    /// unsigned int stride, unsigned int padding,
+    /// unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const MAXPOOL_2D_CUDA: &str = "\
+extern \"C\" __global__ void maxpool_2d(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int kh, unsigned int kw,
+    unsigned int stride, unsigned int padding,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    const float* plane = input + c * h_in * w_in;
+    float m = -3.402823466e38f;
+    bool any = false;
+    for (unsigned int khi = 0; khi < kh; khi++) {
+        int ih = (int)(oh * stride + khi) - (int)padding;
+        if (ih < 0 || ih >= (int)h_in) continue;
+        for (unsigned int kwi = 0; kwi < kw; kwi++) {
+            int iw = (int)(ow * stride + kwi) - (int)padding;
+            if (iw < 0 || iw >= (int)w_in) continue;
+            float v = plane[(unsigned int)ih * w_in + (unsigned int)iw];
+            if (!any || v > m) m = v;
+            any = true;
+        }
+    }
+    out[idx] = any ? m : 0.0f;
+}";
+
+    /// Adaptive 2D average pooling: `[channels, h_in, w_in]` →
+    /// `[channels, h_out, w_out]` with per-output regions
+    /// `h_start = oh*h_in/h_out`, `h_end = (oh+1)*h_in/h_out` (and likewise
+    /// for w). Matches PyTorch's `AdaptiveAvgPool2d` integer-rounded
+    /// regions; global average pooling is the `h_out=w_out=1` special
+    /// case.
+    ///
+    /// One thread per output element. For global pooling each thread
+    /// reduces `h_in*w_in` inputs serially — fine for ResNet-class
+    /// channels (≤2048) where the SM count gives plenty of parallelism;
+    /// no shared-memory reduction needed.
+    ///
+    /// **Kernel signature:** `adaptive_avg_pool_2d(const float* input,
+    /// float* out, unsigned int channels, unsigned int h_in,
+    /// unsigned int w_in, unsigned int h_out, unsigned int w_out)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_out*w_out).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const ADAPTIVE_AVG_POOL_2D_CUDA: &str = "\
+extern \"C\" __global__ void adaptive_avg_pool_2d(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int h_out, unsigned int w_out
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    unsigned int h_start = oh * h_in / h_out;
+    unsigned int h_end = (oh + 1) * h_in / h_out;
+    unsigned int w_start = ow * w_in / w_out;
+    unsigned int w_end = (ow + 1) * w_in / w_out;
+
+    const float* plane = input + c * h_in * w_in;
+    float sum = 0.0f;
+    for (unsigned int h = h_start; h < h_end; h++) {
+        for (unsigned int w = w_start; w < w_end; w++) {
+            sum += plane[h * w_in + w];
+        }
+    }
+    unsigned int count = (h_end - h_start) * (w_end - w_start);
+    out[idx] = sum / (float)count;
+}";
+
+    /// f32 → bf16 elementwise cast: `out[i] = (bf16) in[i]` with RNE rounding.
+    ///
+    /// bf16 is the high 16 bits of fp32 with round-to-nearest-even — no
+    /// header required. We avoid `#include <cuda_bf16.h>` because NVRTC's
+    /// default include path does not cover CUDA toolkit headers, and the
+    /// cast is a one-liner in raw bits anyway. The buffer type on the device
+    /// side is `unsigned short` (16 bits, matching `half::bf16`'s layout).
+    ///
+    /// RNE bias: `+0x7FFF + (mantissa_lsb_after_truncate ? 1 : 0)`. NaN
+    /// inputs propagate as bf16 NaN provided the high mantissa bits are set
+    /// (which they are for canonical fp32 NaNs); subnormal NaNs are not
+    /// handled specially. Activation tensors should never carry NaN/Inf in
+    /// practice, so the naive form suffices.
+    ///
+    /// **Kernel signature:** `cast_f32_bf16(const float* input, unsigned short* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
+    #[cfg(feature = "bf16")]
+    pub const CAST_F32_BF16_CUDA: &str = "\
+extern \"C\" __global__ void cast_f32_bf16(
+    const float* input, unsigned short* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    unsigned int u = __float_as_uint(input[i]);
+    unsigned int lsb = (u >> 16) & 1u;
+    u += 0x7FFFu + lsb;
+    out[i] = (unsigned short)(u >> 16);
+}";
+
+    /// bf16 → f32 elementwise cast: `out[i] = (float) in[i]`.
+    ///
+    /// Lossless: bf16 is a strict subset of fp32, so we just shift the 16
+    /// bits up into the high half. No header needed.
+    ///
+    /// **Kernel signature:** `cast_bf16_f32(const unsigned short* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
+    #[cfg(feature = "bf16")]
+    pub const CAST_BF16_F32_CUDA: &str = "\
+extern \"C\" __global__ void cast_bf16_f32(
+    const unsigned short* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = __uint_as_float(((unsigned int)input[i]) << 16);
+}";
 }
 
 /// Backward activation and utility shaders for backpropagation.

@@ -22,9 +22,12 @@ use scry_llm::backend::MathBackend;
 use scry_llm::tensor::Tensor;
 
 /// Element-wise `ReLU`: `max(0, x)`.
+///
+/// Routes through `MathBackend::relu` so GPU backends can keep tensors
+/// device-resident; the trait's default impl falls back to a scalar map
+/// via `to_vec`/`from_vec` for backends without a dedicated kernel.
 pub fn relu<B: MathBackend>(input: &Tensor<B>) -> Tensor<B> {
-    let data: Vec<f32> = input.to_vec().into_iter().map(|x| x.max(0.0)).collect();
-    Tensor::from_vec(data, input.shape.clone())
+    Tensor::new(B::relu(&input.data), input.shape.clone())
 }
 
 /// Element-wise sigmoid: `1 / (1 + exp(-x))`.

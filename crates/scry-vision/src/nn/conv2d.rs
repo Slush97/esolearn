@@ -2,7 +2,10 @@
 //! 2D convolution layer (inference-only).
 //!
 //! Uses im2col + matmul as the default path, with Winograd F(2×2, 3×3) fast
-//! convolution auto-dispatched for 3×3 stride-1 padding-1 kernels.
+//! convolution auto-dispatched for 3×3 stride-1 padding-1 kernels — except
+//! on backends with device-resident im2col, which set
+//! [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`] and skip Winograd at
+//! construction time (see [`Conv2dStrategy`]).
 //!
 //! Input shape: `[C_in, H, W]`
 //! Output shape: `[C_out, H_out, W_out]`
@@ -13,6 +16,40 @@ use scry_llm::backend::MathBackend;
 use scry_llm::nn::Module;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
+
+use crate::nn::batchnorm::BatchNorm2d;
+
+/// Convolution algorithm choice for [`Conv2d`].
+///
+/// Set once at construction via [`Conv2dStrategy::default_for`] from the
+/// backend's [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`] hint. Tests and
+/// benchmarks can override per-instance via [`Conv2d::with_strategy`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Conv2dStrategy {
+    /// 3×3-stride-1-padding-1 kernels use Winograd F(2×2, 3×3); other
+    /// shapes use im2col + matmul. Best on CPU backends where Winograd's
+    /// ~2.25× lower FLOP count dominates.
+    #[default]
+    Auto,
+    /// Always use im2col + matmul. Best on backends with device-resident
+    /// im2col + matmul + bias-add (e.g. `ScryGpuBackend` on CUDA), where
+    /// Winograd's CPU-side filter and tile transforms force per-call
+    /// host↔device round-trips that swamp the FLOP savings.
+    Im2col,
+}
+
+impl Conv2dStrategy {
+    /// Pick the default strategy for backend `B` from
+    /// [`MathBackend::PREFERS_IM2COL_OVER_WINOGRAD`].
+    #[must_use]
+    pub fn default_for<B: MathBackend>() -> Self {
+        if B::PREFERS_IM2COL_OVER_WINOGRAD {
+            Self::Im2col
+        } else {
+            Self::Auto
+        }
+    }
+}
 
 /// 2D convolution with im2col + matmul and Winograd F(2×2, 3×3) fast path.
 ///
@@ -29,8 +66,9 @@ pub struct Conv2d<B: MathBackend> {
     pub kernel_w: usize,
     pub stride: usize,
     pub padding: usize,
-    /// Reusable workspace to avoid per-forward allocation.
-    pub workspace: RefCell<Vec<f32>>,
+    /// Algorithm selection. Defaults from `B::PREFERS_IM2COL_OVER_WINOGRAD`
+    /// at construction; override per-instance via [`Conv2d::with_strategy`].
+    pub strategy: Conv2dStrategy,
     /// Cached Winograd F(2×2, 3×3) transformed filter weights as backend storage.
     /// 16 elements, each a `[C_out, C_in]` matrix in `B::Storage` form.
     /// Lazily computed on first forward pass for eligible convolutions.
@@ -107,9 +145,17 @@ impl<B: MathBackend> Conv2d<B> {
             kernel_w,
             stride,
             padding,
-            workspace: RefCell::new(Vec::new()),
+            strategy: Conv2dStrategy::default_for::<B>(),
             winograd_weight: RefCell::new(None),
         }
+    }
+
+    /// Override the convolution algorithm. Useful for benchmarks or tests
+    /// that want to force a specific path.
+    #[must_use]
+    pub fn with_strategy(mut self, strategy: Conv2dStrategy) -> Self {
+        self.strategy = strategy;
+        self
     }
 
     /// Convenience constructor for square kernels.
@@ -130,22 +176,150 @@ impl<B: MathBackend> Conv2d<B> {
         )
     }
 
+    /// Pre-upload weight and bias to the backend's device-resident form.
+    /// No-op on `CpuBackend`; idempotent on any backend.
+    ///
+    /// The Winograd cache (`winograd_weight`) is left untouched — it's
+    /// rebuilt lazily from `self.weight` on first `forward_winograd` call,
+    /// so uploading the source `weight` is what matters.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+    }
+
+    /// Fold the parameters of an immediately-following `BatchNorm2d` into
+    /// this conv's weight and bias. Inference-only optimization: BN at
+    /// inference is `y = (x - μ)/√(σ² + ε) · γ + β`, which is a per-channel
+    /// affine map and can be absorbed into the preceding conv. After folding,
+    /// the BN op can be skipped entirely — typically via the containing
+    /// block's `bn_fused` flag.
+    ///
+    /// Per out-channel `c` with `s = γ[c] / √(σ²[c] + ε)`:
+    ///   - `weight[c, ·, ·, ·] *= s`
+    ///   - `bias[c] = (bias[c] − μ[c]) · s + β[c]`
+    ///
+    /// Must be called **before** [`Self::to_device`] — the fold reads tensor
+    /// values via `B::to_vec`, which on GPU backends would force a download.
+    /// The Winograd weight cache is invalidated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bn.num_features != self.out_channels`.
+    pub fn fold_batchnorm(&mut self, bn: &BatchNorm2d<B>) {
+        assert_eq!(
+            bn.num_features, self.out_channels,
+            "BN channels ({}) must match conv out_channels ({})",
+            bn.num_features, self.out_channels,
+        );
+
+        let gamma = B::to_vec(&bn.weight.data);
+        let beta = B::to_vec(&bn.bias.data);
+        let mean = B::to_vec(&bn.running_mean.data);
+        let var = B::to_vec(&bn.running_var.data);
+        let eps = bn.eps;
+
+        let mut w = B::to_vec(&self.weight.data);
+        let mut b = B::to_vec(&self.bias.data);
+
+        let c_out = self.out_channels;
+        let stride_per_filter = w.len() / c_out;
+        for c in 0..c_out {
+            let s = gamma[c] / (var[c] + eps).sqrt();
+            let base = c * stride_per_filter;
+            for k in 0..stride_per_filter {
+                w[base + k] *= s;
+            }
+            b[c] = (b[c] - mean[c]) * s + beta[c];
+        }
+
+        self.weight = Tensor::from_vec(w, self.weight.shape.clone());
+        self.bias = Tensor::from_vec(b, self.bias.shape.clone());
+        *self.winograd_weight.borrow_mut() = None;
+    }
+
     /// Whether this conv qualifies for Winograd F(2×2, 3×3).
     fn use_winograd(&self) -> bool {
         self.kernel_h == 3 && self.kernel_w == 3 && self.stride == 1 && self.padding == 1
     }
 
+    /// Whether this conv is a "pointwise" 1×1 stride-1 padding-0 — the case
+    /// where im2col is a no-op rearrangement and the convolution is exactly
+    /// a matmul on the flattened input. Bottleneck blocks in ResNet-50 are
+    /// the dominant call site (32 of 49 conv2d calls, 35% of GPU wall time
+    /// pre-fast-path).
+    fn is_pointwise_1x1(&self) -> bool {
+        self.kernel_h == 1 && self.kernel_w == 1 && self.stride == 1 && self.padding == 0
+    }
+
     /// Forward pass: `[C_in, H, W]` → `[C_out, H_out, W_out]`.
     ///
-    /// Auto-dispatches to Winograd for 3×3/stride-1/pad-1 kernels.
+    /// Routing:
+    /// - 1×1 stride-1 padding-0 → [`forward_1x1`] (always; backend-agnostic
+    ///   identity equivalence to matmul, no algorithmic choice).
+    /// - else [`Conv2dStrategy::Auto`] + 3×3-s1-p1 → [`forward_winograd`].
+    /// - else → [`forward_im2col`].
+    ///
+    /// [`forward_1x1`]: Self::forward_1x1
+    /// [`forward_winograd`]: Self::forward_winograd
+    /// [`forward_im2col`]: Self::forward_im2col
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
-        if self.use_winograd() {
-            return self.forward_winograd(input);
+        if self.is_pointwise_1x1() {
+            return self.forward_1x1(input);
         }
-        self.forward_im2col(input)
+        match self.strategy {
+            Conv2dStrategy::Auto if self.use_winograd() => self.forward_winograd(input),
+            _ => self.forward_im2col(input),
+        }
+    }
+
+    /// 1×1 stride-1 padding-0 fast path.
+    ///
+    /// `im2col` for this kernel shape is a literal copy of the input — the
+    /// `[C_in*1*1, H*W]` lowered matrix has exactly the same row-major bytes
+    /// as the `[C_in, H, W]` input. We can skip the lowering kernel and call
+    /// `B::matmul` directly with the flat input as the right-hand operand.
+    /// The bias add is identical to [`forward_im2col`]: a `[C_out, 1]`
+    /// row-bias broadcast that GPU backends route to `add_row_bias`.
+    pub fn forward_1x1(&self, input: &Tensor<B>) -> Tensor<B> {
+        let dims = input.shape.dims();
+        let (c_in, h_in, w_in) = (dims[0], dims[1], dims[2]);
+        debug_assert_eq!(c_in, self.in_channels);
+        debug_assert_eq!(self.kernel_h, 1);
+        debug_assert_eq!(self.kernel_w, 1);
+        debug_assert_eq!(self.stride, 1);
+        debug_assert_eq!(self.padding, 0);
+        let spatial = h_in * w_in;
+
+        // Weight `[C_out, C_in, 1, 1]` shares its row-major layout with
+        // `[C_out, C_in]`; input `[C_in, H, W]` shares with `[C_in, H*W]`.
+        let out_data = B::matmul(
+            &self.weight.data,
+            &input.data,
+            self.out_channels,
+            self.in_channels,
+            spatial,
+            false,
+            false,
+        );
+
+        let out_shape = Shape::new(&[self.out_channels, spatial]);
+        let result = B::add(
+            &out_data,
+            &self.bias.data,
+            &out_shape,
+            &Shape::new(&[self.out_channels, 1]),
+            &out_shape,
+        );
+
+        Tensor::<B>::new(result, Shape::new(&[self.out_channels, h_in, w_in]))
     }
 
     /// Im2col + matmul convolution (general case, also used as test reference).
+    ///
+    /// Lowers the convolution to a GEMM via `B::im2col_2d`, then multiplies by
+    /// the flattened weight matrix and adds the per-channel bias. Backends
+    /// with on-device im2col + matmul + row-bias-add kernels (e.g.
+    /// `ScryGpuBackend` on CUDA) keep the entire chain GPU-resident.
     pub fn forward_im2col(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let h_in = dims[1];
@@ -154,47 +328,17 @@ impl<B: MathBackend> Conv2d<B> {
         let h_out = (h_in + 2 * self.padding - self.kernel_h) / self.stride + 1;
         let w_out = (w_in + 2 * self.padding - self.kernel_w) / self.stride + 1;
         let spatial_out = h_out * w_out;
-
-        let input_vec = input.to_vec();
-
-        // im2col: [C_in * kH * kW, H_out * W_out]
         let col_rows = self.in_channels * self.kernel_h * self.kernel_w;
-        let needed = col_rows * spatial_out;
-        let mut col = self.workspace.borrow_mut();
-        if col.len() < needed {
-            col.resize(needed, 0.0);
-        }
 
-        for oh in 0..h_out {
-            for ow in 0..w_out {
-                let out_col = oh * w_out + ow;
-                for c in 0..self.in_channels {
-                    for kh in 0..self.kernel_h {
-                        for kw in 0..self.kernel_w {
-                            let ih = oh * self.stride + kh;
-                            let iw = ow * self.stride + kw;
-                            let val = if ih >= self.padding
-                                && ih < self.padding + h_in
-                                && iw >= self.padding
-                                && iw < self.padding + w_in
-                            {
-                                let h_idx = ih - self.padding;
-                                let w_idx = iw - self.padding;
-                                input_vec[c * h_in * w_in + h_idx * w_in + w_idx]
-                            } else {
-                                0.0 // zero padding
-                            };
-                            let row = c * self.kernel_h * self.kernel_w + kh * self.kernel_w + kw;
-                            col[row * spatial_out + out_col] = val;
-                        }
-                    }
-                }
-            }
-        }
-
-        let col_storage = B::from_vec(
-            col[..needed].to_vec(),
-            &Shape::new(&[col_rows, spatial_out]),
+        let col_storage = B::im2col_2d(
+            &input.data,
+            self.in_channels,
+            h_in,
+            w_in,
+            self.kernel_h,
+            self.kernel_w,
+            self.stride,
+            self.padding,
         );
 
         // Weight [out_ch, in_ch, kH, kW] has same flat layout as [out_ch, in_ch*kH*kW]
@@ -208,12 +352,15 @@ impl<B: MathBackend> Conv2d<B> {
             false,
         );
 
-        // Bias add: bias[out_ch] broadcast across spatial dims
-        let bias_col = B::from_vec(self.bias.to_vec(), &Shape::new(&[self.out_channels, 1]));
+        // Bias add: bias[out_ch] broadcast across spatial dims as a [C_out, 1]
+        // column vector. ScryGpuBackend's add detects this row-bias broadcast
+        // and routes to the on-device add_row_bias kernel.
+        let bias_col =
+            Tensor::<B>::new(B::clone_storage(&self.bias.data), Shape::new(&[self.out_channels, 1]));
         let out_shape = Shape::new(&[self.out_channels, spatial_out]);
         let result = B::add(
             &out_data,
-            &bias_col,
+            &bias_col.data,
             &out_shape,
             &Shape::new(&[self.out_channels, 1]),
             &out_shape,
@@ -577,5 +724,215 @@ mod tests {
     fn winograd_not_used_for_1x1() {
         let conv = Conv2d::<CpuBackend>::square(3, 16, 1, 1, 0);
         assert!(!conv.use_winograd());
+    }
+
+    // ── Strategy tests ──
+
+    #[test]
+    fn cpu_default_strategy_is_auto() {
+        let conv = Conv2d::<CpuBackend>::square(3, 16, 3, 1, 1);
+        assert_eq!(conv.strategy, Conv2dStrategy::Auto);
+        assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
+    }
+
+    #[test]
+    fn with_strategy_im2col_skips_winograd_on_cpu() {
+        // Force im2col on a Winograd-eligible CPU conv; output must match
+        // both the Auto-Winograd path and the explicit im2col path.
+        let conv = random_conv(3, 16).with_strategy(Conv2dStrategy::Im2col);
+        let input = random_input(3, 8, 8);
+        assert_eq!(conv.strategy, Conv2dStrategy::Im2col);
+        assert!(conv.use_winograd(), "kernel still Winograd-eligible");
+        let out = conv.forward(&input);
+        let ref_out = conv.forward_im2col(&input);
+        assert_close(&out.to_vec(), &ref_out.to_vec(), 1e-4, "im2col strategy");
+    }
+
+    #[test]
+    fn auto_strategy_matches_im2col_strategy_numerically() {
+        // The two strategies must produce equivalent outputs on the same
+        // input — Winograd is just a faster algorithm, not a different op.
+        let auto = random_conv(3, 16);
+        let im2col = random_conv(3, 16).with_strategy(Conv2dStrategy::Im2col);
+        let input = random_input(3, 14, 14);
+        let auto_out = auto.forward(&input);
+        let im2col_out = im2col.forward(&input);
+        assert_close(
+            &auto_out.to_vec(),
+            &im2col_out.to_vec(),
+            1e-4,
+            "auto vs im2col",
+        );
+    }
+
+    // ── 1×1 fast path tests ──
+
+    /// Helper: 1×1 stride-1 padding-0 conv with deterministic weights.
+    fn random_conv_1x1(in_ch: usize, out_ch: usize) -> Conv2d<CpuBackend> {
+        let n = out_ch * in_ch;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 0.5 + 0.1).sin()).collect();
+        let b: Vec<f32> = (0..out_ch).map(|i| (i as f32 * 0.17).cos() * 0.3).collect();
+        let mut conv = Conv2d::<CpuBackend>::square(in_ch, out_ch, 1, 1, 0);
+        conv.weight = Tensor::from_vec(w, Shape::new(&[out_ch, in_ch, 1, 1]));
+        conv.bias = Tensor::from_vec(b, Shape::new(&[out_ch]));
+        conv
+    }
+
+    #[test]
+    fn is_pointwise_1x1_only_for_kernel1_stride1_pad0() {
+        // The predicate gates the fast path; getting any of the four
+        // conditions wrong would either skip a valid case or wrongly take
+        // the fast path on a strided/padded conv.
+        assert!(Conv2d::<CpuBackend>::square(64, 256, 1, 1, 0).is_pointwise_1x1());
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 2, 0).is_pointwise_1x1()); // stride-2 downsample
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 3, 1, 1).is_pointwise_1x1()); // 3×3
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 1, 1).is_pointwise_1x1()); // pad-1 (rare but possible)
+    }
+
+    #[test]
+    fn forward_1x1_matches_im2col_reference() {
+        // The pointwise fast path must produce bit-equivalent results to
+        // the im2col reference (modulo any matmul reordering — same matmul
+        // shape both ways, so we expect exact equality on CPU).
+        // Use a shape from R50 stage 3: 256→1024 channels at 14×14.
+        let conv = random_conv_1x1(256, 1024);
+        let input = random_input(256, 14, 14);
+        let fast = conv.forward_1x1(&input);
+        let reference = conv.forward_im2col(&input);
+        assert_eq!(fast.shape.dims(), reference.shape.dims());
+        assert_close(&fast.to_vec(), &reference.to_vec(), 1e-5, "1x1 fast vs im2col");
+    }
+
+    #[test]
+    fn forward_dispatches_pointwise_1x1_to_fast_path() {
+        // `forward()` must route through `forward_1x1` for pointwise convs;
+        // numerical equivalence with the im2col reference confirms it took
+        // the right path (any wrong dispatch would still match, but having
+        // both this test and the predicate test pins down the contract).
+        let conv = random_conv_1x1(64, 256);
+        let input = random_input(64, 28, 28);
+        let dispatched = conv.forward(&input);
+        let reference = conv.forward_im2col(&input);
+        assert_close(
+            &dispatched.to_vec(),
+            &reference.to_vec(),
+            1e-5,
+            "forward() dispatch vs im2col",
+        );
+    }
+
+    // ── BN folding tests ──
+
+    /// Build a `BatchNorm2d` with deterministic non-trivial running stats and
+    /// affine params, so folding has something to actually do.
+    fn random_bn(channels: usize) -> BatchNorm2d<CpuBackend> {
+        let gamma: Vec<f32> = (0..channels).map(|i| 0.5 + (i as f32 * 0.31).sin()).collect();
+        let beta: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.17).cos() * 0.7).collect();
+        let mean: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.21).sin() * 0.4).collect();
+        // Variance must be positive; bias the floor up.
+        let var: Vec<f32> = (0..channels)
+            .map(|i| 0.25 + (i as f32 * 0.11).cos().abs())
+            .collect();
+        let mut bn = BatchNorm2d::<CpuBackend>::new(channels, 1e-5);
+        bn.weight = Tensor::from_vec(gamma, Shape::new(&[channels]));
+        bn.bias = Tensor::from_vec(beta, Shape::new(&[channels]));
+        bn.running_mean = Tensor::from_vec(mean, Shape::new(&[channels]));
+        bn.running_var = Tensor::from_vec(var, Shape::new(&[channels]));
+        bn
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_3x3() {
+        let mut conv_folded = random_conv(8, 16);
+        let conv_ref = random_conv(8, 16);
+        let bn = random_bn(16);
+        let input = random_input(8, 14, 14);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_eq!(folded.shape.dims(), reference.shape.dims());
+        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "3×3 conv-bn fold");
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_1x1() {
+        let mut conv_folded = random_conv_1x1(64, 64);
+        let conv_ref = random_conv_1x1(64, 64);
+        let bn = random_bn(64);
+        let input = random_input(64, 7, 7);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "1×1 conv-bn fold");
+    }
+
+    #[test]
+    fn fold_batchnorm_matches_unfolded_with_stride() {
+        // Stride-2 3×3 (the downsample path between ResNet stages).
+        let mut conv_folded = Conv2d::<CpuBackend>::square(16, 32, 3, 2, 1);
+        let n = 32 * 16 * 9;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 0.7 + 0.3).sin()).collect();
+        let b: Vec<f32> = (0..32).map(|i| (i as f32 * 0.13).cos() * 0.5).collect();
+        conv_folded.weight = Tensor::from_vec(w.clone(), Shape::new(&[32, 16, 3, 3]));
+        conv_folded.bias = Tensor::from_vec(b.clone(), Shape::new(&[32]));
+
+        let mut conv_ref = Conv2d::<CpuBackend>::square(16, 32, 3, 2, 1);
+        conv_ref.weight = Tensor::from_vec(w, Shape::new(&[32, 16, 3, 3]));
+        conv_ref.bias = Tensor::from_vec(b, Shape::new(&[32]));
+
+        let bn = random_bn(32);
+        let input = random_input(16, 14, 14);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv_folded.fold_batchnorm(&bn);
+        let folded = conv_folded.forward(&input);
+
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "3×3 stride-2 conv-bn fold",
+        );
+    }
+
+    #[test]
+    fn fold_batchnorm_zero_bias_conv() {
+        // Conv2d::new initializes bias to zero — exercises the (0 - μ)·s + β
+        // branch of the bias update, which is the common case for ResNet
+        // (PyTorch ResNet convs are trained with bias=False before BN).
+        let mut conv = Conv2d::<CpuBackend>::square(4, 8, 3, 1, 1);
+        let n = 8 * 4 * 9;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 1.1).cos()).collect();
+        conv.weight = Tensor::from_vec(w, Shape::new(&[8, 4, 3, 3]));
+        // bias stays at zeros from Conv2d::new
+
+        let mut conv_ref = Conv2d::<CpuBackend>::square(4, 8, 3, 1, 1);
+        conv_ref.weight = Tensor::from_vec(conv.weight.to_vec(), conv.weight.shape.clone());
+
+        let bn = random_bn(8);
+        let input = random_input(4, 8, 8);
+
+        let reference = bn.forward(&conv_ref.forward(&input));
+        conv.fold_batchnorm(&bn);
+        let folded = conv.forward(&input);
+
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "zero-bias conv-bn fold",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "BN channels")]
+    fn fold_batchnorm_channel_mismatch_panics() {
+        let mut conv = Conv2d::<CpuBackend>::square(3, 16, 3, 1, 1);
+        let bn = random_bn(8); // wrong channel count
+        conv.fold_batchnorm(&bn);
     }
 }

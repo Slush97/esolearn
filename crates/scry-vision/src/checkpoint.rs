@@ -12,7 +12,7 @@ use scry_llm::tensor::Tensor;
 
 use crate::error::{Result, VisionError};
 use crate::nn::batchnorm::BatchNorm2d;
-use crate::nn::conv2d::Conv2d;
+use crate::nn::conv2d::{Conv2d, Conv2dStrategy};
 use crate::nn::conv_transpose2d::ConvTranspose2d;
 use crate::nn::layernorm2d::LayerNorm2d;
 
@@ -115,7 +115,7 @@ pub fn load_conv2d<B: MathBackend>(
         kernel_w,
         stride,
         padding,
-        workspace: RefCell::new(Vec::new()),
+        strategy: Conv2dStrategy::default_for::<B>(),
         winograd_weight: RefCell::new(None),
     })
 }
@@ -171,7 +171,7 @@ pub fn load_conv2d_with_bias<B: MathBackend>(
         kernel_w,
         stride,
         padding,
-        workspace: RefCell::new(Vec::new()),
+        strategy: Conv2dStrategy::default_for::<B>(),
         winograd_weight: RefCell::new(None),
     })
 }

@@ -43,32 +43,35 @@ impl<B: MathBackend> BatchNorm2d<B> {
         }
     }
 
+    /// Pre-upload all parameter tensors to the backend's device-resident
+    /// form. No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+        B::to_device_in_place(&mut self.running_mean.data);
+        B::to_device_in_place(&mut self.running_var.data);
+    }
+
     /// Forward pass: `[C, H, W]` → `[C, H, W]`.
     ///
-    /// Applies `(x - mean) / sqrt(var + eps) * weight + bias` per channel.
+    /// Applies `(x - mean) / sqrt(var + eps) * weight + bias` per channel
+    /// via the backend's `batchnorm_2d_inference` op so GPU backends can keep
+    /// the tensor device-resident.
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let c = dims[0];
         let spatial = dims[1] * dims[2];
-
-        let input_vec = input.to_vec();
-        let weight = self.weight.to_vec();
-        let bias = self.bias.to_vec();
-        let mean = self.running_mean.to_vec();
-        let var = self.running_var.to_vec();
-
-        let mut output = vec![0.0f32; c * spatial];
-
-        for ch in 0..c {
-            let scale = weight[ch] / (var[ch] + self.eps).sqrt();
-            let shift = bias[ch] - mean[ch] * scale;
-            let offset = ch * spatial;
-            for i in 0..spatial {
-                output[offset + i] = input_vec[offset + i] * scale + shift;
-            }
-        }
-
-        Tensor::from_vec(output, input.shape.clone())
+        let data = B::batchnorm_2d_inference(
+            &input.data,
+            &self.weight.data,
+            &self.bias.data,
+            &self.running_mean.data,
+            &self.running_var.data,
+            c,
+            spatial,
+            self.eps,
+        );
+        Tensor::new(data, input.shape.clone())
     }
 }
 

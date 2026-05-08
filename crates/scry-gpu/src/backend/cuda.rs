@@ -89,10 +89,12 @@ impl CudaBackend {
         })
     }
 
-    /// Dispatch a compiled CUDA kernel.
+    /// Dispatch a compiled CUDA kernel and block until it completes.
     ///
-    /// Buffer device pointers are passed as kernel arguments in order,
-    /// followed by push constant bytes split into `u32` arguments.
+    /// Matches the Vulkan fence-wait semantics — when this returns, the
+    /// kernel has finished and any host-visible output is consistent.
+    /// For pipelined work that doesn't need a host sync between stages,
+    /// prefer [`Self::dispatch_cuda_async`].
     pub fn dispatch_cuda(
         &self,
         kernel: &CudaKernel,
@@ -100,48 +102,31 @@ impl CudaBackend {
         workgroups: [u32; 3],
         push_constants: Option<&[u8]>,
     ) -> Result<()> {
-        let config = LaunchConfig {
-            grid_dim: (workgroups[0], workgroups[1], workgroups[2]),
-            block_dim: kernel.block_dim,
-            shared_mem_bytes: 0,
-        };
-
-        // Collect push constant u32 values so they outlive the builder.
-        let pc_values: Vec<u32> = push_constants
-            .map(|pc| {
-                pc.chunks_exact(4)
-                    .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        unsafe {
-            let mut builder = self.stream.launch_builder(&kernel.function);
-
-            // Push buffer device pointers as kernel arguments.
-            for buf in buffers {
-                builder.arg(&buf.inner);
-            }
-
-            // Push constants as individual u32 kernel arguments.
-            for val in &pc_values {
-                builder.arg(val);
-            }
-
-            builder
-                .launch(config)
-                .map_err(|e| backend_err(BackendOp::LaunchKernel, e))?;
-        }
-
-        // Synchronize to match the Vulkan fence-wait semantics.
+        self.dispatch_cuda_async(kernel, buffers, workgroups, push_constants)?;
         self.stream
             .synchronize()
             .map_err(|e| backend_err(BackendOp::StreamSync, e))?;
-
         Ok(())
     }
 
-    /// Run cuBLAS SGEMM: C = alpha * A * B + beta * C.
+    /// Dispatch a compiled CUDA kernel without synchronizing.
+    ///
+    /// Queues the kernel on this backend's stream and returns once it has
+    /// been submitted to the GPU. Subsequent calls on the same stream are
+    /// stream-ordered, so chained operators see consistent state. Host-side
+    /// reads (`Buffer::download`) implicitly synchronize. Use this in tight
+    /// pipelines where each per-call sync would otherwise dominate latency.
+    pub fn dispatch_cuda_async(
+        &self,
+        kernel: &CudaKernel,
+        buffers: &[&CudaBuffer],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        launch_on_stream(&self.stream, kernel, buffers, workgroups, push_constants)
+    }
+
+    /// Run cuBLAS SGEMM and block until it completes: C = A * B.
     ///
     /// Buffers must contain `f32` data. This is the recommended path for
     /// matrix multiplication on CUDA — it reaches 80%+ peak throughput
@@ -149,8 +134,34 @@ impl CudaBackend {
     ///
     /// Matrix layout is row-major. Dimensions: A is `m×k`, B is `k×n`,
     /// C is `m×n`.
+    ///
+    /// For pipelined GPU-resident work, prefer [`Self::cublas_matmul_async`]
+    /// to avoid the per-call sync.
     #[allow(clippy::many_single_char_names)]
     pub fn cublas_matmul(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_matmul_async(a, b, c, m, n, k)?;
+        self.stream
+            .synchronize()
+            .map_err(|e| backend_err(BackendOp::StreamSync, e))?;
+        Ok(())
+    }
+
+    /// Run cuBLAS SGEMM without synchronizing.
+    ///
+    /// Queues the SGEMM on this backend's stream. Subsequent stream work
+    /// (kernels, further matmuls, downloads) is stream-ordered against it,
+    /// so chained operators see consistent state. Use in tight pipelines
+    /// where the per-call sync would otherwise dominate latency.
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_async(
         &self,
         a: &CudaBuffer,
         b: &CudaBuffer,
@@ -190,12 +201,143 @@ impl CudaBackend {
             )
             .map_err(|e| backend_err(BackendOp::CuBlas, e))?;
         }
+        Ok(())
+    }
 
-        // Sync after cuBLAS call.
+    /// Run cuBLAS GemmEx with bf16 inputs/outputs and fp32 accumulate, blocking
+    /// until the GPU finishes.
+    ///
+    /// Buffers must contain `bf16` data laid out row-major (A is `m×k`, B is
+    /// `k×n`, C is `m×n`). Internally calls `cublasGemmEx` with
+    /// `CUDA_R_16BF` data type, `CUBLAS_COMPUTE_32F` accumulator, and
+    /// `CUBLAS_GEMM_DEFAULT` algo selection — on Ampere+ the driver picks a
+    /// tensor-core path automatically. Yields ~3–5× the throughput of fp32
+    /// `sgemm` at ResNet-shaped sizes.
+    ///
+    /// For pipelined GPU-resident work, prefer
+    /// [`Self::cublas_matmul_bf16_async`].
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_matmul_bf16_async(a, b, c, m, n, k)?;
         self.stream
             .synchronize()
             .map_err(|e| backend_err(BackendOp::StreamSync, e))?;
+        Ok(())
+    }
 
+    /// Run cuBLAS GemmEx (bf16 / fp32-accumulate) without synchronizing.
+    ///
+    /// Same column-major-swap trick as [`Self::cublas_matmul_async`]: row-major
+    /// `C = A·B` becomes column-major `Cᵀ = Bᵀ·Aᵀ`. Alpha and beta are passed
+    /// as `f32` because the compute type is `CUBLAS_COMPUTE_32F`.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_gemm_ex_async_inner(a, b, c, m, n, k, /* c_is_f32 */ false)
+    }
+
+    /// Run cuBLAS GemmEx with bf16 inputs and an **fp32** output.
+    ///
+    /// Same compute path as [`Self::cublas_matmul_bf16_async`] (CUDA_R_16BF
+    /// data, CUBLAS_COMPUTE_32F accumulator, tensor-core algo selection),
+    /// but the fp32 accumulator is written directly to `c` without rounding
+    /// down to bf16. Skips the cast-back-to-f32 HBM pass that
+    /// [`Self::cublas_matmul_bf16_async`] would otherwise force on the
+    /// caller, and is bit-exact with "GemmEx then cast-up" up to a single
+    /// rounding step.
+    ///
+    /// `c` must be sized for `m × n` `f32` elements (4 bytes each).
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        self.cublas_gemm_ex_async_inner(a, b, c, m, n, k, /* c_is_f32 */ true)
+    }
+
+    /// Shared body of the two `cublas_matmul_bf16*` variants. The output
+    /// data type is the only thing that varies — both compute via the same
+    /// fp32 accumulator and tensor-core algo selection.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    fn cublas_gemm_ex_async_inner(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        m: u32,
+        n: u32,
+        k: u32,
+        c_is_f32: bool,
+    ) -> Result<()> {
+        use cudarc::cublas::sys;
+        use std::ffi::c_void;
+
+        let c_type = if c_is_f32 {
+            sys::cudaDataType_t::CUDA_R_32F
+        } else {
+            sys::cudaDataType_t::CUDA_R_16BF
+        };
+
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            let blas = self
+                .blas
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cublas"))?;
+            let (a_ptr, _a_guard) = a.inner.device_ptr(&self.stream);
+            let (b_ptr, _b_guard) = b.inner.device_ptr(&self.stream);
+            let (c_ptr, _c_guard) = c.inner.device_ptr_mut(&self.stream);
+
+            let alpha: f32 = 1.0;
+            let beta: f32 = 0.0;
+
+            cudarc::cublas::result::gemm_ex(
+                *blas.handle(),
+                cublasOperation_t::CUBLAS_OP_N,
+                cublasOperation_t::CUBLAS_OP_N,
+                n as i32,
+                m as i32,
+                k as i32,
+                std::ptr::from_ref(&alpha).cast::<c_void>(),
+                b_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                n as i32,
+                a_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                k as i32,
+                std::ptr::from_ref(&beta).cast::<c_void>(),
+                c_ptr as *mut c_void,
+                c_type,
+                n as i32,
+                sys::cublasComputeType_t::CUBLAS_COMPUTE_32F,
+                sys::cublasGemmAlgo_t::CUBLAS_GEMM_DEFAULT,
+            )
+            .map_err(|e| backend_err(BackendOp::CuBlas, e))?;
+        }
         Ok(())
     }
 
@@ -225,8 +367,9 @@ impl Backend for CudaBackend {
             .name()
             .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?;
         let device_memory =
-            ctx.total_mem()
-                .map_err(|e| backend_err(BackendOp::DeviceQuery, e))? as u64;
+            unsafe { cudarc::driver::result::device::total_mem(ctx.cu_device()) }
+                .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?
+                as u64;
 
         let stream = ctx.default_stream();
         let blas = CudaBlas::new(stream.clone()).map_err(|e| backend_err(BackendOp::CuBlas, e))?;
@@ -258,6 +401,23 @@ impl Backend for CudaBackend {
             .stream
             .alloc_zeros::<u8>(size as usize)
             .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
+        Ok(CudaBuffer {
+            inner,
+            size,
+            stream: Arc::clone(&self.stream),
+        })
+    }
+
+    fn alloc_uninit(&self, size: u64) -> Result<Self::Buffer> {
+        // SAFETY: cudarc's `Stream::alloc` returns a CudaSlice<u8> whose
+        // contents are undefined. That's exactly the contract of
+        // alloc_uninit — caller is responsible for fully overwriting
+        // before any read.
+        let inner = unsafe {
+            self.stream
+                .alloc::<u8>(size as usize)
+                .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?
+        };
         Ok(CudaBuffer {
             inner,
             size,
@@ -319,7 +479,7 @@ impl Backend for CudaBackend {
             .alloc_zeros::<u8>(size as usize)
             .map_err(|e| backend_err(BackendOp::CreateBuffer, e))?;
         self.stream
-            .memcpy_dtod(&mut dst, &src.inner, size as usize)
+            .memcpy_dtod(&src.inner, &mut dst)
             .map_err(|e| backend_err(BackendOp::CopyBuffer, e))?;
         Ok(CudaBuffer {
             inner: dst,
@@ -327,15 +487,34 @@ impl Backend for CudaBackend {
             stream: Arc::clone(&self.stream),
         })
     }
+
+    fn synchronize(&self) -> Result<()> {
+        // Drain every async dispatch issued on this stream. Needed any time
+        // the host needs to observe completion timing (benchmarks) or state
+        // through a path that doesn't already sync (`Buffer::download` does
+        // sync internally; the async dispatch helpers do not).
+        self.stream
+            .synchronize()
+            .map_err(|e| backend_err(BackendOp::StreamSync, e))
+    }
 }
 
 // ── Buffer operations ──
 
 impl BackendBufferOps for CudaBuffer {
     fn read_back(&self) -> Result<Vec<u8>> {
-        self.stream
+        // cudarc's clone_dtoh issues a stream-ordered async memcpy to a
+        // plain Vec<u8>, whose SyncOnDrop drops to a no-op — the host data
+        // is not guaranteed visible on return. Sync explicitly so callers
+        // observe the result of any prior async dispatches on this stream.
+        let out = self
+            .stream
             .clone_dtoh(&self.inner)
-            .map_err(|e| backend_err(BackendOp::CopyBuffer, e))
+            .map_err(|e| backend_err(BackendOp::CopyBuffer, e))?;
+        self.stream
+            .synchronize()
+            .map_err(|e| backend_err(BackendOp::StreamSync, e))?;
+        Ok(out)
     }
 
     fn byte_size(&self) -> u64 {
@@ -343,10 +522,59 @@ impl BackendBufferOps for CudaBuffer {
     }
 }
 
+// Stream-bound kernel launch shared by sync, async, and batched dispatch.
+// Queues the kernel on `stream` without synchronizing — callers that need
+// host-visible state must sync the stream themselves (or rely on the
+// implicit sync inside `Buffer::download`).
+fn launch_on_stream(
+    stream: &CudaStream,
+    kernel: &CudaKernel,
+    buffers: &[&CudaBuffer],
+    workgroups: [u32; 3],
+    push_constants: Option<&[u8]>,
+) -> Result<()> {
+    let config = LaunchConfig {
+        grid_dim: (workgroups[0], workgroups[1], workgroups[2]),
+        block_dim: kernel.block_dim,
+        shared_mem_bytes: 0,
+    };
+
+    // Push constants are passed as individual u32 kernel args; collect
+    // them up front so they outlive the launch builder.
+    let pc_values: Vec<u32> = push_constants
+        .map(|pc| {
+            pc.chunks_exact(4)
+                .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    unsafe {
+        let mut builder = stream.launch_builder(&kernel.function);
+        for buf in buffers {
+            builder.arg(&buf.inner);
+        }
+        for val in &pc_values {
+            builder.arg(val);
+        }
+        builder
+            .launch(config)
+            .map_err(|e| backend_err(BackendOp::LaunchKernel, e))?;
+    }
+
+    Ok(())
+}
+
 // ── Batch dispatch ──
 
 impl CudaBatch {
     /// Record a kernel dispatch into the batch stream.
+    ///
+    /// `&mut self` is kept for parity with the Vulkan batch API (which
+    /// records into a command buffer and genuinely needs unique access).
+    /// Records on a CUDA stream are stream-ordered without exclusive access,
+    /// so the borrow is conservative on this backend.
+    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn record_dispatch(
         &mut self,
         kernel: &CudaKernel,
@@ -354,37 +582,7 @@ impl CudaBatch {
         workgroups: [u32; 3],
         push_constants: Option<&[u8]>,
     ) -> Result<()> {
-        let config = LaunchConfig {
-            grid_dim: (workgroups[0], workgroups[1], workgroups[2]),
-            block_dim: kernel.block_dim,
-            shared_mem_bytes: 0,
-        };
-
-        let pc_values: Vec<u32> = push_constants
-            .map(|pc| {
-                pc.chunks_exact(4)
-                    .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        unsafe {
-            let mut builder = self.stream.launch_builder(&kernel.function);
-
-            for buf in buffers {
-                builder.arg(&buf.inner);
-            }
-
-            for val in &pc_values {
-                builder.arg(val);
-            }
-
-            builder
-                .launch(config)
-                .map_err(|e| backend_err(BackendOp::LaunchKernel, e))?;
-        }
-
-        Ok(())
+        launch_on_stream(&self.stream, kernel, buffers, workgroups, push_constants)
     }
 
     /// No-op on CUDA — kernel launches on the same stream are serialized.

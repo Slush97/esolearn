@@ -16,6 +16,10 @@ readme = "README.md"
 default = ["vulkan"]
 vulkan = ["dep:ash", "dep:gpu-allocator"]
 cuda = ["dep:cudarc"]
+# Mixed-precision matmul (bf16 in / fp32 accumulate) via cuBLAS GemmEx.
+# Note: cudarc gates *both* fp16 and bf16 behind its `f16` feature flag —
+# the name is historical; enabling it brings in `half::bf16` too.
+bf16 = ["cuda", "cudarc/f16", "dep:half"]
 bench-wgpu = ["dep:wgpu"]
 # metal = []  # future
 
@@ -26,6 +30,9 @@ gpu-allocator = { version = "0.27", optional = true, default-features = false, f
 
 # CUDA backend
 cudarc = { version = "0.19", optional = true, features = ["cublas", "nvrtc", "cuda-version-from-build-system"] }
+
+# Mixed-precision matmul element types (gated behind the `bf16` feature)
+half = { version = "2", optional = true, features = ["bytemuck"] }
 
 # Shader compilation (WGSL → SPIR-V)
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }
@@ -41,6 +48,7 @@ wgpu = { version = "24", optional = true }
 
 [dev-dependencies]
 pollster = "0.4"
+rand = "0.9"
 
 [[example]]
 name = "bench_wgpu_compare"

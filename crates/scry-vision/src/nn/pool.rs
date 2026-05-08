@@ -28,39 +28,18 @@ impl AdaptiveAvgPool2d {
     }
 
     /// Forward pass: `[C, H, W]` → `[C, output_h, output_w]`.
+    ///
+    /// Backends with on-device adaptive avg pool kernels (e.g. `ScryGpuBackend`
+    /// on CUDA) keep the result GPU-resident.
     pub fn forward<B: MathBackend>(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let c = dims[0];
         let h_in = dims[1];
         let w_in = dims[2];
 
-        let input_vec = input.to_vec();
-        let mut output = vec![0.0f32; c * self.output_h * self.output_w];
-
-        for ch in 0..c {
-            let ch_offset = ch * h_in * w_in;
-            let out_ch_offset = ch * self.output_h * self.output_w;
-
-            for oh in 0..self.output_h {
-                let h_start = oh * h_in / self.output_h;
-                let h_end = (oh + 1) * h_in / self.output_h;
-                for ow in 0..self.output_w {
-                    let w_start = ow * w_in / self.output_w;
-                    let w_end = (ow + 1) * w_in / self.output_w;
-
-                    let mut sum = 0.0f32;
-                    let count = (h_end - h_start) * (w_end - w_start);
-                    for h in h_start..h_end {
-                        for w in w_start..w_end {
-                            sum += input_vec[ch_offset + h * w_in + w];
-                        }
-                    }
-                    output[out_ch_offset + oh * self.output_w + ow] = sum / count as f32;
-                }
-            }
-        }
-
-        Tensor::from_vec(output, Shape::new(&[c, self.output_h, self.output_w]))
+        let out_storage =
+            B::adaptive_avg_pool_2d(&input.data, c, h_in, w_in, self.output_h, self.output_w);
+        Tensor::<B>::new(out_storage, Shape::new(&[c, self.output_h, self.output_w]))
     }
 }
 
@@ -86,6 +65,9 @@ impl MaxPool2d {
     }
 
     /// Forward pass: `[C, H, W]` → `[C, H_out, W_out]`.
+    ///
+    /// Backends with on-device max-pool kernels (e.g. `ScryGpuBackend` on CUDA)
+    /// keep the result GPU-resident.
     pub fn forward<B: MathBackend>(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
         let c = dims[0];
@@ -95,44 +77,16 @@ impl MaxPool2d {
         let h_out = (h_in + 2 * self.padding - self.kernel_size) / self.stride + 1;
         let w_out = (w_in + 2 * self.padding - self.kernel_size) / self.stride + 1;
 
-        let input_vec = input.to_vec();
-        let mut output = vec![f32::NEG_INFINITY; c * h_out * w_out];
-
-        for ch in 0..c {
-            let ch_offset = ch * h_in * w_in;
-            let out_ch_offset = ch * h_out * w_out;
-            for oh in 0..h_out {
-                for ow in 0..w_out {
-                    let mut max_val = f32::NEG_INFINITY;
-                    for kh in 0..self.kernel_size {
-                        for kw in 0..self.kernel_size {
-                            let ih = oh * self.stride + kh;
-                            let iw = ow * self.stride + kw;
-                            if ih >= self.padding
-                                && ih < self.padding + h_in
-                                && iw >= self.padding
-                                && iw < self.padding + w_in
-                            {
-                                let h_idx = ih - self.padding;
-                                let w_idx = iw - self.padding;
-                                let val = input_vec[ch_offset + h_idx * w_in + w_idx];
-                                if val > max_val {
-                                    max_val = val;
-                                }
-                            }
-                        }
-                    }
-                    // If all positions were padding (shouldn't happen in practice),
-                    // use 0.0 instead of -inf
-                    if max_val == f32::NEG_INFINITY {
-                        max_val = 0.0;
-                    }
-                    output[out_ch_offset + oh * w_out + ow] = max_val;
-                }
-            }
-        }
-
-        Tensor::from_vec(output, Shape::new(&[c, h_out, w_out]))
+        let out_storage = B::max_pool_2d(
+            &input.data,
+            c,
+            h_in,
+            w_in,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+        );
+        Tensor::<B>::new(out_storage, Shape::new(&[c, h_out, w_out]))
     }
 }
 

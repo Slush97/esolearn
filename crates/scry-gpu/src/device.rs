@@ -126,7 +126,12 @@ impl Device {
         })
     }
 
-    /// Allocate an uninitialized GPU buffer for `count` elements of type `T`.
+    /// Allocate a GPU buffer for `count` elements of type `T`.
+    ///
+    /// On backends that zero-initialize by default (CUDA), the buffer is
+    /// zero-filled before return. Use [`Self::alloc_uninit`] in tight loops
+    /// where the caller fully overwrites the buffer (matmul output, kernel
+    /// dispatches that write every element).
     pub fn alloc<T: bytemuck::Pod>(&self, count: usize) -> Result<Buffer<T>> {
         let size = count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
             GpuError::AllocationFailed {
@@ -135,6 +140,28 @@ impl Device {
             }
         })? as u64;
         let inner = self.alloc_raw(size)?;
+        Ok(Buffer {
+            inner,
+            len: count,
+            _marker: std::marker::PhantomData,
+        })
+    }
+
+    /// Allocate a GPU buffer with **undefined** contents.
+    ///
+    /// Faster than [`Self::alloc`] on CUDA (skips a `cuMemsetD8Async`
+    /// dispatch). Caller must overwrite every element that will later be
+    /// read — otherwise downstream computation observes garbage. Use this
+    /// only for outputs that the next kernel writes in full (matmul C
+    /// matrix, elementwise kernels with full-coverage thread dispatch).
+    pub fn alloc_uninit<T: bytemuck::Pod>(&self, count: usize) -> Result<Buffer<T>> {
+        let size = count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+            GpuError::AllocationFailed {
+                requested: u64::MAX,
+                device_max: self.memory(),
+            }
+        })? as u64;
+        let inner = self.alloc_uninit_raw(size)?;
         Ok(Buffer {
             inner,
             len: count,
@@ -329,6 +356,23 @@ impl Device {
         }
     }
 
+    /// Block until every previously-issued dispatch has completed.
+    ///
+    /// Async paths ([`Self::run_configured_async`],
+    /// [`Self::cublas_matmul_async`]) elide the per-call host sync to keep
+    /// chained dispatches cheap, but a benchmark needs to wait for the GPU
+    /// to actually finish before stopping the timer. This is the explicit
+    /// drain. On the synchronous Vulkan path it's a no-op since each
+    /// dispatch already waits for its own fence.
+    pub fn synchronize(&self) -> Result<()> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => b.synchronize(),
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(b) => b.synchronize(),
+        }
+    }
+
     /// Device name (for diagnostics / logging).
     pub fn name(&self) -> &str {
         match &self.inner {
@@ -428,6 +472,21 @@ impl Device {
             #[cfg(feature = "cuda")]
             DeviceInner::Cuda(b) => {
                 let buf = b.alloc(size)?;
+                Ok(BackendBuffer::Cuda(buf))
+            }
+        }
+    }
+
+    fn alloc_uninit_raw(&self, size: u64) -> Result<BackendBuffer> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => {
+                let buf = b.alloc_uninit(size)?;
+                Ok(BackendBuffer::Vulkan(buf))
+            }
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(b) => {
+                let buf = b.alloc_uninit(size)?;
                 Ok(BackendBuffer::Cuda(buf))
             }
         }
@@ -595,7 +654,9 @@ impl Device {
     /// Dimensions: A is `m×k`, B is `k×n`, C is `m×n`.
     ///
     /// This is the recommended matmul path on CUDA — it reaches 80%+ peak
-    /// throughput without any custom kernels.
+    /// throughput without any custom kernels. Blocks until the GPU finishes;
+    /// for chained GPU-resident pipelines, prefer
+    /// [`Self::cublas_matmul_async`].
     #[allow(clippy::many_single_char_names)]
     pub fn cublas_matmul(
         &self,
@@ -606,31 +667,199 @@ impl Device {
         n: u32,
         k: u32,
     ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Run cuBLAS SGEMM without synchronizing.
+    ///
+    /// Queues the SGEMM on the CUDA stream and returns once it has been
+    /// submitted. Subsequent stream work is stream-ordered against it
+    /// (kernels, further matmuls, downloads), so chained operators see
+    /// consistent state. Use this in tight pipelines where the per-call
+    /// sync of [`Self::cublas_matmul`] would dominate latency.
+    ///
+    /// Host-visible reads (via [`Buffer::download`](crate::Buffer::download))
+    /// implicitly sync, so no explicit fence is needed at storage boundaries.
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_async(
+        &self,
+        a: &Buffer<f32>,
+        b: &Buffer<f32>,
+        c: &mut Buffer<f32>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul_async(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Run cuBLAS GemmEx with bf16 inputs/outputs and fp32 accumulate.
+    ///
+    /// Row-major `C = A × B`, A is `m×k`, B is `k×n`, C is `m×n`. Mirrors
+    /// [`Self::cublas_matmul`] but routes through `cublasGemmEx` so the driver
+    /// can pick a tensor-core path. Blocks until the GPU finishes; for chained
+    /// pipelines prefer [`Self::cublas_matmul_bf16_async`].
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<half::bf16>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul_bf16(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Run cuBLAS GemmEx (bf16 / fp32-accumulate) without synchronizing.
+    ///
+    /// Stream-ordered against subsequent kernels and matmuls — chained
+    /// operators see consistent state without a host fence.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names)]
+    pub fn cublas_matmul_bf16_async(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<half::bf16>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let (a_buf, b_buf, c_buf) = unwrap_cuda_matmul_buffers(a, b, c)?;
+        backend.cublas_matmul_bf16_async(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Run cuBLAS GemmEx with bf16 inputs and an `f32` output, no sync.
+    ///
+    /// Same compute path as [`Self::cublas_matmul_bf16_async`] (tensor cores,
+    /// fp32 accumulate) but writes the fp32 accumulator straight to `c`,
+    /// skipping the cast-back-to-fp32 HBM pass that pure-bf16 callers pay.
+    /// Use this when downstream operators want fp32 anyway.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::many_single_char_names, clippy::type_complexity)]
+    pub fn cublas_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<f32>,
+        m: u32,
+        n: u32,
+        k: u32,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let BackendBuffer::Cuda(a_buf) = &a.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(b_buf) = &b.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(c_buf) = &mut c.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        backend.cublas_matmul_bf16_in_f32_out_async(a_buf, b_buf, c_buf, m, n, k)
+    }
+
+    /// Dispatch a precompiled CUDA kernel without synchronizing.
+    ///
+    /// CUDA-only counterpart to [`Self::run_configured`] that skips the
+    /// per-call `stream.synchronize()` so a chain of dispatches incurs only
+    /// one host-side sync (at the next [`Buffer::download`](crate::Buffer::download)
+    /// or explicit boundary).
+    ///
+    /// Returns [`GpuError::BackendUnavailable`] on non-CUDA backends or if
+    /// the kernel was not compiled for CUDA.
+    pub fn run_configured_async(
+        &self,
+        kernel: &Kernel,
+        buffers: &[&dyn GpuBuf],
+        workgroups: [u32; 3],
+        push_constants: Option<&[u8]>,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        #[allow(irrefutable_let_patterns)]
+        let BackendKernel::Cuda(cuda_kernel) = &kernel.inner
+        else {
+            return Err(GpuError::BackendUnavailable(
+                "kernel was not compiled for CUDA".into(),
+            ));
+        };
+
+        let backend_bufs: Vec<&BackendBuffer> = buffers.iter().map(|b| b.raw()).collect();
+        if kernel.binding_count != backend_bufs.len() {
+            return Err(GpuError::BindingMismatch {
+                expected: kernel.binding_count,
+                got: backend_bufs.len(),
+            });
+        }
+
+        let cuda_bufs: Vec<&crate::backend::cuda::CudaBuffer> = backend_bufs
+            .iter()
+            .map(|buf| match buf {
+                BackendBuffer::Cuda(cb) => Ok(cb),
+                #[cfg(feature = "vulkan")]
+                _ => Err(GpuError::BackendUnavailable(
+                    "buffer/backend mismatch: expected CUDA buffer".into(),
+                )),
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        backend.dispatch_cuda_async(cuda_kernel, &cuda_bufs, workgroups, push_constants)
+    }
+
+    fn cuda_backend(&self) -> Result<&crate::backend::cuda::CudaBackend> {
         match &self.inner {
-            DeviceInner::Cuda(backend) => {
-                let BackendBuffer::Cuda(a_buf) = &a.inner else {
-                    return Err(GpuError::BackendUnavailable(
-                        "buffer not from CUDA backend".into(),
-                    ));
-                };
-                let BackendBuffer::Cuda(b_buf) = &b.inner else {
-                    return Err(GpuError::BackendUnavailable(
-                        "buffer not from CUDA backend".into(),
-                    ));
-                };
-                let BackendBuffer::Cuda(c_buf) = &mut c.inner else {
-                    return Err(GpuError::BackendUnavailable(
-                        "buffer not from CUDA backend".into(),
-                    ));
-                };
-                backend.cublas_matmul(a_buf, b_buf, c_buf, m, n, k)
-            }
+            DeviceInner::Cuda(b) => Ok(b),
             #[cfg(feature = "vulkan")]
             _ => Err(GpuError::BackendUnavailable(
-                "cublas_matmul requires CUDA backend".into(),
+                "operation requires CUDA backend".into(),
             )),
         }
     }
+}
+
+#[cfg(feature = "cuda")]
+#[allow(clippy::type_complexity, irrefutable_let_patterns)]
+fn unwrap_cuda_matmul_buffers<'a, T: bytemuck::Pod>(
+    a: &'a Buffer<T>,
+    b: &'a Buffer<T>,
+    c: &'a mut Buffer<T>,
+) -> Result<(
+    &'a crate::backend::cuda::CudaBuffer,
+    &'a crate::backend::cuda::CudaBuffer,
+    &'a mut crate::backend::cuda::CudaBuffer,
+)> {
+    let BackendBuffer::Cuda(a_buf) = &a.inner else {
+        return Err(GpuError::BackendUnavailable(
+            "buffer not from CUDA backend".into(),
+        ));
+    };
+    let BackendBuffer::Cuda(b_buf) = &b.inner else {
+        return Err(GpuError::BackendUnavailable(
+            "buffer not from CUDA backend".into(),
+        ));
+    };
+    let BackendBuffer::Cuda(c_buf) = &mut c.inner else {
+        return Err(GpuError::BackendUnavailable(
+            "buffer not from CUDA backend".into(),
+        ));
+    };
+    Ok((a_buf, b_buf, c_buf))
 }
 
 impl std::fmt::Debug for Device {

@@ -26,8 +26,24 @@ pub trait Backend: Sized {
     /// Allocate a GPU buffer and upload `data` into it.
     fn upload(&self, data: &[u8]) -> Result<Self::Buffer>;
 
-    /// Allocate an uninitialized GPU buffer of `size` bytes.
+    /// Allocate a GPU buffer of `size` bytes.
+    ///
+    /// On backends that zero-initialize by default (CUDA), this method does
+    /// the zero-fill. Use [`Self::alloc_uninit`] when the caller will
+    /// overwrite the buffer before any read.
     fn alloc(&self, size: u64) -> Result<Self::Buffer>;
+
+    /// Allocate a GPU buffer with **undefined** contents.
+    ///
+    /// Faster than [`Self::alloc`] on backends that would otherwise zero-fill
+    /// (CUDA dispatches a `cuMemsetD8Async` kernel under the default path).
+    /// The caller must overwrite every byte that will subsequently be read;
+    /// otherwise downstream computation observes garbage.
+    ///
+    /// Default implementation falls back to [`Self::alloc`].
+    fn alloc_uninit(&self, size: u64) -> Result<Self::Buffer> {
+        self.alloc(size)
+    }
 
     /// Compile a SPIR-V shader module and dispatch it.
     fn dispatch(
@@ -73,6 +89,17 @@ pub trait Backend: Sized {
     /// Allocates a new buffer and copies `size` bytes from `src` into it.
     /// The copy is synchronous (blocks until complete).
     fn copy_buffer(&self, src: &Self::Buffer, size: u64) -> Result<Self::Buffer>;
+
+    /// Block until all previously-issued work on the backend's stream/queue
+    /// has completed.
+    ///
+    /// Needed by benchmarks (the host needs to wait for async dispatches to
+    /// finish before stopping the timer) and any caller that observes GPU
+    /// state through a non-`Buffer::download` path. The default impl is a
+    /// no-op for backends whose dispatch path is already synchronous.
+    fn synchronize(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Operations available on a backend buffer.
