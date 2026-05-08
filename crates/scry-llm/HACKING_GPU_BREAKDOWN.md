@@ -87,6 +87,103 @@ Findings vs. breakdown predictions:
 
 The POC also serves as the API smoke test for the port: `ScryGpuBackend::matmul_then_gelu_batched_for_bench` is the prototype, and produces numerically equivalent output to the unbatched path (1e-3 relative tolerance).
 
+## Competitive comparison (added after POC)
+
+How does our path compare to alternatives on the **same hardware** (RTX 5070 Ti)? Three reference points:
+
+- **scry-gpu cuBLAS** (in-Rust, via `scry-gpu/src/backend/cuda.rs`) — `bench_cuda_compare` example.
+- **PyTorch 2.11 + CUDA 13** — standalone Python script (see below).
+- **Our paths** — gpu_breakdown bench (WGSL chain) and gpu_batched_poc (WGSL batched).
+
+### End-to-end `C = GELU(A @ B)` chain median
+
+| size | scry-llm WGSL chain | scry-llm batched POC | PyTorch chain |
+|---|---:|---:|---:|
+| small  (128/256/128) | ~74 µs | 39.46 µs | **12.26 µs** |
+| medium (256/512/256) | ~80 µs | 53.61 µs | **14.47 µs** |
+| large  (1024³) | ~238 µs | 199.79 µs | **90.53 µs** |
+
+Gap to PyTorch shrinks with size (6× → 5.5× → 2.6×) — the same overhead-vs-compute curve we observed internally.
+
+### Matmul TFLOPS at 1024³
+
+| backend | TFLOPS | % of 55 TF peak |
+|---|---:|---:|
+| scry-llm WGSL coarse 4×4 | 10.69 | 19% |
+| scry-gpu cuBLAS (in-Rust) | 24.54 | 45% |
+| PyTorch matmul | 24.76 | 45% |
+
+PyTorch matmul ≡ scry-gpu cuBLAS within 1% — confirms PyTorch is just wrapping cuBLAS underneath. **The kernel-quality gap is exactly 2.3× and is independent of substrate, language, or batching.**
+
+### GELU stays flat across sizes
+
+| backend | small | medium | large |
+|---|---:|---:|---:|
+| scry-llm WGSL | 27.6 µs | 26.6 µs | 37.2 µs |
+| PyTorch | 6.5 µs | 6.5 µs | 9.2 µs |
+
+PyTorch's elementwise dispatch + execution is consistently 4–5× faster. The existing `bench_cuda_compare` shows 3–6× CUDA-vs-Vulkan throughput on memory-bound kernels at all sizes, so this is largely a substrate gap.
+
+### Per-launch overhead estimates
+
+PyTorch's matmul at 1024³ (compute-dominated): 86.7 µs ≈ scry-gpu cuBLAS 87.5 µs — they agree.
+PyTorch's matmul at small (4M FMAs): 11.4 µs. Compute floor at 24 TFLOPS would be ~0.17 µs, so ~11 µs is launch overhead. Comparable to our ~17 µs Vulkan fence wait — within a factor of 2.
+
+### Sources of the gap (large size, decomposed)
+
+```
+scry-llm WGSL chain:        ~238 µs
+  scry-llm WGSL coarse 4×4 matmul:                     ~201 µs
+    (cuBLAS would be):                                  ~87 µs   (-114 µs)
+  scry-llm WGSL gelu:                                   ~37 µs
+    (PyTorch elementwise would be):                     ~9 µs    (-28 µs)
+
+scry-llm batched POC:       ~200 µs   (-38 µs from one fence saved)
+PyTorch chain:              ~90 µs    (mostly cuBLAS + tiny GELU + ~10 µs overlap)
+```
+
+If we had cuBLAS matmul + a competitive GELU shader, even *without* batching, our chain at 1024³ would land near 100–120 µs — close to PyTorch territory. Batching gets us another 10–20%.
+
+### Path forward, ranked by leverage
+
+1. **Plumb cuBLAS into the persistent matmul path on CUDA.** Memory entry already noted "cuBLAS keeps legacy materialize-and-download until CUDA transpose/GELU shaders are wired" — that's the gating work. Closes ~80% of the gap on NVIDIA hardware. **Highest single uplift available.**
+2. **Better WGSL elementwise kernels (GELU first, then softmax/layernorm when added).** Closes the 4–5× elementwise gap that hurts both Vulkan users and the GELU portion of our chain. Less work than fixing matmul because the kernels are simpler (vec4 loads, larger workgroups).
+3. **Batched dispatch port** (validated by gpu_batched_poc, 22–29% wins). Biggest leverage on Vulkan platforms; marginal on CUDA where launch overhead is already low.
+
+### Reproducing PyTorch numbers
+
+Saved as `/tmp/torch-bench/bench.py` during this session; equivalent script:
+
+```python
+import time, torch
+assert torch.cuda.is_available()
+dev = torch.device("cuda")
+SHAPES = [(128,256,128), (256,512,256), (1024,1024,1024)]
+for m,k,n in SHAPES:
+    a = torch.randn(m,k,device=dev,dtype=torch.float32)
+    b = torch.randn(k,n,device=dev,dtype=torch.float32)
+    for _ in range(10):  # warmup
+        c = a @ b; g = torch.nn.functional.gelu(c); torch.cuda.synchronize()
+    times = []
+    for _ in range(100):
+        torch.cuda.synchronize(); t = time.perf_counter()
+        c = a @ b; g = torch.nn.functional.gelu(c)
+        torch.cuda.synchronize(); times.append(time.perf_counter() - t)
+    times.sort()
+    print(f"{m}x{k}x{n}: median {times[50]*1e6:.2f} µs")
+```
+
+Setup: `uv venv && source .venv/bin/activate && uv pip install torch && python bench.py`.
+
+### Reproducing scry-gpu cuBLAS numbers
+
+```bash
+CUDARC_CUDA_VERSION=13010 cargo run -p scry-gpu \
+  --example bench_cuda_compare --features "cuda vulkan" --release
+```
+
+(Env var is needed because `cudarc 0.19` is pinned to `cuda-13010` features but local CUDA is 13.2.)
+
 ## Out of scope here
 
 - **Splitting per-op time into "kernel compute" vs "fence wait" vs "command-buffer record"** would need GPU timestamp queries (`vkCmdWriteTimestamp`, `vkCmdResetQueryPool`). That's a scry-gpu-side instrumentation effort, not a scry-llm bench. The compute-floor argument above pins down compute time well enough to justify the next investment without it.
