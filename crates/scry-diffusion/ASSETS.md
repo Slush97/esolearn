@@ -25,21 +25,30 @@ crates/scry-diffusion/.assets/sd-1-5/
 
 ### Download
 
-Requires `huggingface-cli` (ships with the `huggingface_hub` Python
-package). The repo is gated, so you may need to `huggingface-cli login`
-first and accept the
+Requires the `hf` CLI (ships with the `huggingface_hub` Python package
+1.14+; the older `huggingface-cli` binary still works on 1.13 but has
+been removed in 1.14). The repo is gated, so you may need to
+`hf auth login` first and accept the
 [CreativeML Open RAIL-M license](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 on the model page.
 
 ```bash
-# From the repo root.
+# From the repo root. Two passes — the new `hf` CLI's --include doesn't
+# expand globs the way the old `huggingface-cli` did, so we list the
+# tokenizer files explicitly. The bulk safetensors fetch is in pass 1
+# (it does still understand the per-file --include forms below).
 mkdir -p crates/scry-diffusion/.assets/sd-1-5
-huggingface-cli download runwayml/stable-diffusion-v1-5 \
+
+hf download runwayml/stable-diffusion-v1-5 \
     --local-dir crates/scry-diffusion/.assets/sd-1-5 \
-    --include 'tokenizer/*' \
-              'text_encoder/model.safetensors' \
+    --include 'text_encoder/model.safetensors' \
               'unet/diffusion_pytorch_model.safetensors' \
               'vae/diffusion_pytorch_model.safetensors'
+
+hf download runwayml/stable-diffusion-v1-5 tokenizer/vocab.json \
+    --local-dir crates/scry-diffusion/.assets/sd-1-5
+hf download runwayml/stable-diffusion-v1-5 tokenizer/merges.txt \
+    --local-dir crates/scry-diffusion/.assets/sd-1-5
 ```
 
 The full repo also ships `feature_extractor/`, `safety_checker/`,
