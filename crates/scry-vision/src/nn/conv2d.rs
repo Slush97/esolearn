@@ -190,16 +190,76 @@ impl<B: MathBackend> Conv2d<B> {
         self.kernel_h == 3 && self.kernel_w == 3 && self.stride == 1 && self.padding == 1
     }
 
+    /// Whether this conv is a "pointwise" 1×1 stride-1 padding-0 — the case
+    /// where im2col is a no-op rearrangement and the convolution is exactly
+    /// a matmul on the flattened input. Bottleneck blocks in ResNet-50 are
+    /// the dominant call site (32 of 49 conv2d calls, 35% of GPU wall time
+    /// pre-fast-path).
+    fn is_pointwise_1x1(&self) -> bool {
+        self.kernel_h == 1 && self.kernel_w == 1 && self.stride == 1 && self.padding == 0
+    }
+
     /// Forward pass: `[C_in, H, W]` → `[C_out, H_out, W_out]`.
     ///
-    /// Routing follows `self.strategy`:
-    /// - [`Conv2dStrategy::Auto`] → Winograd for 3×3/stride-1/pad-1, im2col otherwise.
-    /// - [`Conv2dStrategy::Im2col`] → always im2col, even for Winograd-eligible kernels.
+    /// Routing:
+    /// - 1×1 stride-1 padding-0 → [`forward_1x1`] (always; backend-agnostic
+    ///   identity equivalence to matmul, no algorithmic choice).
+    /// - else [`Conv2dStrategy::Auto`] + 3×3-s1-p1 → [`forward_winograd`].
+    /// - else → [`forward_im2col`].
+    ///
+    /// [`forward_1x1`]: Self::forward_1x1
+    /// [`forward_winograd`]: Self::forward_winograd
+    /// [`forward_im2col`]: Self::forward_im2col
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
+        if self.is_pointwise_1x1() {
+            return self.forward_1x1(input);
+        }
         match self.strategy {
             Conv2dStrategy::Auto if self.use_winograd() => self.forward_winograd(input),
             _ => self.forward_im2col(input),
         }
+    }
+
+    /// 1×1 stride-1 padding-0 fast path.
+    ///
+    /// `im2col` for this kernel shape is a literal copy of the input — the
+    /// `[C_in*1*1, H*W]` lowered matrix has exactly the same row-major bytes
+    /// as the `[C_in, H, W]` input. We can skip the lowering kernel and call
+    /// `B::matmul` directly with the flat input as the right-hand operand.
+    /// The bias add is identical to [`forward_im2col`]: a `[C_out, 1]`
+    /// row-bias broadcast that GPU backends route to `add_row_bias`.
+    pub fn forward_1x1(&self, input: &Tensor<B>) -> Tensor<B> {
+        let dims = input.shape.dims();
+        let (c_in, h_in, w_in) = (dims[0], dims[1], dims[2]);
+        debug_assert_eq!(c_in, self.in_channels);
+        debug_assert_eq!(self.kernel_h, 1);
+        debug_assert_eq!(self.kernel_w, 1);
+        debug_assert_eq!(self.stride, 1);
+        debug_assert_eq!(self.padding, 0);
+        let spatial = h_in * w_in;
+
+        // Weight `[C_out, C_in, 1, 1]` shares its row-major layout with
+        // `[C_out, C_in]`; input `[C_in, H, W]` shares with `[C_in, H*W]`.
+        let out_data = B::matmul(
+            &self.weight.data,
+            &input.data,
+            self.out_channels,
+            self.in_channels,
+            spatial,
+            false,
+            false,
+        );
+
+        let out_shape = Shape::new(&[self.out_channels, spatial]);
+        let result = B::add(
+            &out_data,
+            &self.bias.data,
+            &out_shape,
+            &Shape::new(&[self.out_channels, 1]),
+            &out_shape,
+        );
+
+        Tensor::<B>::new(result, Shape::new(&[self.out_channels, h_in, w_in]))
     }
 
     /// Im2col + matmul convolution (general case, also used as test reference).
@@ -650,6 +710,62 @@ mod tests {
             &im2col_out.to_vec(),
             1e-4,
             "auto vs im2col",
+        );
+    }
+
+    // ── 1×1 fast path tests ──
+
+    /// Helper: 1×1 stride-1 padding-0 conv with deterministic weights.
+    fn random_conv_1x1(in_ch: usize, out_ch: usize) -> Conv2d<CpuBackend> {
+        let n = out_ch * in_ch;
+        let w: Vec<f32> = (0..n).map(|i| (i as f32 * 0.5 + 0.1).sin()).collect();
+        let b: Vec<f32> = (0..out_ch).map(|i| (i as f32 * 0.17).cos() * 0.3).collect();
+        let mut conv = Conv2d::<CpuBackend>::square(in_ch, out_ch, 1, 1, 0);
+        conv.weight = Tensor::from_vec(w, Shape::new(&[out_ch, in_ch, 1, 1]));
+        conv.bias = Tensor::from_vec(b, Shape::new(&[out_ch]));
+        conv
+    }
+
+    #[test]
+    fn is_pointwise_1x1_only_for_kernel1_stride1_pad0() {
+        // The predicate gates the fast path; getting any of the four
+        // conditions wrong would either skip a valid case or wrongly take
+        // the fast path on a strided/padded conv.
+        assert!(Conv2d::<CpuBackend>::square(64, 256, 1, 1, 0).is_pointwise_1x1());
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 2, 0).is_pointwise_1x1()); // stride-2 downsample
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 3, 1, 1).is_pointwise_1x1()); // 3×3
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 1, 1).is_pointwise_1x1()); // pad-1 (rare but possible)
+    }
+
+    #[test]
+    fn forward_1x1_matches_im2col_reference() {
+        // The pointwise fast path must produce bit-equivalent results to
+        // the im2col reference (modulo any matmul reordering — same matmul
+        // shape both ways, so we expect exact equality on CPU).
+        // Use a shape from R50 stage 3: 256→1024 channels at 14×14.
+        let conv = random_conv_1x1(256, 1024);
+        let input = random_input(256, 14, 14);
+        let fast = conv.forward_1x1(&input);
+        let reference = conv.forward_im2col(&input);
+        assert_eq!(fast.shape.dims(), reference.shape.dims());
+        assert_close(&fast.to_vec(), &reference.to_vec(), 1e-5, "1x1 fast vs im2col");
+    }
+
+    #[test]
+    fn forward_dispatches_pointwise_1x1_to_fast_path() {
+        // `forward()` must route through `forward_1x1` for pointwise convs;
+        // numerical equivalence with the im2col reference confirms it took
+        // the right path (any wrong dispatch would still match, but having
+        // both this test and the predicate test pins down the contract).
+        let conv = random_conv_1x1(64, 256);
+        let input = random_input(64, 28, 28);
+        let dispatched = conv.forward(&input);
+        let reference = conv.forward_im2col(&input);
+        assert_close(
+            &dispatched.to_vec(),
+            &reference.to_vec(),
+            1e-5,
+            "forward() dispatch vs im2col",
         );
     }
 }

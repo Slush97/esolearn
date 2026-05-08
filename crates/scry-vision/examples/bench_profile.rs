@@ -75,11 +75,16 @@ impl Profile {
 }
 
 fn conv_bucket(c: &Conv2d<B>) -> &'static str {
+    // Note: bucket names reflect *kernel shape*, not the algorithm taken at
+    // runtime. With `PREFERS_IM2COL_OVER_WINOGRAD = true` on `ScryGpuBackend`,
+    // `conv_winograd_3x3s1` actually runs im2col + matmul. The 1×1-s1-p0
+    // bucket runs through the pointwise fast path (`forward_1x1`), which
+    // skips im2col entirely.
     if c.kernel_h == 3 && c.kernel_w == 3 && c.stride == 1 && c.padding == 1 {
         "conv_winograd_3x3s1"
     } else if c.kernel_h == 1 && c.kernel_w == 1 {
-        if c.stride == 1 {
-            "conv_im2col_1x1s1"
+        if c.stride == 1 && c.padding == 0 {
+            "conv_pointwise_1x1s1"
         } else {
             "conv_im2col_1x1s2_ds"
         }
