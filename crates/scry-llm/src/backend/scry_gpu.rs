@@ -1186,6 +1186,17 @@ impl DeviceBackend for ScryGpuBackend {
     fn clone_storage(storage: &ScryGpuStorage) -> ScryGpuStorage {
         storage.clone()
     }
+
+    fn to_device_in_place(storage: &mut ScryGpuStorage) {
+        // Already on device — nothing to do.
+        if matches!(storage, ScryGpuStorage::Gpu { .. }) {
+            return;
+        }
+        // GPU unavailable: keep the CPU storage so the call stays a soft no-op.
+        if let Ok(gpu) = Self::to_gpu(storage) {
+            *storage = gpu;
+        }
+    }
 }
 
 /// Wrap a CPU result in `ScryGpuStorage::Cpu`.

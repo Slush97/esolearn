@@ -22,6 +22,7 @@ use std::time::Instant;
 
 use scry_llm::backend::cpu::CpuBackend;
 use scry_llm::backend::scry_gpu::ScryGpuBackend;
+use scry_llm::backend::DeviceBackend;
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 use scry_vision::models::{ResNet, ResNetConfig};
@@ -60,14 +61,30 @@ fn run_resnet18(input: &[f32]) {
     let cpu_ms = time_ms(1, 3, || {
         let _ = std::hint::black_box(cpu_model.forward(&cpu_input));
     });
-    println!("  CpuBackend     : {cpu_ms:7.1} ms/image");
+    println!("  CpuBackend                 : {cpu_ms:7.1} ms/image");
 
-    let gpu_model = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet18(1000));
+    // Without weight pre-upload: every forward pays ~50 host→device uploads.
+    let gpu_model_lazy = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet18(1000));
     let gpu_input = Tensor::<ScryGpuBackend>::from_vec(input.to_vec(), Shape::new(&[3, 224, 224]));
-    let gpu_ms = time_ms(2, 5, || {
-        let _ = std::hint::black_box(gpu_model.forward(&gpu_input));
+    let gpu_lazy_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
     });
-    println!("  ScryGpuBackend : {gpu_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_ms);
+    println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
+
+    // With weight + input pre-upload: weights live in ScryGpuStorage::Gpu for
+    // every forward, so as_gpu_buffer hits the Arc fast path instead of
+    // re-uploading.
+    let mut gpu_model = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet18(1000));
+    gpu_model.to_device();
+    let mut input_storage = ScryGpuBackend::from_vec(input.to_vec(), &Shape::new(&[3, 224, 224]));
+    ScryGpuBackend::to_device_in_place(&mut input_storage);
+    let gpu_input_resident =
+        Tensor::<ScryGpuBackend>::new(input_storage, Shape::new(&[3, 224, 224]));
+    let gpu_resident_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
+    });
+    println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+        cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
 }
 
 fn run_resnet50(input: &[f32]) {
@@ -78,14 +95,26 @@ fn run_resnet50(input: &[f32]) {
     let cpu_ms = time_ms(1, 3, || {
         let _ = std::hint::black_box(cpu_model.forward(&cpu_input));
     });
-    println!("  CpuBackend     : {cpu_ms:7.1} ms/image");
+    println!("  CpuBackend                 : {cpu_ms:7.1} ms/image");
 
-    let gpu_model = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet50(1000));
+    let gpu_model_lazy = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet50(1000));
     let gpu_input = Tensor::<ScryGpuBackend>::from_vec(input.to_vec(), Shape::new(&[3, 224, 224]));
-    let gpu_ms = time_ms(2, 5, || {
-        let _ = std::hint::black_box(gpu_model.forward(&gpu_input));
+    let gpu_lazy_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
     });
-    println!("  ScryGpuBackend : {gpu_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_ms);
+    println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
+
+    let mut gpu_model = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet50(1000));
+    gpu_model.to_device();
+    let mut input_storage = ScryGpuBackend::from_vec(input.to_vec(), &Shape::new(&[3, 224, 224]));
+    ScryGpuBackend::to_device_in_place(&mut input_storage);
+    let gpu_input_resident =
+        Tensor::<ScryGpuBackend>::new(input_storage, Shape::new(&[3, 224, 224]));
+    let gpu_resident_ms = time_ms(2, 5, || {
+        let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
+    });
+    println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+        cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
 }
 
 fn main() {

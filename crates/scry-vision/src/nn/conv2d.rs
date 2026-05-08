@@ -127,6 +127,17 @@ impl<B: MathBackend> Conv2d<B> {
         )
     }
 
+    /// Pre-upload weight and bias to the backend's device-resident form.
+    /// No-op on `CpuBackend`; idempotent on any backend.
+    ///
+    /// The Winograd cache (`winograd_weight`) is left untouched — it's
+    /// rebuilt lazily from `self.weight` on first `forward_winograd` call,
+    /// so uploading the source `weight` is what matters.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+    }
+
     /// Whether this conv qualifies for Winograd F(2×2, 3×3).
     fn use_winograd(&self) -> bool {
         self.kernel_h == 3 && self.kernel_w == 3 && self.stride == 1 && self.padding == 1

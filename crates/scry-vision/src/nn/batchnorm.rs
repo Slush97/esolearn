@@ -43,6 +43,15 @@ impl<B: MathBackend> BatchNorm2d<B> {
         }
     }
 
+    /// Pre-upload all parameter tensors to the backend's device-resident
+    /// form. No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+        B::to_device_in_place(&mut self.running_mean.data);
+        B::to_device_in_place(&mut self.running_var.data);
+    }
+
     /// Forward pass: `[C, H, W]` → `[C, H, W]`.
     ///
     /// Applies `(x - mean) / sqrt(var + eps) * weight + bias` per channel

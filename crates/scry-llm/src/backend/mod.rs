@@ -42,6 +42,20 @@ pub trait DeviceBackend: Sized {
         std::borrow::Cow::Owned(Self::to_vec(storage))
     }
     fn clone_storage(storage: &Self::Storage) -> Self::Storage;
+
+    /// Move a storage cell to the backend's "device-resident" form, in place.
+    ///
+    /// For `CpuBackend` this is a no-op. For `ScryGpuBackend` it uploads a
+    /// CPU-resident `Vec<f32>` to a `Gpu` buffer; subsequent reads via the
+    /// matmul / pool / etc. kernels see the device buffer directly instead
+    /// of paying a fresh upload on every forward pass.
+    ///
+    /// Idempotent: safe to call on an already-device-resident storage.
+    /// Models pre-upload all parameters by walking the parameter tree once
+    /// after construction (e.g. `ResNet::to_device`).
+    fn to_device_in_place(_storage: &mut Self::Storage) {
+        // CPU default: nothing to move.
+    }
 }
 
 /// Math operations trait — all operations needed for forward passes.

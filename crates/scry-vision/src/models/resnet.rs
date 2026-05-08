@@ -61,6 +61,19 @@ impl<B: MathBackend> BasicBlock<B> {
         }
     }
 
+    /// Pre-upload all parameter tensors to the backend's device-resident
+    /// form. Walks every conv and batchnorm in the block.
+    pub fn to_device(&mut self) {
+        self.conv1.to_device();
+        self.bn1.to_device();
+        self.conv2.to_device();
+        self.bn2.to_device();
+        if let Some((ds_conv, ds_bn)) = &mut self.downsample {
+            ds_conv.to_device();
+            ds_bn.to_device();
+        }
+    }
+
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
             Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
@@ -121,6 +134,21 @@ impl<B: MathBackend> Bottleneck<B> {
         }
     }
 
+    /// Pre-upload all parameter tensors to the backend's device-resident
+    /// form. Walks every conv and batchnorm in the block.
+    pub fn to_device(&mut self) {
+        self.conv1.to_device();
+        self.bn1.to_device();
+        self.conv2.to_device();
+        self.bn2.to_device();
+        self.conv3.to_device();
+        self.bn3.to_device();
+        if let Some((ds_conv, ds_bn)) = &mut self.downsample {
+            ds_conv.to_device();
+            ds_bn.to_device();
+        }
+    }
+
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
             Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
@@ -145,6 +173,15 @@ pub enum ResNetStage<B: MathBackend> {
 }
 
 impl<B: MathBackend> ResNetStage<B> {
+    /// Pre-upload every block's parameters to the backend's device-resident
+    /// form.
+    pub fn to_device(&mut self) {
+        match self {
+            Self::Basic(blocks) => blocks.iter_mut().for_each(BasicBlock::to_device),
+            Self::Bottleneck(blocks) => blocks.iter_mut().for_each(Bottleneck::to_device),
+        }
+    }
+
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         match self {
             Self::Basic(blocks) => {
@@ -297,6 +334,26 @@ impl<B: MathBackend> ResNet<B> {
         }
 
         (stages, in_ch)
+    }
+
+    /// Pre-upload every parameter tensor to the backend's device-resident
+    /// form. Walks the stem (conv1, bn1), all four stages, and the FC layer.
+    /// No-op on `CpuBackend`; on `ScryGpuBackend` this turns ~50+ per-call
+    /// uploads (one per parameter, every forward pass) into a single
+    /// up-front upload, so the bench loop measures kernel time rather than
+    /// host→device traffic.
+    pub fn to_device(&mut self) {
+        self.conv1.to_device();
+        self.bn1.to_device();
+        for stage in &mut self.stages {
+            stage.to_device();
+        }
+        if let Some(w) = &mut self.fc_weight {
+            B::to_device_in_place(&mut w.data);
+        }
+        if let Some(b) = &mut self.fc_bias {
+            B::to_device_in_place(&mut b.data);
+        }
     }
 
     /// Feature dimension after global average pooling (before FC).
