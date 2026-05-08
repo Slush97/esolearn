@@ -422,6 +422,11 @@ fn binary_logreg_matches_gd_solver() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
+// `tracking_alloc` uses a process-global allocator counter, so tests running
+// in parallel on the same binary contaminate each other's measurements
+// (observed: 125 allocs in isolation, 60k+ when run alongside neighbouring
+// tests). Run with `--test-threads=1 --include-ignored` for an accurate count.
+#[ignore = "process-wide alloc counter; run with --test-threads=1 --include-ignored"]
 fn lbfgs_allocation_count_bounded() {
     println!("\n═══ L-BFGS allocation count ═══\n");
 
