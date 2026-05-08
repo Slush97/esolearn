@@ -500,16 +500,19 @@ fn format_numbers_uniform(values: &[f64]) -> Vec<String> {
     if values.is_empty() {
         return Vec::new();
     }
-    let max_abs = values
-        .iter()
-        .map(|v| v.abs())
-        .fold(0.0_f64, f64::max);
+    let max_abs = values.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
 
     if max_abs >= 1e9 {
-        return values.iter().map(|&v| format_si_unit(v, 1e9, "B")).collect();
+        return values
+            .iter()
+            .map(|&v| format_si_unit(v, 1e9, "B"))
+            .collect();
     }
     if max_abs >= 1e6 {
-        return values.iter().map(|&v| format_si_unit(v, 1e6, "M")).collect();
+        return values
+            .iter()
+            .map(|&v| format_si_unit(v, 1e6, "M"))
+            .collect();
     }
     if max_abs >= 1e4 {
         return values
@@ -742,7 +745,13 @@ mod tests {
             range: (0.0, 500.0),
         };
         let ticks = vec![
-            0.0, 200_000.0, 400_000.0, 600_000.0, 800_000.0, 1_000_000.0, 1_200_000.0,
+            0.0,
+            200_000.0,
+            400_000.0,
+            600_000.0,
+            800_000.0,
+            1_000_000.0,
+            1_200_000.0,
         ];
         let labels = s.format_ticks(&ticks);
         // All non-zero labels share the M suffix.

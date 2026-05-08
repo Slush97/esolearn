@@ -46,8 +46,7 @@ fn main() -> esoc_chart::error::Result<()> {
         .save_svg("clusters_truth.svg")?;
     println!("Saved clusters_truth.svg");
 
-    let predicted_labels: Vec<String> =
-        labels.iter().map(|&l| format!("Cluster {l}")).collect();
+    let predicted_labels: Vec<String> = labels.iter().map(|&l| format!("Cluster {l}")).collect();
     scatter(&f0, &f1)
         .color_by(&predicted_labels)
         .title("K-Means Clustering — Predicted Labels")

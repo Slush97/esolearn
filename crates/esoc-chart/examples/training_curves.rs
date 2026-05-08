@@ -68,10 +68,7 @@ fn main() -> esoc_chart::error::Result<()> {
     Ok(())
 }
 
-fn stack_series(
-    x: &[f64],
-    series: &[(&str, &Vec<f64>)],
-) -> (Vec<f64>, Vec<f64>, Vec<String>) {
+fn stack_series(x: &[f64], series: &[(&str, &Vec<f64>)]) -> (Vec<f64>, Vec<f64>, Vec<String>) {
     let cap = x.len() * series.len();
     let mut xs = Vec::with_capacity(cap);
     let mut ys = Vec::with_capacity(cap);

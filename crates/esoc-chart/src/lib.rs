@@ -44,4 +44,3 @@ pub mod prelude {
     pub use esoc_color::{Color, OkLab, OkLch, Palette};
     pub use esoc_scene::SceneGraph;
 }
-

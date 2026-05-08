@@ -58,7 +58,11 @@ fn main() -> esoc_chart::error::Result<()> {
     let mut x = Vec::new();
     let mut y = Vec::new();
     let mut series = Vec::new();
-    for (label, roc) in [(&lr_label, &roc_lr), (&rf_label, &roc_rf), (&knn_label, &roc_knn)] {
+    for (label, roc) in [
+        (&lr_label, &roc_lr),
+        (&rf_label, &roc_rf),
+        (&knn_label, &roc_knn),
+    ] {
         for (&fpr, &tpr) in roc.fpr.iter().zip(roc.tpr.iter()) {
             x.push(fpr);
             y.push(tpr);
