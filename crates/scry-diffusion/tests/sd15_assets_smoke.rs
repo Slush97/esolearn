@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use scry_diffusion::text_encoder::clip_text::{ClipTextConfig, ClipTextEncoder};
 use scry_diffusion::tokenizer::Tokenizer;
+use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::{decoder::VaeDecoderConfig, VaeDecoder};
 use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_llm::backend::cpu::CpuBackend;
@@ -137,4 +138,15 @@ fn checkpoint_opens_unet() {
         names.iter().any(|n| n.starts_with("down_blocks.")),
         "unet checkpoint has no `down_blocks.*` tensors — wrong file?"
     );
+}
+
+#[test]
+fn unet_loads_all_keys() {
+    let path = snapshot_root().join("unet/diffusion_pytorch_model.safetensors");
+    if skip_if_missing(&path, "unet_loads_all_keys") {
+        return;
+    }
+    let ckpt = SafetensorsCheckpoint::open(&path).expect("open unet");
+    let _unet = Unet::<CpuBackend>::from_safetensors(UnetConfig::sd_1_5(), &ckpt)
+        .expect("from_safetensors");
 }
