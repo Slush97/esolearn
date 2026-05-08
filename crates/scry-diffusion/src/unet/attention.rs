@@ -40,10 +40,14 @@
 
 use scry_llm::backend::MathBackend;
 use scry_llm::nn::layernorm::LayerNormModule;
+use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 use scry_vision::nn::conv2d::Conv2d;
 
-use super::common::GroupNormParams;
+use super::common::{
+    add_same, exact_gelu, matmul_bias_2d, transpose_chw_to_hwc, transpose_hwc_to_chw,
+    GroupNormParams,
+};
 use crate::conditioning::Conditioning;
 use crate::error::Result;
 
@@ -106,15 +110,141 @@ pub struct BasicTransformerBlock<B: MathBackend> {
     pub(crate) ff: GeGluFf<B>,
 }
 
+impl<B: MathBackend> Attention<B> {
+    /// Multi-head attention. `q_input` is `[n_q, d_model]`; `kv_input` is
+    /// `[n_kv, cross_dim]`. For self-attention, pass the same tensor and
+    /// `cross_dim == d_model`. Returns `[n_q, d_model]`.
+    fn forward(&self, q_input: &Tensor<B>, kv_input: &Tensor<B>) -> Tensor<B> {
+        let inner_dim = self.num_heads * self.head_dim;
+        let n_q = q_input.shape.dims()[0];
+        let n_kv = kv_input.shape.dims()[0];
+
+        // Q/K/V projections — bias is zero (HF SD attention uses bias=False).
+        // We still go through `matmul_bias` so backends with a fused path
+        // pick it up; the loader fills the bias with zeros.
+        let q = B::matmul(
+            &q_input.data,
+            &self.q_weight.data,
+            n_q,
+            self.d_model,
+            inner_dim,
+            false,
+            false,
+        );
+        let k = B::matmul(
+            &kv_input.data,
+            &self.k_weight.data,
+            n_kv,
+            self.cross_dim,
+            inner_dim,
+            false,
+            false,
+        );
+        let v = B::matmul(
+            &kv_input.data,
+            &self.v_weight.data,
+            n_kv,
+            self.cross_dim,
+            inner_dim,
+            false,
+            false,
+        );
+
+        // Scaled dot-product attention, per head. Use scatter_columns to
+        // reassemble heads into the [n_q, inner_dim] concat.
+        let scale = 1.0f32 / (self.head_dim as f32).sqrt();
+        let mut head_concat = B::zeros(&Shape::new(&[n_q, inner_dim]));
+        for h in 0..self.num_heads {
+            let off = h * self.head_dim;
+            let q_h = B::gather_columns(&q, n_q, inner_dim, off, self.head_dim);
+            let k_h = B::gather_columns(&k, n_kv, inner_dim, off, self.head_dim);
+            let v_h = B::gather_columns(&v, n_kv, inner_dim, off, self.head_dim);
+
+            // scores = q_h @ k_h^T → [n_q, n_kv]
+            let scores = B::matmul(&q_h, &k_h, n_q, self.head_dim, n_kv, false, true);
+            let attn = B::scaled_softmax(&scores, scale, &Shape::new(&[n_q, n_kv]));
+            // out_h = attn @ v_h → [n_q, head_dim]
+            let out_h = B::matmul(&attn, &v_h, n_q, n_kv, self.head_dim, false, false);
+
+            B::scatter_columns(&mut head_concat, &out_h, n_q, inner_dim, off, self.head_dim);
+        }
+
+        // Output projection (with bias).
+        let out = B::matmul_bias(
+            &head_concat,
+            &self.out_weight.data,
+            &self.out_bias.data,
+            n_q,
+            inner_dim,
+            self.d_model,
+            false,
+            false,
+        );
+        Tensor::new(out, Shape::new(&[n_q, self.d_model]))
+    }
+}
+
+impl<B: MathBackend> GeGluFf<B> {
+    /// GeGLU feed-forward on `[n, d_model]`. Returns `[n, d_model]`.
+    fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
+        let n = input.shape.dims()[0];
+        let proj = matmul_bias_2d::<B>(
+            input,
+            &self.proj_in_weight,
+            &self.proj_in_bias,
+            n,
+            self.d_model,
+            2 * self.d_ff,
+        );
+
+        // Chunk along the last axis: HF `chunk(2, dim=-1)` returns
+        // `(first_half, second_half)`, with the *first half* being the
+        // values and the *second half* being the gate.
+        let x = B::gather_columns(&proj.data, n, 2 * self.d_ff, 0, self.d_ff);
+        let gate = B::gather_columns(&proj.data, n, 2 * self.d_ff, self.d_ff, self.d_ff);
+        // HF GeGLU uses `F.gelu(approximate="none")` (erf-based exact GELU).
+        // `B::gelu` is the tanh approximation, which drifts enough across
+        // SD 1.5's 16 transformer blocks to push the M6 1e-3 parity gate.
+        let gate_t: Tensor<B> = Tensor::new(gate, Shape::new(&[n, self.d_ff]));
+        let gelu_gate = exact_gelu(&gate_t);
+        let gated = B::mul_elementwise(&x, &gelu_gate.data);
+        let gated_t = Tensor::new(gated, Shape::new(&[n, self.d_ff]));
+
+        matmul_bias_2d::<B>(
+            &gated_t,
+            &self.proj_out_weight,
+            &self.proj_out_bias,
+            n,
+            self.d_ff,
+            self.d_model,
+        )
+    }
+}
+
 impl<B: MathBackend> BasicTransformerBlock<B> {
     /// Forward pass: latent ⊕ self-attn → ⊕ cross-attn(text) → ⊕ MLP.
+    ///
+    /// Input/output `[n, d_model]` (image tokens flattened from `[H*W, C]`).
     pub fn forward(
         &mut self,
         latent: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let _ = (latent, conditioning);
-        todo!("M6: pre-LN self-attn, pre-LN cross-attn, pre-LN GeGLU MLP — all residual-added")
+        // Self-attention with pre-LN, residual-added.
+        let n1 = self.norm1.forward(latent);
+        let attn1_out = self.attn1.forward(&n1, &n1);
+        let x = add_same(latent, &attn1_out);
+
+        // Cross-attention with pre-LN; K/V come from the conditioning
+        // text embeddings `[seq_len, cross_dim]`.
+        let n2 = self.norm2.forward(&x);
+        let attn2_out = self.attn2.forward(&n2, &conditioning.embeddings);
+        let x = add_same(&x, &attn2_out);
+
+        // FF MLP with pre-LN.
+        let n3 = self.norm3.forward(&x);
+        let ff_out = self.ff.forward(&n3);
+        Ok(add_same(&x, &ff_out))
     }
 }
 
@@ -132,15 +262,34 @@ pub struct SpatialTransformer<B: MathBackend> {
 }
 
 impl<B: MathBackend> SpatialTransformer<B> {
-    /// Forward: 1×1 conv in → reshape to seq → N × `BasicTransformerBlock` →
-    /// reshape back → 1×1 conv out → residual add.
+    /// Forward: GroupNorm → 1×1 conv in → reshape `[C, H, W]` to `[H*W, C]`
+    /// → N × `BasicTransformerBlock` → reshape back → 1×1 conv out →
+    /// residual add. Input/output `[C, H, W]`.
     pub fn forward(
         &mut self,
         feature_map: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let _ = (feature_map, conditioning);
-        todo!("M6: spatial transformer — 1x1 in, NCHW->(N,seq,C), N transformer blocks, reshape, 1x1 out, residual")
+        let dims = feature_map.shape.dims();
+        debug_assert_eq!(dims.len(), 3);
+        let (c, h, w) = (dims[0], dims[1], dims[2]);
+        debug_assert_eq!(c, self.channels);
+        let n = h * w;
+
+        // Pre-norm + 1×1 in projection, still NCHW.
+        let normed = self.norm.forward(feature_map);
+        let proj_in = self.proj_in.forward(&normed);
+
+        // [C, H, W] -> [H*W, C] for the transformer blocks.
+        let mut x = transpose_chw_to_hwc::<B>(&proj_in, c, n);
+        for block in &mut self.transformer_blocks {
+            x = block.forward(&x, conditioning)?;
+        }
+
+        // [H*W, C] -> [C, H, W] and 1×1 out projection, then residual.
+        let x_chw = transpose_hwc_to_chw::<B>(&x, n, c, h, w);
+        let proj_out = self.proj_out.forward(&x_chw);
+        Ok(add_same(feature_map, &proj_out))
     }
 }
 

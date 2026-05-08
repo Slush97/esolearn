@@ -11,12 +11,15 @@
 
 use std::path::{Path, PathBuf};
 
+use scry_diffusion::conditioning::Conditioning;
 use scry_diffusion::text_encoder::clip_text::{ClipTextConfig, ClipTextEncoder};
 use scry_diffusion::tokenizer::Tokenizer;
 use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::{decoder::VaeDecoderConfig, VaeDecoder};
 use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_llm::backend::cpu::CpuBackend;
+use scry_llm::tensor::shape::Shape;
+use scry_llm::tensor::Tensor;
 
 fn snapshot_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".assets/sd-1-5")
@@ -149,4 +152,50 @@ fn unet_loads_all_keys() {
     let ckpt = SafetensorsCheckpoint::open(&path).expect("open unet");
     let _unet = Unet::<CpuBackend>::from_safetensors(UnetConfig::sd_1_5(), &ckpt)
         .expect("from_safetensors");
+}
+
+/// Run a single Unet forward at a tiny latent resolution against random
+/// conditioning. No HF reference involved — we just need shape/topology
+/// to be coherent: every skip is consumed, every block hands the right
+/// channel count to the next, and the output lands at `[out, H, W]`.
+#[test]
+fn unet_forward_shape_smoke() {
+    let path = snapshot_root().join("unet/diffusion_pytorch_model.safetensors");
+    if skip_if_missing(&path, "unet_forward_shape_smoke") {
+        return;
+    }
+    let ckpt = SafetensorsCheckpoint::open(&path).expect("open unet");
+    let cfg = UnetConfig::sd_1_5();
+    let in_ch = cfg.in_channels;
+    let out_ch = cfg.out_channels;
+    let cross_dim = cfg.cross_attention_dim;
+    let mut unet =
+        Unet::<CpuBackend>::from_safetensors(cfg, &ckpt).expect("from_safetensors");
+
+    // Tiny 16×16 latent (vs the production 64×64 = 512px). The deepest
+    // stage downsamples 3×, so we need spatial size ≥ 8 — 16 keeps the
+    // smoke test cheap (~1 GB intermediate) while exercising every
+    // attention/upsample/downsample once.
+    let h = 16;
+    let w = 16;
+    let latent = Tensor::<CpuBackend>::from_vec(
+        vec![0.1f32; in_ch * h * w],
+        Shape::new(&[in_ch, h, w]),
+    );
+    // Fake conditioning: 77 tokens × cross_attention_dim, all zeros works.
+    let embeddings = Tensor::<CpuBackend>::from_vec(
+        vec![0.0f32; 77 * cross_dim],
+        Shape::new(&[77, cross_dim]),
+    );
+    let cond = Conditioning {
+        embeddings,
+        extras: None,
+    };
+
+    let out = unet.forward(&latent, 981.0, &cond).expect("forward");
+    assert_eq!(out.shape.dims(), &[out_ch, h, w]);
+    assert!(
+        out.to_vec().iter().all(|v| v.is_finite()),
+        "unet forward produced non-finite output"
+    );
 }

@@ -11,12 +11,15 @@
 use std::collections::HashSet;
 
 use scry_llm::backend::MathBackend;
-#[cfg(feature = "safetensors")]
 use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
 #[cfg(feature = "safetensors")]
 use crate::error::{Error, Result};
+
+/// GroupNorm eps used across the SD UNet. HF diffusers sets this to 1e-5
+/// for the UNet (vs 1e-6 in the VAE) — same value across SD 1.5 / 2.x / SDXL.
+const NORM_EPS: f32 = 1e-5;
 
 /// 1D GroupNorm parameter pack. Compute goes through
 /// `MathBackend::group_norm`; this struct just holds the affine weights
@@ -27,6 +30,181 @@ pub(crate) struct GroupNormParams<B: MathBackend> {
     pub(crate) bias: Tensor<B>,
     pub(crate) num_groups: usize,
     pub(crate) channels: usize,
+}
+
+impl<B: MathBackend> GroupNormParams<B> {
+    /// Apply GroupNorm to a `[C, H, W]` tensor (batch=1). Returns same shape.
+    pub(crate) fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
+        let dims = input.shape.dims();
+        debug_assert_eq!(dims.len(), 3);
+        debug_assert_eq!(dims[0], self.channels);
+        let spatial = dims[1] * dims[2];
+        let out = B::group_norm(
+            &input.data,
+            &self.weight.data,
+            &self.bias.data,
+            self.num_groups,
+            self.channels,
+            spatial,
+            NORM_EPS,
+        );
+        Tensor::new(out, input.shape.clone())
+    }
+}
+
+// -----------------------------------------------------------------------
+// Tensor helpers shared across UNet submodules.
+//
+// These mirror the ones VaeDecoder rolls locally — we keep a UNet copy
+// rather than promoting them to a public API because the shapes/conventions
+// are specific to the SD UNet's batch=1, NCHW path.
+// -----------------------------------------------------------------------
+
+/// SiLU on a single tensor (`x * sigmoid(x)`), shape-preserving.
+pub(crate) fn silu<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
+    Tensor::new(B::silu(&t.data), t.shape.clone())
+}
+
+/// Elementwise add of two same-shape tensors.
+pub(crate) fn add_same<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> Tensor<B> {
+    debug_assert_eq!(a.shape.dims(), b.shape.dims());
+    let out = B::add(&a.data, &b.data, &a.shape, &b.shape, &a.shape);
+    Tensor::new(out, a.shape.clone())
+}
+
+/// Round-trip clone via `to_vec`/`from_vec`. Used where we need to keep
+/// an intermediate alive across an op that consumes the tensor.
+pub(crate) fn clone_tensor<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
+    let v = B::to_vec(&t.data);
+    Tensor::from_vec(v, t.shape.clone())
+}
+
+/// `C = A @ W + b`, with `A: [m, k]`, `W: [k, n]` (scry-llm `[in, out]`),
+/// `b: [n]`. Output shape `[m, n]`.
+pub(crate) fn matmul_bias_2d<B: MathBackend>(
+    a: &Tensor<B>,
+    weight: &Tensor<B>,
+    bias: &Tensor<B>,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> Tensor<B> {
+    let out = B::matmul_bias(&a.data, &weight.data, &bias.data, m, k, n, false, false);
+    Tensor::new(out, Shape::new(&[m, n]))
+}
+
+/// Concatenate two `[C_i, H, W]` tensors along the channel axis, host-side.
+/// Both inputs must share spatial dims; output is `[C1+C2, H, W]`. The
+/// SD UNet's UpBlock skip-concat is the only caller.
+pub(crate) fn concat_channels<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> Tensor<B> {
+    let ad = a.shape.dims();
+    let bd = b.shape.dims();
+    debug_assert_eq!(ad.len(), 3);
+    debug_assert_eq!(bd.len(), 3);
+    debug_assert_eq!(ad[1], bd[1]);
+    debug_assert_eq!(ad[2], bd[2]);
+    let mut va = B::to_vec(&a.data);
+    let vb = B::to_vec(&b.data);
+    va.extend_from_slice(&vb);
+    Tensor::from_vec(va, Shape::new(&[ad[0] + bd[0], ad[1], ad[2]]))
+}
+
+/// Reshape `[C, H, W]` (NCHW row-major) into `[H*W, C]` (HWC row-major).
+/// This is a transpose, not a reshape — channel data is interleaved per
+/// spatial location in the output.
+pub(crate) fn transpose_chw_to_hwc<B: MathBackend>(
+    t: &Tensor<B>,
+    c: usize,
+    n: usize,
+) -> Tensor<B> {
+    let v = B::to_vec(&t.data);
+    debug_assert_eq!(v.len(), c * n);
+    let mut out = vec![0.0f32; v.len()];
+    for ci in 0..c {
+        for ni in 0..n {
+            out[ni * c + ci] = v[ci * n + ni];
+        }
+    }
+    Tensor::from_vec(out, Shape::new(&[n, c]))
+}
+
+/// Reshape `[H*W, C]` back to `[C, H, W]`.
+pub(crate) fn transpose_hwc_to_chw<B: MathBackend>(
+    t: &Tensor<B>,
+    n: usize,
+    c: usize,
+    h: usize,
+    w: usize,
+) -> Tensor<B> {
+    debug_assert_eq!(n, h * w);
+    let v = B::to_vec(&t.data);
+    debug_assert_eq!(v.len(), c * n);
+    let mut out = vec![0.0f32; v.len()];
+    for ni in 0..n {
+        for ci in 0..c {
+            out[ci * n + ni] = v[ni * c + ci];
+        }
+    }
+    Tensor::from_vec(out, Shape::new(&[c, h, w]))
+}
+
+/// Exact GELU (erf-based) on a flat host-side slice. Used by the UNet's
+/// GeGLU feed-forward, which HF computes with `F.gelu(approximate="none")`
+/// — the tanh approximation in `MathBackend::gelu` drifts ~3e-4 at the
+/// peak of the curve and cumulatively pushes the M6 parity gate just over
+/// 1e-3 across SD 1.5's 16 transformer blocks.
+///
+/// `erf` itself is computed via Abramowitz–Stegun 7.1.26 in f64 (max error
+/// ≈ 1.5e-7), which is comfortably tighter than the gate. The cost is a
+/// host round-trip; CPU and CUDA both pay one `to_vec` + `from_vec` here,
+/// but GeGLU's matmul flanks dominate the wall-clock either way.
+pub(crate) fn exact_gelu<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
+    let v = B::to_vec(&t.data);
+    let mut out = vec![0.0f32; v.len()];
+    for (i, &x) in v.iter().enumerate() {
+        out[i] = exact_gelu_scalar(x);
+    }
+    Tensor::from_vec(out, t.shape.clone())
+}
+
+#[inline]
+fn exact_gelu_scalar(x: f32) -> f32 {
+    // gelu(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
+    const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+    let xd = f64::from(x);
+    (0.5 * xd * (1.0 + erf64(xd * INV_SQRT_2))) as f32
+}
+
+/// Abramowitz–Stegun 7.1.26 approximation to `erf`, accurate to ~1.5e-7
+/// in f64. Used by [`exact_gelu`].
+#[inline]
+fn erf64(x: f64) -> f64 {
+    const P: f64 = 0.327_591_1;
+    const A1: f64 = 0.254_829_592;
+    const A2: f64 = -0.284_496_736;
+    const A3: f64 = 1.421_413_741;
+    const A4: f64 = -1.453_152_027;
+    const A5: f64 = 1.061_405_429;
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let ax = x.abs();
+    let t = 1.0 / (1.0 + P * ax);
+    let poly = ((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t;
+    let y = 1.0 - poly * (-ax * ax).exp();
+    sign * y
+}
+
+/// Add a per-channel bias `[C]` into a `[C, H, W]` tensor (broadcast over
+/// the spatial axes). Used by ResBlock to inject the timestep projection.
+pub(crate) fn add_channel_bias<B: MathBackend>(t: &Tensor<B>, bias: &Tensor<B>) -> Tensor<B> {
+    let dims = t.shape.dims();
+    debug_assert_eq!(dims.len(), 3);
+    debug_assert_eq!(bias.shape.numel(), dims[0]);
+    let c = dims[0];
+    let spatial = dims[1] * dims[2];
+    let lhs_shape = Shape::new(&[c, spatial]);
+    let bias_shape = Shape::new(&[c, 1]);
+    let out = B::add(&t.data, &bias.data, &lhs_shape, &bias_shape, &lhs_shape);
+    Tensor::new(out, t.shape.clone())
 }
 
 /// Load `{prefix}.weight` + `{prefix}.bias` as a GroupNorm affine pair and

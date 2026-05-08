@@ -54,5 +54,9 @@ required-features = ["safetensors"]
 name = "inspect_unet_keys"
 required-features = ["safetensors"]
 
+[[example]]
+name = "check_unet"
+required-features = ["safetensors"]
+
 [lints]
 workspace = true

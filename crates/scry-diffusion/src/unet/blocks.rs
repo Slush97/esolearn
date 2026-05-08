@@ -18,10 +18,12 @@
 //!   (`[false, true, true, true]`).
 
 use scry_llm::backend::MathBackend;
+use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 use scry_vision::nn::conv2d::Conv2d;
 
 use super::attention::SpatialTransformer;
+use super::common::concat_channels;
 use super::resblock::ResBlock;
 use crate::conditioning::Conditioning;
 use crate::error::Result;
@@ -55,14 +57,30 @@ pub struct DownBlock<B: MathBackend> {
 impl<B: MathBackend> DownBlock<B> {
     /// Forward, returning the output plus per-layer skip activations
     /// (in encounter order) that the symmetric `UpBlock` consumes.
+    ///
+    /// HF `CrossAttnDownBlock2D.forward` records one skip per
+    /// `(resnet, attention)` pair (after both fire) plus, when present,
+    /// one more after the downsampler.
     pub fn forward(
         &mut self,
         feature_map: &Tensor<B>,
         time_embed: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<(Tensor<B>, Vec<Tensor<B>>)> {
-        let _ = (feature_map, time_embed, conditioning);
-        todo!("M6: alternate ResBlock + (optional SpatialTransformer); record skips; downsample at end")
+        let mut x = super::common::clone_tensor(feature_map);
+        let mut skips = Vec::with_capacity(self.resnets.len() + 1);
+        for (i, resnet) in self.resnets.iter_mut().enumerate() {
+            x = resnet.forward(&x, time_embed)?;
+            if let Some(atts) = self.attentions.as_mut() {
+                x = atts[i].forward(&x, conditioning)?;
+            }
+            skips.push(super::common::clone_tensor(&x));
+        }
+        if let Some(d) = &self.downsampler {
+            x = d.conv.forward(&x);
+            skips.push(super::common::clone_tensor(&x));
+        }
+        Ok((x, skips))
     }
 }
 
@@ -78,15 +96,16 @@ pub struct MidBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> MidBlock<B> {
-    /// Forward.
+    /// Forward: ResBlock → SpatialTransformer → ResBlock at the deepest stage.
     pub fn forward(
         &mut self,
         feature_map: &Tensor<B>,
         time_embed: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let _ = (feature_map, time_embed, conditioning);
-        todo!("M6: ResBlock → SpatialTransformer → ResBlock")
+        let x = self.resnet_in.forward(feature_map, time_embed)?;
+        let x = self.attention.forward(&x, conditioning)?;
+        self.resnet_out.forward(&x, time_embed)
     }
 }
 
@@ -104,6 +123,12 @@ pub struct UpBlock<B: MathBackend> {
 
 impl<B: MathBackend> UpBlock<B> {
     /// Forward consuming skips from the matching DownBlock in reverse order.
+    ///
+    /// Per HF `CrossAttnUpBlock2D.forward`: each ResBlock pops one skip,
+    /// concatenates it with the running activation along the channel axis,
+    /// and (when this stage has cross-attention) follows with the matching
+    /// SpatialTransformer. After all ResBlocks fire, the optional 2× nearest
+    /// upsample + 3×3 conv runs.
     pub fn forward(
         &mut self,
         feature_map: &Tensor<B>,
@@ -111,8 +136,28 @@ impl<B: MathBackend> UpBlock<B> {
         time_embed: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let _ = (feature_map, skips, time_embed, conditioning);
-        todo!("M6: pop skip → concat along channels → ResBlock → (optional SpatialTransformer); upsample at end")
+        let mut x = super::common::clone_tensor(feature_map);
+        for (i, resnet) in self.resnets.iter_mut().enumerate() {
+            let skip = skips.pop().ok_or_else(|| {
+                crate::error::Error::Llm(
+                    "up block: ran out of skip activations from down stack".into(),
+                )
+            })?;
+            x = concat_channels(&x, &skip);
+            x = resnet.forward(&x, time_embed)?;
+            if let Some(atts) = self.attentions.as_mut() {
+                x = atts[i].forward(&x, conditioning)?;
+            }
+        }
+        if let Some(u) = &self.upsampler {
+            // Diffusers `Upsample2D`: nearest-2× then 3×3 padding-1 conv.
+            let dims = x.shape.dims();
+            let (c, h, w) = (dims[0], dims[1], dims[2]);
+            let upsampled = B::upsample_2d_nearest(&x.data, c, h, w, 2);
+            let upsampled_t = Tensor::new(upsampled, Shape::new(&[c, h * 2, w * 2]));
+            x = u.conv.forward(&upsampled_t);
+        }
+        Ok(x)
     }
 }
 

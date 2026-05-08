@@ -29,13 +29,6 @@
 //! - [`attention`] — Spatial transformer block (self-attention + cross-attention).
 //! - [`blocks`] — DownBlock / MidBlock / UpBlock orchestration.
 
-// M5 lands the structs and weight loaders; M6 wires up `forward` and starts
-// reading these weights. Until then, every Conv2d / Tensor / GroupNorm field
-// is loaded but unread, which trips `dead_code` per-field. Suppressing the
-// lint at the module root is cleaner than annotating every struct and field
-// individually — the warnings naturally clear themselves once forward lands.
-#![allow(dead_code)]
-
 pub mod attention;
 pub mod blocks;
 pub(crate) mod common;
@@ -43,15 +36,17 @@ pub mod config;
 pub mod resblock;
 
 use scry_llm::backend::MathBackend;
+use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
 use crate::conditioning::Conditioning;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::ops::sinusoidal_timestep_embedding;
 
 pub use config::UnetConfig;
 
 use self::blocks::{DownBlock, MidBlock, UpBlock};
-use self::common::GroupNormParams;
+use self::common::{clone_tensor, silu, GroupNormParams};
 use scry_vision::nn::conv2d::Conv2d;
 
 /// Sinusoidal timestep embedding MLP `linear_1 → SiLU → linear_2`.
@@ -83,22 +78,102 @@ pub struct Unet<B: MathBackend> {
 impl<B: MathBackend> Unet<B> {
     /// Forward pass: `(noisy_latent, timestep, conditioning) → predicted_noise`.
     ///
-    /// `noisy_latent` is `[batch, in_channels, h, w]` — for SD 1.5 latents
-    /// are `[batch, 4, height/8, width/8]`. With CFG enabled the pipeline
-    /// passes `batch=2` (uncond + cond) and combines outputs after the call.
+    /// `noisy_latent` is `[in_channels, h, w]` (batch=1 squeezed) — for SD 1.5
+    /// latents are `[4, height/8, width/8]`. With CFG enabled the pipeline
+    /// calls `forward` twice (uncond + cond) and combines the outputs.
+    ///
+    /// The forward mirrors HF `UNet2DConditionModel.forward`:
+    ///
+    /// 1. `conv_in` lifts the latent to `block_out_channels[0]` features.
+    /// 2. `time_embedding(silu(linear_1(sin_emb(t))))` produces a
+    ///    `[time_embed_dim]` vector consumed by every ResBlock.
+    /// 3. Down blocks emit per-layer skip activations (one per
+    ///    resnet/attention pair, plus one per downsampler). The conv_in
+    ///    output itself is the first skip, matching diffusers'
+    ///    `down_block_res_samples = (sample,)`.
+    /// 4. Mid block (resnet → spatial-attention → resnet) at the deepest stage.
+    /// 5. Up blocks pop skips in LIFO order, concat-along-channels at each
+    ///    resnet input.
+    /// 6. `conv_norm_out → SiLU → conv_out` projects back to
+    ///    `out_channels` (= 4 for SD's noise-prediction head).
     pub fn forward(
         &mut self,
         noisy_latent: &Tensor<B>,
         timestep: f32,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let _ = (noisy_latent, timestep, conditioning);
-        todo!(
-            "M6: conv_in → time_embed → down_blocks → mid_block → up_blocks (with skip \
-             concats) → conv_norm_out + SiLU + conv_out"
-        )
+        let dims = noisy_latent.shape.dims();
+        if dims.len() != 3 || dims[0] != self.config.in_channels {
+            return Err(Error::Llm(format!(
+                "unet forward: expected [{}, H, W] latent, got {:?}",
+                self.config.in_channels, dims
+            )));
+        }
+
+        // ---- 1. conv_in ---------------------------------------------
+        let mut x = self.conv_in.forward(noisy_latent);
+
+        // ---- 2. timestep embedding ---------------------------------
+        // `block_out_channels[0]` sized sinusoidal embed → linear → silu →
+        // linear → `[time_embed_dim]`.
+        let bc0 = self.config.block_out_channels[0];
+        let t_sin = sinusoidal_timestep_embedding::<B>(timestep, bc0, 10_000.0)?;
+        let t1 = B::matmul_bias(
+            &t_sin.data,
+            &self.time_embed.linear_1_weight.data,
+            &self.time_embed.linear_1_bias.data,
+            1,
+            bc0,
+            self.config.time_embed_dim,
+            false,
+            false,
+        );
+        let t1_t: Tensor<B> = Tensor::new(t1, Shape::new(&[self.config.time_embed_dim]));
+        let t1_silu = silu(&t1_t);
+        let t2 = B::matmul_bias(
+            &t1_silu.data,
+            &self.time_embed.linear_2_weight.data,
+            &self.time_embed.linear_2_bias.data,
+            1,
+            self.config.time_embed_dim,
+            self.config.time_embed_dim,
+            false,
+            false,
+        );
+        let time_embed = Tensor::new(t2, Shape::new(&[self.config.time_embed_dim]));
+
+        // ---- 3. down blocks ----------------------------------------
+        // Diffusers' `down_block_res_samples = (sample,) + ...` — the
+        // conv_in output itself is the first skip.
+        let mut skips: Vec<Tensor<B>> = Vec::with_capacity(16);
+        skips.push(clone_tensor(&x));
+        for db in &mut self.down_blocks {
+            let (out, mut emitted) = db.forward(&x, &time_embed, conditioning)?;
+            x = out;
+            skips.append(&mut emitted);
+        }
+
+        // ---- 4. mid block ------------------------------------------
+        x = self.mid_block.forward(&x, &time_embed, conditioning)?;
+
+        // ---- 5. up blocks ------------------------------------------
+        for ub in &mut self.up_blocks {
+            x = ub.forward(&x, &mut skips, &time_embed, conditioning)?;
+        }
+        if !skips.is_empty() {
+            return Err(Error::Llm(format!(
+                "unet forward: {} skips left unused after up blocks",
+                skips.len()
+            )));
+        }
+
+        // ---- 6. final norm + silu + conv_out -----------------------
+        x = self.conv_norm_out.forward(&x);
+        let x_silu = silu(&x);
+        Ok(self.conv_out.forward(&x_silu))
     }
 }
+
 
 #[cfg(feature = "safetensors")]
 impl<B: MathBackend> Unet<B> {
