@@ -38,5 +38,13 @@ tempfile = "3"
 name = "txt2img"
 required-features = ["safetensors", "decode"]
 
+[[example]]
+name = "check_text_encoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "inspect_clip_keys"
+required-features = ["safetensors"]
+
 [lints]
 workspace = true

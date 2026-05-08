@@ -11,8 +11,10 @@
 
 use std::path::{Path, PathBuf};
 
+use scry_diffusion::text_encoder::clip_text::{ClipTextConfig, ClipTextEncoder};
 use scry_diffusion::tokenizer::Tokenizer;
 use scry_diffusion::weights::SafetensorsCheckpoint;
+use scry_llm::backend::cpu::CpuBackend;
 
 fn snapshot_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".assets/sd-1-5")
@@ -95,6 +97,20 @@ fn checkpoint_opens_vae() {
         names.iter().any(|n| n.starts_with("decoder.")),
         "vae checkpoint has no `decoder.*` tensors — wrong file?"
     );
+}
+
+#[test]
+fn clip_text_encoder_loads_all_keys() {
+    let path = snapshot_root().join("text_encoder/model.safetensors");
+    if skip_if_missing(&path, "clip_text_encoder_loads_all_keys") {
+        return;
+    }
+    let ckpt = SafetensorsCheckpoint::open(&path).expect("open");
+    let encoder =
+        ClipTextEncoder::<CpuBackend>::from_safetensors(ClipTextConfig::clip_vit_l(), &ckpt)
+            .expect("from_safetensors");
+    assert_eq!(encoder.d_model(), 768);
+    assert_eq!(encoder.num_layers(), 12);
 }
 
 #[test]

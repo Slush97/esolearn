@@ -106,6 +106,25 @@ pub fn silu<B: MathBackend>(input: &Tensor<B>) -> Result<Tensor<B>> {
     Ok(Tensor::new(out, input.shape.clone()))
 }
 
+/// QuickGELU activation: `x * sigmoid(1.702 * x)`.
+///
+/// CLIP's text encoder uses this approximation everywhere a transformer
+/// MLP would normally use exact GELU. Composed from existing primitives —
+/// `silu(y) = y * sigmoid(y)`, so `silu(1.702 * x) = 1.702 * x *
+/// sigmoid(1.702 * x) = 1.702 * quick_gelu(x)`. Two scales + one silu;
+/// stays GPU-resident wherever the backend's `silu` and `scale` are.
+///
+/// Reference: OpenAI CLIP `clip/model.py::QuickGELU`. Tolerated drift vs
+/// exact GELU is ~5e-3 relative — too large for M3's 1e-4 tolerance, hence
+/// the dedicated path.
+pub fn quick_gelu<B: MathBackend>(input: &Tensor<B>) -> Tensor<B> {
+    const C: f32 = 1.702;
+    let scaled = B::scale(&input.data, C);
+    let silu_scaled = B::silu(&scaled);
+    let out = B::scale(&silu_scaled, 1.0 / C);
+    Tensor::new(out, input.shape.clone())
+}
+
 /// Apply GroupNorm with `num_groups` groups along the channel dim.
 ///
 /// SD UNet uses `num_groups = 32` everywhere. Accepts 3-D `[C, H, W]` or 4-D
