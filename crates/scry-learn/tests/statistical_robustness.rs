@@ -258,7 +258,10 @@ fn scaling_dt_accuracy_vs_dataset_size() {
     for &n in &sizes {
         // Take first n samples (use stratified approach for fairness)
         let subset = Dataset::new(
-            data.features().iter().map(|col| col[..n].to_vec()).collect(),
+            data.features()
+                .iter()
+                .map(|col| col[..n].to_vec())
+                .collect(),
             data.target()[..n].to_vec(),
             data.feature_names().to_vec(),
             data.target_name(),

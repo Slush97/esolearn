@@ -108,7 +108,10 @@ fn main() -> scry_learn::error::Result<()> {
 
     // ── 5. Check for negative Experience values ─────────────────────
     if let Some(exp_idx) = data.feature_names().iter().position(|n| n == "Experience") {
-        let neg_count = data.features()[exp_idx].iter().filter(|&&v| v < 0.0).count();
+        let neg_count = data.features()[exp_idx]
+            .iter()
+            .filter(|&&v| v < 0.0)
+            .count();
         if neg_count > 0 {
             println!("Found {neg_count} negative Experience values — clipping to 0.");
             // Rebuild the dataset with the clipped column.

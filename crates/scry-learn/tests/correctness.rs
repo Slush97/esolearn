@@ -1136,7 +1136,10 @@ fn prove_column_transformer_composition() {
     );
 
     // Columns 2, 3: MinMaxScaler → [0, 1]
-    let min_2 = ds.features()[2].iter().copied().fold(f64::INFINITY, f64::min);
+    let min_2 = ds.features()[2]
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
     let max_2 = ds.features()[2]
         .iter()
         .copied()
@@ -1147,7 +1150,10 @@ fn prove_column_transformer_composition() {
         "col 2 max should be ~1, got {max_2}"
     );
 
-    let min_3 = ds.features()[3].iter().copied().fold(f64::INFINITY, f64::min);
+    let min_3 = ds.features()[3]
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
     let max_3 = ds.features()[3]
         .iter()
         .copied()
