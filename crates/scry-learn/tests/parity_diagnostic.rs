@@ -134,7 +134,7 @@ fn main() {
         let mut lr = scry_learn::linear::LogisticRegression::new().max_iter(200);
         lr.fit(&ds).unwrap();
 
-        let test_rows = to_rows(&ds.features());
+        let test_rows = to_rows(ds.features());
         let preds = lr.predict(&test_rows).unwrap();
 
         let sklearn_preds: Vec<f64> = json["logreg_iris"]["predictions"]

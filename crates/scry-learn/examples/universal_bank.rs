@@ -251,7 +251,7 @@ fn main() -> scry_learn::error::Result<()> {
     let test_rows = to_row_major(&test);
     let preds = rf.predict(&test_rows)?;
 
-    let report = classification_report(&test.target(), &preds);
+    let report = classification_report(test.target(), &preds);
     println!("{report}\n");
 
     // ── 12. Also show Logistic Regression on scaled data ────────────
@@ -264,7 +264,7 @@ fn main() -> scry_learn::error::Result<()> {
     let test_s_rows = to_row_major(&test_s);
     let preds_lr = lr.predict(&test_s_rows)?;
 
-    let report_lr = classification_report(&test_s.target(), &preds_lr);
+    let report_lr = classification_report(test_s.target(), &preds_lr);
     println!("{report_lr}\n");
 
     println!("═══════════════════════════════════════════════════════════");

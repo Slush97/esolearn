@@ -105,7 +105,7 @@ fn prove_decision_tree_iris() {
 
     let features = test.feature_matrix();
     let preds = dt.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("Decision Tree Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -126,7 +126,7 @@ fn prove_random_forest_iris() {
 
     let features = test.feature_matrix();
     let preds = rf.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("Random Forest Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -157,7 +157,7 @@ fn prove_logistic_regression_iris() {
 
     let features = test_scaled.feature_matrix();
     let preds = lr.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("Logistic Regression Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -178,7 +178,7 @@ fn prove_knn_iris() {
 
     let features = test.feature_matrix();
     let preds = knn.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("KNN Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -199,7 +199,7 @@ fn prove_gaussian_nb_iris() {
 
     let features = test.feature_matrix();
     let preds = nb.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("Gaussian NB Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -236,8 +236,8 @@ fn prove_linear_regression_known_coefficients() {
 
     let features = test.feature_matrix();
     let preds = lr.predict(&features).unwrap();
-    let r2 = r2_score(&test.target(), &preds);
-    let mse = mean_squared_error(&test.target(), &preds);
+    let r2 = r2_score(test.target(), &preds);
+    let mse = mean_squared_error(test.target(), &preds);
 
     eprintln!("Linear Regression: R²={r2:.6}, MSE={mse:.6}");
     assert!(
@@ -454,7 +454,7 @@ fn prove_gbt_classifier_iris() {
         let test_features = test.feature_matrix();
         let preds = gbc.predict(&test_features).unwrap();
 
-        let acc = accuracy(&test.target(), &preds);
+        let acc = accuracy(test.target(), &preds);
         eprintln!(
             "Seed {seed:>3}: {acc:.4} ({}/{} correct)",
             (acc * test.target().len() as f64) as usize,
@@ -577,7 +577,7 @@ fn prove_lasso_sparsity_on_known_system() {
     // Prediction quality.
     let test_features = test.feature_matrix();
     let preds = lasso.predict(&test_features).unwrap();
-    let r2 = r2_score(&test.target(), &preds);
+    let r2 = r2_score(test.target(), &preds);
     eprintln!("Lasso R² on known system: {r2:.4}");
     assert!(r2 > 0.90, "Lasso R² should be > 0.90, got {r2:.4}");
 }
@@ -621,7 +621,7 @@ fn prove_elastic_net_ridge_mode() {
 
     let test_features = test.feature_matrix();
     let preds = en.predict(&test_features).unwrap();
-    let r2 = r2_score(&test.target(), &preds);
+    let r2 = r2_score(test.target(), &preds);
     eprintln!("ElasticNet Ridge-mode R²: {r2:.4}");
     assert!(
         r2 > 0.98,
@@ -712,7 +712,7 @@ fn prove_class_weight_dt_imbalanced() {
     dt_unweighted.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds_unweighted = dt_unweighted.predict(&matrix).unwrap();
-    let recall_unweighted = recall(&data.target(), &preds_unweighted, Average::Binary);
+    let recall_unweighted = recall(data.target(), &preds_unweighted, Average::Binary);
 
     // Train WITH class_weight=Balanced.
     let mut dt_weighted = DecisionTreeClassifier::new()
@@ -720,7 +720,7 @@ fn prove_class_weight_dt_imbalanced() {
         .class_weight(ClassWeight::Balanced);
     dt_weighted.fit(&data).unwrap();
     let preds_weighted = dt_weighted.predict(&matrix).unwrap();
-    let recall_weighted = recall(&data.target(), &preds_weighted, Average::Binary);
+    let recall_weighted = recall(data.target(), &preds_weighted, Average::Binary);
 
     eprintln!("Minority recall (unweighted): {recall_unweighted:.3}");
     eprintln!("Minority recall (weighted):   {recall_weighted:.3}");
@@ -759,7 +759,7 @@ fn prove_knn_distance_weights_iris() {
 
     let features = test.feature_matrix();
     let preds = knn.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("KNN (distance weights) Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -794,7 +794,7 @@ fn prove_knn_regressor_linear() {
 
     let features = test.feature_matrix();
     let preds = knn.predict(&features).unwrap();
-    let r2 = r2_score(&test.target(), &preds);
+    let r2 = r2_score(test.target(), &preds);
 
     eprintln!("KNN Regressor R² on y=2x₁+3x₂+1: {r2:.4}");
     assert!(
@@ -862,7 +862,7 @@ fn prove_linear_svc_iris() {
 
     let features = test.feature_matrix();
     let preds = svc.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("LinearSVC Iris accuracy: {:.1}%", acc * 100.0);
     assert!(
@@ -1219,7 +1219,7 @@ fn prove_pruning_reduces_tree_size() {
     // Pruned tree should still be reasonably accurate on training data.
     let matrix = data.feature_matrix();
     let preds = dt_pruned.predict(&matrix).unwrap();
-    let acc = scry_learn::metrics::accuracy(&data.target(), &preds);
+    let acc = scry_learn::metrics::accuracy(data.target(), &preds);
     eprintln!("Pruned tree training accuracy: {:.1}%", acc * 100.0);
     assert!(
         acc >= 0.80,
@@ -1380,7 +1380,7 @@ fn prove_bernoulli_nb_binary_features() {
 
     let features = test.feature_matrix();
     let preds = nb.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!(
         "BernoulliNB accuracy on binary features: {:.1}%",
@@ -1430,7 +1430,7 @@ fn prove_multinomial_nb_count_features() {
 
     let features = test.feature_matrix();
     let preds = nb.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!(
         "MultinomialNB accuracy on count features: {:.1}%",
@@ -1687,7 +1687,7 @@ fn prove_hist_gbt_classifier_iris() {
         model.fit(&train).unwrap();
 
         let preds = model.predict(&test.feature_matrix()).unwrap();
-        let acc = scry_learn::metrics::accuracy(&test.target(), &preds);
+        let acc = scry_learn::metrics::accuracy(test.target(), &preds);
         eprintln!("HistGBT Iris seed {seed:>3}: {acc:.4}");
         total_acc += acc;
     }
@@ -1717,7 +1717,7 @@ fn prove_hist_gbt_regressor_linear() {
     model.fit(&data).unwrap();
 
     let preds = model.predict(&data.feature_matrix()).unwrap();
-    let r2 = scry_learn::metrics::r2_score(&data.target(), &preds);
+    let r2 = scry_learn::metrics::r2_score(data.target(), &preds);
 
     eprintln!("HistGBT R² on y=2x+1: {r2:.4}");
     assert!(r2 > 0.95, "expected R² > 0.95, got {r2:.4}");
@@ -1858,7 +1858,7 @@ fn prove_mlp_classifier_iris() {
 
     let features = test_scaled.feature_matrix();
     let preds = clf.predict(&features).unwrap();
-    let acc = accuracy(&test.target(), &preds);
+    let acc = accuracy(test.target(), &preds);
 
     eprintln!("MLP Iris accuracy: {:.1}%", acc * 100.0);
     assert!(

@@ -77,7 +77,7 @@ fn convergence_logistic_regression() {
             .learning_rate(0.1);
         lr.fit(&train).unwrap();
         let preds = lr.predict(&test_rows).unwrap();
-        let acc = accuracy(&test.target(), &preds);
+        let acc = accuracy(test.target(), &preds);
         println!("  {mi:>10} {acc:>12.4}");
 
         assert!(
@@ -118,8 +118,8 @@ fn convergence_lasso() {
             .max_iter(mi);
         lasso.fit(&train).unwrap();
         let preds = lasso.predict(&test_rows).unwrap();
-        let mse = mean_squared_error(&test.target(), &preds);
-        let r2 = r2_score(&test.target(), &preds);
+        let mse = mean_squared_error(test.target(), &preds);
+        let r2 = r2_score(test.target(), &preds);
         println!("  {mi:>10} {mse:>12.4} {r2:>12.4}");
 
         // MSE should decrease (or stay flat) as iterations increase
@@ -162,8 +162,8 @@ fn convergence_elastic_net() {
             .max_iter(mi);
         en.fit(&train).unwrap();
         let preds = en.predict(&test_rows).unwrap();
-        let mse = mean_squared_error(&test.target(), &preds);
-        let r2 = r2_score(&test.target(), &preds);
+        let mse = mean_squared_error(test.target(), &preds);
+        let r2 = r2_score(test.target(), &preds);
         println!("  {mi:>10} {mse:>12.4} {r2:>12.4}");
 
         assert!(
@@ -202,7 +202,7 @@ fn convergence_linear_svc() {
         let mut svc = scry_learn::svm::LinearSVC::new().max_iter(mi);
         svc.fit(&train).unwrap();
         let preds = svc.predict(&test_rows).unwrap();
-        let acc = accuracy(&test.target(), &preds);
+        let acc = accuracy(test.target(), &preds);
         println!("  {mi:>10} {acc:>12.4}");
         accs.push(acc);
     }
@@ -289,8 +289,8 @@ fn convergence_gradient_boosting() {
             .max_depth(3);
         gbr.fit(&train).unwrap();
         let preds = gbr.predict(&test_rows).unwrap();
-        let mse = mean_squared_error(&test.target(), &preds);
-        let r2 = r2_score(&test.target(), &preds);
+        let mse = mean_squared_error(test.target(), &preds);
+        let r2 = r2_score(test.target(), &preds);
         println!("  {ne:>14} {mse:>12.4} {r2:>12.4}");
 
         assert!(

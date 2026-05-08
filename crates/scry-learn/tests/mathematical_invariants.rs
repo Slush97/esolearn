@@ -477,7 +477,7 @@ fn invariant_logistic_regression_separable_data() {
 
     let features = data.feature_matrix();
     let preds = lr.predict(&features).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         (acc - 1.0).abs() < 1e-6,
@@ -633,7 +633,7 @@ fn invariant_decision_tree_pure_leaves_on_separable() {
 
     let features = data.feature_matrix();
     let preds = dt.predict(&features).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         (acc - 1.0).abs() < 1e-6,

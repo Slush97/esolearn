@@ -107,7 +107,7 @@ fn golden_dt_iris() {
     dt.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = dt.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         acc >= sklearn_acc - 0.02,
@@ -125,7 +125,7 @@ fn golden_dt_wine() {
     dt.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = dt.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         acc >= sklearn_acc - 0.02,
@@ -143,7 +143,7 @@ fn golden_dt_breast_cancer() {
     dt.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = dt.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         acc >= sklearn_acc - 0.02,
@@ -165,7 +165,7 @@ fn golden_knn_iris() {
     knn.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = knn.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         acc >= sklearn_acc - 0.02,
@@ -183,7 +183,7 @@ fn golden_knn_wine() {
     knn.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = knn.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     // KNN on Wine without scaling may differ — use relaxed tolerance
     assert!(
@@ -214,7 +214,7 @@ fn golden_logreg_iris() {
     lr.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = lr.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     assert!(
         acc >= sklearn_acc - 0.03,
@@ -242,7 +242,7 @@ fn golden_linreg_california() {
     lr.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = lr.predict(&matrix).unwrap();
-    let r2 = r2_score(&data.target(), &preds);
+    let r2 = r2_score(data.target(), &preds);
 
     assert!(
         (r2 - sklearn_r2).abs() < 0.02,
@@ -367,7 +367,7 @@ fn golden_dt_digits() {
     dt.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = dt.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     // Decision tree on digits should overfit to ~100% on train set.
     assert!(
@@ -384,7 +384,7 @@ fn golden_knn_digits() {
     knn.fit(&data).unwrap();
     let matrix = data.feature_matrix();
     let preds = knn.predict(&matrix).unwrap();
-    let acc = accuracy(&data.target(), &preds);
+    let acc = accuracy(data.target(), &preds);
 
     // KNN on digits with k=5 should get ≥98% on training data.
     assert!(acc >= 0.98, "KNN Digits: scry accuracy {acc:.4} < 98%");

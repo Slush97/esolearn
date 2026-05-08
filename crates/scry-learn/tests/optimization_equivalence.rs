@@ -206,9 +206,9 @@ fn lasso_dense_matches_sparse() {
     lasso_dense.fit(&train).unwrap();
 
     // Sparse fit — construct CSC from the same features
-    let csc = CscMatrix::from_dense(&train.features());
+    let csc = CscMatrix::from_dense(train.features());
     let mut lasso_sparse = LassoRegression::new().alpha(0.1).max_iter(1000).tol(1e-6);
-    lasso_sparse.fit_sparse(&csc, &train.target()).unwrap();
+    lasso_sparse.fit_sparse(&csc, train.target()).unwrap();
 
     // Compare coefficients
     let coef_dense = lasso_dense.coefficients();
@@ -247,7 +247,7 @@ fn lasso_dense_matches_sparse() {
         "Lasso predictions diverge: max diff = {max_pred_diff}"
     );
 
-    let r2 = r2_score(&test.target(), &pred_dense);
+    let r2 = r2_score(test.target(), &pred_dense);
     println!("  R² (dense) = {r2:.4}");
     println!("  PASS: Lasso dense ≡ sparse\n");
 }
@@ -266,7 +266,7 @@ fn elastic_net_dense_matches_sparse() {
     let l1_ratios = [0.0, 0.25, 0.5, 0.75, 1.0];
     let test_rows: Vec<Vec<f64>> = (0..test.n_samples()).map(|i| test.sample(i)).collect();
 
-    let csc = CscMatrix::from_dense(&train.features());
+    let csc = CscMatrix::from_dense(train.features());
 
     for &l1_ratio in &l1_ratios {
         // Dense
@@ -283,7 +283,7 @@ fn elastic_net_dense_matches_sparse() {
             .l1_ratio(l1_ratio)
             .max_iter(1000)
             .tol(1e-6);
-        en_sparse.fit_sparse(&csc, &train.target()).unwrap();
+        en_sparse.fit_sparse(&csc, train.target()).unwrap();
 
         // Compare coefficients
         let coef_dense = en_dense.coefficients();
@@ -370,8 +370,8 @@ fn binary_logreg_matches_gd_solver() {
         .count();
     let agreement = n_agree as f64 / pred_lbfgs.len() as f64;
 
-    let acc_lbfgs = accuracy(&test.target(), &pred_lbfgs);
-    let acc_gd = accuracy(&test.target(), &pred_gd);
+    let acc_lbfgs = accuracy(test.target(), &pred_lbfgs);
+    let acc_gd = accuracy(test.target(), &pred_gd);
 
     println!("  L-BFGS accuracy = {acc_lbfgs:.4}");
     println!("  GD accuracy     = {acc_gd:.4}");
