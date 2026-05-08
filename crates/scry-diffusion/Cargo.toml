@@ -23,6 +23,7 @@ scry-llm = { path = "../scry-llm", default-features = false }
 scry-vision = { path = "../scry-vision", default-features = false }
 thiserror = "2"
 tracing = "0.1"
+serde_json = "1"
 safetensors = { version = "0.4", optional = true }
 memmap2 = { version = "0.9", optional = true }
 half = { version = "2", features = ["num-traits"], optional = true }
