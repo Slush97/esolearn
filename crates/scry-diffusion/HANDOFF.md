@@ -1,0 +1,235 @@
+# scry-diffusion — Handoff
+
+This crate is a **scaffold**. Every public type compiles, every method body is
+`todo!()`. Your job is to fill them in, in the milestone order below, and ship
+end-to-end Stable Diffusion 1.5 txt2img on the scry stack.
+
+## Goal
+
+End-to-end **Stable Diffusion 1.5 text-to-image** on `MathBackend`, with
+correctness validated against HF `diffusers` and competitive perf on
+`ScryGpuBackend`. SDXL should require new configs + a second text encoder
++ extra timestep conditioning, **not a rewrite**.
+
+## Non-goals (for the first cut)
+
+- img2img, inpainting, controlnet, LoRA, IP-adapter — defer.
+- SDXL output quality — scaffold leaves the hooks; first SDXL run is M11.
+- Training. We are inference-only.
+- Vulkan-path optimization. Per the project memory, CUDA is the perf target;
+  Vulkan stays correct (default trait impls + on-CPU fallbacks).
+
+## Architecture (and where SDXL plugs in)
+
+```
+GenerationParams ─► Tokenizer ─► TextEncoder ──► Conditioning
+                                                     │
+                                                     ▼
+                                  Scheduler ◄── UNet (CFG-batched)
+                                                     │
+                                                     ▼
+                                                 VaeDecoder ──► RGB tensor
+```
+
+The five seams that are **already** SDXL-ready:
+
+| Seam | SD 1.5 | SDXL upgrade |
+|---|---|---|
+| `TextEncoder` trait | `ClipTextEncoder` (CLIP-L) | `SdxlTextEncoder` (CLIP-L ++ OpenCLIP-bigG) |
+| `Conditioning` | `embeddings` only | `embeddings` + `extras: SdxlExtras` |
+| `UnetConfig` | `UnetConfig::sd_1_5()` preset | `UnetConfig::sdxl_base()` preset (already written) |
+| `VaeDecoderConfig` | `sd_1_5()` preset | `sdxl()` preset (different scaling factor) |
+| `Scheduler` trait | `DdimScheduler` | works unchanged for SDXL |
+
+The seams not yet touched (do not pre-build them — wait for SD 1.5 to land):
+
+- SDXL refiner (second-stage UNet that takes the first-stage output as init).
+- LoRA / IP-adapter weight merging at load time.
+
+## Missing primitives (M1 — must land before any model code can run)
+
+These need to land in `scry-llm` (trait method + tests) and **on CUDA in
+`scry-gpu`** (kernel + override). Default CPU impl is fine for correctness;
+the CUDA override is what makes inference usable.
+
+| Op | Why we need it | Where it goes |
+|---|---|---|
+| `group_norm` | Used everywhere in UNet / VAE. Channels split into 32 groups, mean/var per `(batch, group)`, then per-channel affine. | Trait: `scry-llm/src/backend/mod.rs::MathBackend`. Kernel: pattern matches `LAYERNORM_CUDA` (one block per `[batch, group]`, two block-wide reductions for mean/var, third pass normalize+affine). |
+| `silu` | Activation in every UNet ResBlock. `x * sigmoid(x)`. | Trait method + elementwise CUDA kernel. Register a key in `ScryCtx` like `gelu`. |
+| `upsample_2d_nearest` | UNet UpBlocks and VAE decoder. NCHW, integer scale factor, no interpolation. | Trait method + CUDA kernel (one thread per output element, `c, oh, ow → c, oh/scale, ow/scale`). |
+| `geglu` (or compose) | UNet MLPs use GeGLU instead of plain MLP: chunk last dim, gate one half through GELU, multiply. | Either: add a trait method (mirrors `swiglu`), **or** compose from two existing matmuls + `gelu` + `mul_elementwise`. Compose first; promote to a kernel only if the bench says so. |
+
+`scry-llm` already has: `matmul`, `matmul_strided_batched`, `softmax`,
+`scaled_softmax`, `layernorm`, `batchnorm_2d_inference`, `gelu`, `relu`,
+`conv2d_forward`, `im2col_2d`, `max_pool_2d`, `adaptive_avg_pool_2d`,
+`embedding`, `mul_elementwise`, `scale`, `concat_rows`, `add`, `rmsnorm`,
+`rope`, `swiglu`. Cross-attention reuses `matmul_strided_batched` and
+`scaled_softmax`; do **not** add a new "cross_attention" trait method.
+
+For each new kernel: one CUDA shader in `scry-gpu/src/shaders.rs`, one
+`Device::*_async` wrapper in `scry-gpu/src/device.rs`, one `MathBackend`
+method in `scry-llm/src/backend/mod.rs` with a CPU default, one
+`ScryGpuBackend` override in `scry-llm/src/backend/scry_gpu.rs` with a
+threshold gate, and one `gpu_*_matches_cpu_within_tolerance` test. **Mirror
+the existing patterns** — e.g. `gpu_layernorm_matches_cpu_within_tolerance`
+for the GroupNorm test shape.
+
+## Milestone plan
+
+Each milestone is a separate commit (or PR). Earlier milestones gate later
+ones — don't skip ahead. Numerical-equivalence tests against `CpuBackend`
+or HF `diffusers` are part of the "done" criterion, not optional polish.
+
+**M1 — Missing kernels** (`scry-gpu` + `scry-llm`)
+
+- GroupNorm: kernel, trait method, override, test.
+- SiLU: kernel, trait method, override, test.
+- `upsample_2d_nearest`: kernel, trait method, override, test.
+- Update `crates/scry-diffusion/src/ops.rs` to delegate to the new
+  `MathBackend` methods (drop the local `todo!()` wrappers).
+
+**M2 — Tokenizer + safetensors loader**
+
+- `Tokenizer`: pick one of the two paths in `src/tokenizer.rs` (DIY BPE
+  recommended — zero new C deps; pattern after the openai-clip Python impl).
+- `SafetensorsCheckpoint`: mirror `crates/scry-vision/src/checkpoint.rs`
+  (memmap → `SafeTensors::deserialize` → cast helpers for f32 / bf16 / fp16).
+- Acquire a local SD 1.5 snapshot for testing — link
+  `runwayml/stable-diffusion-v1-5` into `crates/scry-diffusion/.assets/sd-1-5/`
+  via `huggingface-cli download`. Document the path conventions in a
+  `crates/scry-diffusion/ASSETS.md` that's gitignored.
+
+**M3 — CLIP text encoder forward**
+
+- Implement `ClipTextEncoder::encode` (token embed + positional embed → 12
+  causal-attention blocks → final LN). Fill in `weights::map_clip_text_keys`.
+- Validate: write `examples/check_text_encoder.rs` that loads HF weights and
+  encodes a fixed prompt, then compare to a Python reference dumping
+  `text_model(prompt).last_hidden_state` to a numpy file. Tolerance: 1e-4
+  abs, since this is a single forward through a fp32 transformer.
+
+**M4 — VAE decoder forward**
+
+- Implement `VaeDecoder::decode`, `weights::map_vae_keys`. No attention in
+  SD 1.5 base VAE's mid-block — the spatial attention is self-only,
+  which is the same shape as a one-stack `BasicTransformerBlock` with
+  `cross_attention_dim = channels`.
+- Validate: feed a fixed noise latent through both our decoder and HF's,
+  compare pixels within 1e-3 abs.
+
+**M5 — UNet weight loading + plumbing**
+
+- Wire up the structs (`Unet`, `DownBlock`, `MidBlock`, `UpBlock`,
+  `ResBlock`, `SpatialTransformer`, `BasicTransformerBlock`) with real
+  `Conv2d`, `Linear`, `LayerNorm` etc. fields.
+- Fill in `weights::map_unet_keys`. Print the 100% of HF keys consumed
+  on a successful load, error otherwise — silent missing keys are the most
+  common bug here.
+
+**M6 — UNet forward**
+
+- Implement `Unet::forward` end-to-end: `conv_in` → time-embed MLP →
+  `down_blocks` → `mid_block` → `up_blocks` (with skip concats) →
+  `conv_norm_out` → SiLU → `conv_out`.
+- Validate: a single forward at `t=981, latent=fixed_noise, conditioning=fixed_text`
+  matches HF UNet output within 1e-3 abs.
+
+**M7 — DDIM scheduler**
+
+- Implement `DdimScheduler::new`, `set_timesteps`, `step`. Match HF's
+  `scaled_linear` beta schedule exactly.
+- Validate: given a fixed noise + a fixed sequence of "predicted noise"
+  vectors, our `step` chain matches HF's `step` chain bit-for-bit (this
+  is a pure-CPU numerical test, no GPU involved).
+
+**M8 — End-to-end correctness (no perf yet)**
+
+- Implement `Txt2ImgPipeline::generate` — tokenize, encode (uncond + cond),
+  init noise (deterministic seed), 30-step DDIM loop with CFG batch=2,
+  VAE decode, clamp, rescale to `[0, 1]`.
+- Validate: same prompt + same seed produces a near-identical image to
+  `diffusers.StableDiffusionPipeline` (HF). Use `PSNR > 35 dB` or pixel-MAE
+  `< 0.01` as the success criterion (some drift from
+  GroupNorm-precision differences is unavoidable).
+- Write `examples/txt2img.rs` properly — CLI args for prompt, output path,
+  seed, steps, CFG scale.
+
+**M9 — Bench + perf pass**
+
+- Add `crates/scry-diffusion/bench_pytorch.py` mirroring
+  `crates/scry-vision/bench_pytorch.py` — same prompt + seed, time per-step
+  + total wall-clock.
+- Add `examples/bench_sd.rs` with the equivalent on our side.
+- Expected wall-clock at 30 steps + CFG, RTX 5070 Ti: PyTorch ~3-5s,
+  us probably 15-30s on first land, target 5-10s after a perf pass.
+- Largest expected wins: bf16 routing for UNet matmuls (already wired in
+  `scry-llm`, just flip the toggle), CUDA graphs for the UNet step,
+  fused-attention kernel (the same one ViT round 3 in the project memory
+  flags as the next attack surface — this work makes it gating).
+
+**M10 — SDXL** (optional / opportunistic)
+
+- New text encoder: `text_encoder/sdxl.rs` wrapping CLIP-L + OpenCLIP-bigG
+  (concat embeddings, take pooled from bigG).
+- Switch to `UnetConfig::sdxl_base()` and `VaeDecoderConfig::sdxl()`.
+- Wire `Conditioning::extras` through the timestep MLP — the only UNet
+  code change is in the time-embed pathway (everything else config-drives).
+
+## Build commands
+
+```bash
+# Type-check (default features).
+cargo check -p scry-diffusion
+
+# Type-check with all features the next agent will need.
+CUDARC_CUDA_VERSION=13010 cargo check -p scry-diffusion \
+  --features safetensors,decode,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn
+
+# Run tests.
+CUDARC_CUDA_VERSION=13010 cargo test -p scry-diffusion --features safetensors
+
+# Driver (once M9 lands).
+CUDARC_CUDA_VERSION=13010 cargo run -p scry-diffusion --release --example txt2img \
+  --features safetensors,decode,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn
+```
+
+`CUDARC_CUDA_VERSION=13010` is required everywhere CUDA features are on —
+the system has CUDA 13.2 but cudarc 0.19.3 only knows 13.0.10. Without it,
+cudarc panics at `Unsupported cuda toolkit version: 13.2`.
+
+## Reference implementations to consult
+
+- HF `diffusers` (Python): `pip install diffusers transformers safetensors`.
+  Path-walk: `models/unet_2d_condition.py`, `models/attention.py`,
+  `models/resnet.py`, `models/embeddings.py`, `schedulers/scheduling_ddim.py`,
+  `pipelines/stable_diffusion/pipeline_stable_diffusion.py`.
+- OpenAI CLIP: `https://github.com/openai/CLIP/blob/main/clip/simple_tokenizer.py`
+  for the BPE tokenizer.
+- For numerical references at each milestone, dump intermediate tensors
+  from a Python driver (`diffusers` step-by-step) and compare against our
+  output. Same pattern `crates/scry-vision/bench_pytorch.py` uses for
+  ResNet/ViT.
+
+## Conventions
+
+Inherit from the project's existing CLAUDE.md:
+
+- `cargo check`, `cargo clippy --workspace -- -D warnings`,
+  `cargo fmt --all -- --check`, `cargo test --workspace` all clean.
+- `thiserror` for errors, `tracing` for logs, `#[repr(C)] + bytemuck::Pod`
+  for any GPU-facing struct, `unwrap()` only in tests / `main()`.
+- Foundation commit first, then feature commits.
+- bf16 / GPU struct changes touch the kernel, the trait method, and the
+  test in **the same commit**.
+
+## Project-memory pointers (for the next agent)
+
+Before starting: read these memories. They have load-bearing context the
+scaffold doesn't repeat.
+
+- `project_scry_vision_gpu_residency` — full activity log on phase 1
+  (M1–M5 GPU residency, ResNet & ViT). Includes the bf16 envelope
+  (~5% relative tolerance), the CUDARC_CUDA_VERSION gotcha, and the
+  "fused attention is the next attack surface" finding from ViT round 3.
+- The `gpu-resident/scry-vision` branch may still hold an open PR
+  (`bf16 strided batched matmul`); confirm via `gh pr list`.
