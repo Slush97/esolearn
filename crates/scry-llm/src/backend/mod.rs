@@ -169,6 +169,77 @@ pub trait MathBackend: DeviceBackend {
         output
     }
 
+    /// Group normalization, inference path with per-channel affine.
+    ///
+    /// For input shaped `[batch, channels, spatial]` (where `spatial = H*W`,
+    /// flattened to `batch * channels * spatial` elements), splits channels
+    /// into `num_groups` groups of `channels / num_groups` channels each,
+    /// computes mean/variance per `(batch, group)`, normalizes, then applies
+    /// per-channel affine `out = norm * weight[c] + bias[c]`. `weight` and
+    /// `bias` are length `channels`. `channels` must be evenly divisible by
+    /// `num_groups`.
+    ///
+    /// Stable Diffusion uses `num_groups = 32` everywhere it appears (UNet
+    /// ResBlocks + VAE decoder).
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn group_norm(
+        input: &Self::Storage,
+        weight: &Self::Storage,
+        bias: &Self::Storage,
+        num_groups: usize,
+        channels: usize,
+        spatial: usize,
+        eps: f32,
+    ) -> Self::Storage {
+        assert!(
+            num_groups > 0 && channels % num_groups == 0,
+            "group_norm: channels={channels} must be divisible by num_groups={num_groups}"
+        );
+        let cpg = channels / num_groups;
+        let input_v = Self::to_vec(input);
+        let weight_v = Self::to_vec(weight);
+        let bias_v = Self::to_vec(bias);
+        assert!(weight_v.len() == channels && bias_v.len() == channels);
+
+        let total = input_v.len();
+        let plane = channels * spatial;
+        let n_batch = if plane == 0 { 0 } else { total / plane };
+        let mut out = vec![0.0f32; total];
+        let gsize = cpg * spatial;
+
+        for n in 0..n_batch {
+            for g in 0..num_groups {
+                let c_start = g * cpg;
+                let base = (n * channels + c_start) * spatial;
+
+                let mut sum = 0.0f64;
+                for j in 0..gsize {
+                    sum += f64::from(input_v[base + j]);
+                }
+                let mean = (sum / gsize as f64) as f32;
+
+                let mut sq = 0.0f64;
+                for j in 0..gsize {
+                    let diff = f64::from(input_v[base + j]) - f64::from(mean);
+                    sq += diff * diff;
+                }
+                let var = (sq / gsize as f64) as f32;
+                let rstd = 1.0f32 / (var + eps).sqrt();
+
+                for j in 0..gsize {
+                    let local_c = j / spatial;
+                    let c = c_start + local_c;
+                    let norm = (input_v[base + j] - mean) * rstd;
+                    out[base + j] = norm * weight_v[c] + bias_v[c];
+                }
+            }
+        }
+
+        Self::from_vec(out, &Shape::new(&[total]))
+    }
+
     /// 2D batch normalization, inference-only with stored running statistics.
     ///
     /// For input shaped `[channels, spatial]` (or `[batch, channels, spatial]`
@@ -219,6 +290,18 @@ pub trait MathBackend: DeviceBackend {
         let v = Self::to_vec(input);
         let n = v.len();
         let out: Vec<f32> = v.into_iter().map(|x| x.max(0.0)).collect();
+        Self::from_vec(out, &Shape::new(&[n]))
+    }
+
+    /// SiLU / Swish activation: `out[i] = x * sigmoid(x) = x / (1 + exp(-x))`.
+    ///
+    /// Used in every Stable-Diffusion UNet ResBlock and across the SD family.
+    /// Default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn silu(input: &Self::Storage) -> Self::Storage {
+        let v = Self::to_vec(input);
+        let n = v.len();
+        let out: Vec<f32> = v.into_iter().map(|x| x / (1.0 + (-x).exp())).collect();
         Self::from_vec(out, &Shape::new(&[n]))
     }
 
@@ -380,6 +463,42 @@ pub trait MathBackend: DeviceBackend {
                         }
                     }
                     out[out_plane + oh * w_out + ow] = if any { m } else { 0.0 };
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
+    }
+
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// Input is `[channels, h_in, w_in]`; output is
+    /// `[channels, h_in*scale, w_in*scale]` with
+    /// `out[c, oh, ow] = in[c, oh/scale, ow/scale]` (integer divide). Used in
+    /// SD UNet UpBlocks and the VAE decoder. Matches PyTorch's
+    /// `F.interpolate(mode="nearest")` and `nn.Upsample(mode="nearest")`
+    /// byte-for-byte.
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn upsample_2d_nearest(
+        input: &Self::Storage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        scale: usize,
+    ) -> Self::Storage {
+        let h_out = h_in * scale;
+        let w_out = w_in * scale;
+        let input_v = Self::to_vec(input);
+        let mut out = vec![0.0f32; channels * h_out * w_out];
+        for c in 0..channels {
+            let in_plane = c * h_in * w_in;
+            let out_plane = c * h_out * w_out;
+            for oh in 0..h_out {
+                let ih = oh / scale;
+                for ow in 0..w_out {
+                    let iw = ow / scale;
+                    out[out_plane + oh * w_out + ow] = input_v[in_plane + ih * w_in + iw];
                 }
             }
         }

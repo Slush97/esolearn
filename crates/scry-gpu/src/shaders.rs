@@ -395,6 +395,27 @@ extern \"C\" __global__ void relu(
     out[i] = fmaxf(0.0f, input[i]);
 }";
 
+    /// `SiLU` / Swish activation: `out[i] = x * sigmoid(x) = x / (1 + exp(-x))`.
+    ///
+    /// Used in every Stable-Diffusion `UNet` `ResBlock` (and elsewhere in the
+    /// SD family). Same dispatch shape as [`GELU_CUDA`]; the only arithmetic
+    /// difference is the sigmoid instead of the tanh-approx polynomial.
+    ///
+    /// **Kernel signature:** `silu(const float* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[N.div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const SILU_CUDA: &str = "\
+extern \"C\" __global__ void silu(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    out[i] = x / (1.0f + expf(-x));
+}";
+
     /// Tanh activation: `out[i] = tanh(in[i])`.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
@@ -1012,6 +1033,181 @@ extern \"C\" __global__ void adaptive_avg_pool_2d(
     }
     unsigned int count = (h_end - h_start) * (w_end - w_start);
     out[idx] = sum / (float)count;
+}";
+
+    /// Group normalization with per-channel affine, inference path.
+    ///
+    /// For input shaped `[batch, channels, spatial]` (where `spatial = H*W`)
+    /// with `channels` evenly divisible by `num_groups` (so
+    /// `channels_per_group = channels / num_groups`), normalizes each
+    /// `(batch, group)` plane independently:
+    ///
+    /// ```text
+    /// mean[n, g]  = sum  over c in [g*cpg, (g+1)*cpg), i in [0, spatial) { in[n, c, i] } / (cpg * spatial)
+    /// var[n, g]   = sum  over c in [g*cpg, (g+1)*cpg), i in [0, spatial) { (in[n, c, i] - mean[n, g])^2 } / (cpg * spatial)
+    /// out[n, c, i] = ((in[n, c, i] - mean[n, g_of_c]) * rsqrt(var[n, g_of_c] + eps)) * weight[c] + bias[c]
+    /// ```
+    ///
+    /// where `g_of_c = c / cpg`. Stable Diffusion uses `num_groups = 32`
+    /// everywhere it appears (`UNet` `ResBlocks` + `VAE` decoder).
+    ///
+    /// 2D grid `[num_groups, batch, 1]` — one block per `(batch, group)`
+    /// plane, 256 threads. Two block-wide reductions (sum → mean,
+    /// sum-of-squared-deviations → variance) sharing one 256-float static
+    /// shared-memory scratchpad. The per-block work is
+    /// `cpg * spatial` elements; threads stride over them.
+    ///
+    /// **Kernel signature:** `group_norm(const float* input,
+    /// const float* weight, const float* bias, float* out,
+    /// unsigned int channels, unsigned int spatial,
+    /// unsigned int num_groups, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[num_groups, batch, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const GROUP_NORM_CUDA: &str = "\
+extern \"C\" __global__ void group_norm(
+    const float* input, const float* weight, const float* bias, float* out,
+    unsigned int channels, unsigned int spatial,
+    unsigned int num_groups, float eps
+) {
+    __shared__ float smem[256];
+
+    unsigned int g = blockIdx.x;
+    unsigned int n = blockIdx.y;
+    if (g >= num_groups) return;
+
+    unsigned int cpg = channels / num_groups;
+    unsigned int gsize = cpg * spatial;
+    unsigned int c_start = g * cpg;
+    // Base offset of this (n, group)'s first element in the flat
+    // [batch, channels, spatial] input.
+    unsigned int base = (n * channels + c_start) * spatial;
+    const float* in_block = input + base;
+    float* out_block = out + base;
+
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial sum, block-wide reduction → mean.
+    float local_sum = 0.0f;
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        local_sum += in_block[j];
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float inv_g = 1.0f / (float)gsize;
+    float mean = smem[0] * inv_g;
+    __syncthreads();
+
+    // Pass 2: per-thread partial sum of squared deviations, block-reduce → var.
+    float local_sq = 0.0f;
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        float diff = in_block[j] - mean;
+        local_sq += diff * diff;
+    }
+    smem[tid] = local_sq;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float var = smem[0] * inv_g;
+    float rstd = rsqrtf(var + eps);
+
+    // Pass 3: normalize, scale, shift. weight[c] / bias[c] vary across the
+    // group, so each thread looks them up by channel index. Both lookups
+    // are L1-cached: cpg consecutive channels share `weight`/`bias` reads
+    // across many threads in the same block.
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        unsigned int local_c = j / spatial;
+        unsigned int c = c_start + local_c;
+        float norm = (in_block[j] - mean) * rstd;
+        out_block[j] = norm * weight[c] + bias[c];
+    }
+}";
+
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// For input `[channels, h_in, w_in]` and integer `scale`, writes
+    /// `[channels, h_in*scale, w_in*scale]` where
+    /// `out[c, oh, ow] = in[c, oh/scale, ow/scale]` (integer divide). Used in
+    /// SD `UNet` `UpBlocks` and the `VAE` decoder. `PyTorch`'s
+    /// `F.interpolate(mode="nearest")` and `nn.Upsample(mode="nearest")`
+    /// match this byte-for-byte.
+    ///
+    /// One thread per output element; each thread does one integer-divide
+    /// per axis + one load + one store. The input plane stays in L2 for
+    /// SD-class layers (largest is 1280 × 64 × 64 ≈ 5 MiB), so the kernel
+    /// runs memory-bound.
+    ///
+    /// **Kernel signature:** `upsample_2d_nearest(const float* input,
+    /// float* out, unsigned int channels, unsigned int h_in,
+    /// unsigned int w_in, unsigned int scale)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_in*scale*w_in*scale).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const UPSAMPLE_2D_NEAREST_CUDA: &str = "\
+extern \"C\" __global__ void upsample_2d_nearest(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int scale
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int h_out = h_in * scale;
+    unsigned int w_out = w_in * scale;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    unsigned int ih = oh / scale;
+    unsigned int iw = ow / scale;
+    out[idx] = input[(c * h_in + ih) * w_in + iw];
+}";
+
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// WGSL equivalent of [`UPSAMPLE_2D_NEAREST_CUDA`]. Currently unused by
+    /// the dispatcher (CUDA-first per project memory) but compiles for
+    /// future Vulkan-path use.
+    ///
+    /// **Push constants:** `struct Dims { channels: u32, h_in: u32, w_in: u32, scale: u32 }` (16 bytes)
+    /// **Workgroup size:** 256
+    pub const UPSAMPLE_2D_NEAREST: &str = "\
+struct Dims { channels: u32, h_in: u32, w_in: u32, scale: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let h_out = dims.h_in * dims.scale;
+    let w_out = dims.w_in * dims.scale;
+    let spatial_out = h_out * w_out;
+    let total = dims.channels * spatial_out;
+    if idx >= total { return; }
+    let c = idx / spatial_out;
+    let rem = idx - c * spatial_out;
+    let oh = rem / w_out;
+    let ow = rem - oh * w_out;
+    let ih = oh / dims.scale;
+    let iw = ow / dims.scale;
+    out[idx] = input[(c * dims.h_in + ih) * dims.w_in + iw];
 }";
 
     /// f32 → bf16 elementwise cast: `out[i] = (bf16) in[i]` with RNE rounding.
