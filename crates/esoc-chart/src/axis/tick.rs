@@ -35,7 +35,12 @@ pub fn nice_ticks(min: f64, max: f64, target_count: usize) -> Ticks {
     // Safety bound to prevent infinite loops
     let max_ticks = (target_count + 5) * 2;
     while v <= graph_max + step * 0.5 && positions.len() < max_ticks {
-        positions.push(v);
+        // Snap accumulated drift around zero — `graph_min + k * step` can
+        // produce values like -2.78e-16 instead of exactly 0, which bypass
+        // the `value == 0.0` short-circuit in format_tick and render as
+        // scientific notation.
+        let snapped = if v.abs() < step * 1e-9 { 0.0 } else { v };
+        positions.push(snapped);
         v += step;
     }
 
@@ -199,5 +204,29 @@ mod tests {
     fn test_nice_ticks_same_value() {
         let ticks = nice_ticks(5.0, 5.0, 5);
         assert_eq!(ticks.positions.len(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)] // intentional: the snap produces literal 0.0
+    fn near_zero_tick_drift_snapped_to_zero() {
+        // Reproduces the basic_line/multi_line drift artifact: a domain
+        // straddling zero where step accumulation lands on something like
+        // -2.78e-16 instead of exactly 0.0.
+        let ticks = nice_ticks(-1.0, 1.0, 5);
+        let near_zero = ticks
+            .positions
+            .iter()
+            .copied()
+            .find(|v| v.abs() < 1e-9)
+            .expect("expected a tick at or very near zero");
+        assert_eq!(near_zero, 0.0);
+        let label_for_near_zero = ticks
+            .positions
+            .iter()
+            .zip(ticks.labels.iter())
+            .find(|(v, _)| v.abs() < 1e-9)
+            .map(|(_, l)| l.clone())
+            .unwrap();
+        assert_eq!(label_for_near_zero, "0");
     }
 }

@@ -5,19 +5,15 @@
 //! - Per-feature histograms
 //! - Side-by-side box plots
 
-use esoc_chart::prelude::*;
+use esoc_chart::express::{boxplot, histogram};
 use scry_learn::prelude::*;
 
-fn main() -> Result<()> {
-    // ── Synthetic dataset: 3 features with different distributions ───
+fn main() -> esoc_chart::error::Result<()> {
     let n = 300;
     let mut rng = SimpleRng::new(99);
 
-    // Feature 0: standard normal
     let f0: Vec<f64> = (0..n).map(|_| rng.normal()).collect();
-    // Feature 1: right-skewed (exponential-ish)
     let f1: Vec<f64> = (0..n).map(|_| -rng.uniform().max(1e-15).ln()).collect();
-    // Feature 2: bimodal (mixture of two normals)
     let f2: Vec<f64> = (0..n)
         .map(|_| {
             if rng.uniform() < 0.4 {
@@ -36,34 +32,36 @@ fn main() -> Result<()> {
         "class",
     );
 
-    // ── 1. Histogram per feature ─────────────────────────────────────
     let feature_names = &dataset.feature_names;
     let features = [&f0, &f1, &f2];
 
     for (i, feat) in features.iter().enumerate() {
-        let mut fig = Figure::new()
-            .size(600.0, 400.0)
-            .title(format!("Distribution of \"{}\"", feature_names[i]));
-
-        let ax = fig.add_axes();
-        ax.x_label(&feature_names[i]).y_label("Count");
-        ax.histogram(feat).label(&feature_names[i]).bins(25).done();
-
         let path = format!("hist_{}.svg", feature_names[i].to_lowercase());
-        fig.save_svg(&path)?;
+        histogram(feat)
+            .bins(25)
+            .title(format!("Distribution of \"{}\"", feature_names[i]))
+            .x_label(&feature_names[i])
+            .y_label("Count")
+            .size(600.0, 400.0)
+            .save_svg(&path)?;
         println!("Saved {path}");
     }
 
-    // ── 2. Box plots of all features ─────────────────────────────────
-    let mut fig = Figure::new().size(600.0, 450.0).title("Feature Box Plots");
+    let mut categories = Vec::with_capacity(3 * n);
+    let mut values = Vec::with_capacity(3 * n);
+    for (name, feat) in feature_names.iter().zip([&f0, &f1, &f2]) {
+        for &v in feat {
+            categories.push(name.clone());
+            values.push(v);
+        }
+    }
 
-    let ax = fig.add_axes();
-    ax.x_label("Feature").y_label("Value");
-    ax.boxplot(vec![f0, f1, f2])
-        .labels(feature_names.clone())
-        .done();
-
-    fig.save_svg("feature_boxplots.svg")?;
+    boxplot(&categories, &values)
+        .title("Feature Box Plots")
+        .x_label("Feature")
+        .y_label("Value")
+        .size(600.0, 450.0)
+        .save_svg("feature_boxplots.svg")?;
     println!("Saved feature_boxplots.svg");
 
     Ok(())

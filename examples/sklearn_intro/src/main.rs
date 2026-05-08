@@ -10,8 +10,8 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
+use esoc_chart::express::line;
 use esoc_chart::new_theme::NewTheme;
-use esoc_chart::v2;
 
 use scry_learn::dataset::Dataset;
 use scry_learn::metrics::accuracy;
@@ -122,7 +122,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dsv_x: Vec<f64> = (0..dsv.len()).map(|i| i as f64).collect();
 
     let screegram_path = figs.join("digits_singular_values.svg");
-    v2::line(&dsv_x, &dsv)
+    line(&dsv_x, &dsv)
         .title("Singular values — digits dataset")
         .x_label("component index")
         .y_label("singular value")
@@ -169,7 +169,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("\n  best k = {best_k}   accuracy = {best_acc:.4}");
 
     let knn_path = figs.join("knn_validation_accuracy.svg");
-    v2::line(&ks, &accs)
+    line(&ks, &accs)
         .title(format!(
             "KNN validation accuracy — digits (best k = {best_k})"
         ))

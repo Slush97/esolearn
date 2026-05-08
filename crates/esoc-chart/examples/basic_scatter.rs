@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Standalone scatter plot — no feature flags needed.
 
-use esoc_chart::v2::scatter;
+use esoc_chart::express::scatter;
 
 fn main() -> esoc_chart::error::Result<()> {
     // Some synthetic data: y ≈ x² + noise

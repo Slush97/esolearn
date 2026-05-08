@@ -35,7 +35,7 @@ High-level charting library for Rust. Built on [esoc-gfx](https://crates.io/crat
 
 ```toml
 [dependencies]
-esoc-chart = "0.1"
+esoc-chart = "0.2"
 ```
 
 ```rust
@@ -269,19 +269,22 @@ chart.save_png_to("chart.png")?;
 
 ## scry-learn Integration
 
-With the `scry-learn` feature, plot ML results directly:
+With the `scry-learn` feature, plot ML results directly via the extension traits in `esoc_chart::interop`:
 
 ```rust
-use esoc_chart::interop::*;
+use esoc_chart::interop::{ClassificationReportExt, ConfusionMatrixExt, RocCurveExt};
 
-// From a trained model's confusion matrix
-let svg = confusion_matrix.to_chart().to_svg()?;
+// Confusion matrix → annotated heatmap
+let cm = scry_learn::metrics::confusion_matrix(&y_true, &y_pred);
+cm.figure().save_svg_to("confusion.svg")?;
 
-// ROC curve from predictions
-let svg = roc_curve_figure(&y_true, &y_scores)?.to_svg()?;
+// ROC curve with AUC in the title
+let roc = scry_learn::metrics::roc_curve(&y_true, &y_scores);
+roc.roc_figure().save_svg_to("roc.svg")?;
 
-// Scatter a dataset with class coloring
-let svg = scatter_dataset(&dataset)?.to_svg()?;
+// Per-class precision/recall/F1 grouped bar chart
+let report = scry_learn::metrics::classification_report(&y_true, &y_pred);
+report.figure().save_svg_to("report.svg")?;
 ```
 
 ## Examples
