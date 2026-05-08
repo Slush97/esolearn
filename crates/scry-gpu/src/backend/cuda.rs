@@ -435,6 +435,100 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Run cuBLAS strided batched `GemmEx` with bf16 inputs and an `f32`
+    /// output, no sync.
+    ///
+    /// Same shape contract as [`Self::cublas_strided_batched_matmul_async`]
+    /// (row-major per-batch, natural strides, `[batch, m, k]` × `[batch, k,
+    /// n]` → `[batch, m, n]` with optional transpose flags) but routed
+    /// through `cublasGemmStridedBatchedEx` with `CUDA_R_16BF` data and
+    /// `CUBLAS_COMPUTE_32F` accumulator. The fp32 accumulator is written
+    /// straight to `c` so downstream operators see fp32 storage without a
+    /// cast-up pass — mirrors [`Self::cublas_matmul_bf16_in_f32_out_async`]
+    /// for the batched attention path.
+    ///
+    /// Unblocks `ViT` attention's two strided batched matmuls per block (Q@Kᵀ
+    /// and attn@V — 24 calls/forward at 12 layers): without this they stay
+    /// on the fp32 `sgemm_strided_batched` path even when bf16 matmul is on.
+    #[cfg(feature = "bf16")]
+    #[allow(clippy::too_many_arguments, clippy::many_single_char_names)]
+    pub fn cublas_strided_batched_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        batch: u32,
+        m: u32,
+        n: u32,
+        k: u32,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> Result<()> {
+        use cudarc::cublas::sys;
+        use std::ffi::c_void;
+
+        // Same column-major-swap trick as the f32 path — see the comment in
+        // `cublas_strided_batched_matmul_async`. Op flags travel with the
+        // arg they apply to; lda/ldb are the natural row-major row sizes.
+        let cu_op_for_b = if trans_b {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let cu_op_for_a = if trans_a {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let row_stride_b = if trans_b { k } else { n };
+        let row_stride_a = if trans_a { m } else { k };
+        let stride_a = (m * k) as i64;
+        let stride_b = (k * n) as i64;
+        let stride_c = (m * n) as i64;
+
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            let blas = self
+                .blas
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cublas"))?;
+            let (a_ptr, _a_guard) = a.inner.device_ptr(&self.stream);
+            let (b_ptr, _b_guard) = b.inner.device_ptr(&self.stream);
+            let (c_ptr, _c_guard) = c.inner.device_ptr_mut(&self.stream);
+
+            let alpha: f32 = 1.0;
+            let beta: f32 = 0.0;
+
+            cudarc::cublas::result::gemm_strided_batched_ex(
+                *blas.handle(),
+                cu_op_for_b,
+                cu_op_for_a,
+                n as i32,
+                m as i32,
+                k as i32,
+                std::ptr::from_ref(&alpha).cast::<c_void>(),
+                b_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                row_stride_b as i32,
+                stride_b,
+                a_ptr as *const c_void,
+                sys::cudaDataType_t::CUDA_R_16BF,
+                row_stride_a as i32,
+                stride_a,
+                std::ptr::from_ref(&beta).cast::<c_void>(),
+                c_ptr as *mut c_void,
+                sys::cudaDataType_t::CUDA_R_32F,
+                n as i32,
+                stride_c,
+                batch as i32,
+                sys::cublasComputeType_t::CUBLAS_COMPUTE_32F,
+                sys::cublasGemmAlgo_t::CUBLAS_GEMM_DEFAULT,
+            )
+            .map_err(|e| backend_err(BackendOp::CuBlas, e))?;
+        }
+        Ok(())
+    }
+
     /// Run a cuDNN 2D convolution forward pass without synchronizing.
     ///
     /// Implicit-GEMM (or Winograd / FFT — cuDNN's heuristic picks per shape)
