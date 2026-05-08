@@ -29,6 +29,11 @@ memmap2 = { version = "0.9", optional = true }
 half = { version = "2", features = ["num-traits"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+[dev-dependencies]
+safetensors = "0.4"
+half = { version = "2", features = ["num-traits"] }
+tempfile = "3"
+
 [[example]]
 name = "txt2img"
 required-features = ["safetensors", "decode"]
