@@ -145,6 +145,10 @@ struct ScryCtx {
     /// On-device column-broadcast bias add (`out[r,c] = a[r,c] + bias[r]`).
     /// Used to keep Conv2d's bias add GPU-resident after the matmul. CUDA-only.
     add_row_bias: Option<::scry_gpu::Kernel>,
+    /// On-device same-shape elementwise add (`out[i] = a[i] + b[i]`). Used
+    /// for ResNet residual adds and other identical-shape sums where the
+    /// row-bias broadcast doesn't apply. CUDA-only.
+    add_elementwise: Option<::scry_gpu::Kernel>,
     /// On-device 2D max-pool with fixed kernel/stride/padding. CUDA-only;
     /// Vulkan path is `None` and callers fall back to CPU.
     max_pool: Option<::scry_gpu::Kernel>,
@@ -235,6 +239,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: add_row_bias_cuda compile: {e}"))?;
+        let add_elementwise = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::ADD_ELEMENTWISE_CUDA,
+                "add_elementwise",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: add_elementwise_cuda compile: {e}"))?;
         let max_pool = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::MAXPOOL_2D_CUDA,
@@ -261,6 +273,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             batchnorm: Some(batchnorm),
             im2col: Some(im2col),
             add_row_bias: Some(add_row_bias),
+            add_elementwise: Some(add_elementwise),
             max_pool: Some(max_pool),
             adaptive_avg_pool: Some(adaptive_avg_pool),
         });
@@ -285,6 +298,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         batchnorm: None,
         im2col: None,
         add_row_bias: None,
+        add_elementwise: None,
         max_pool: None,
         adaptive_avg_pool: None,
     })
@@ -761,6 +775,13 @@ fn gpu_im2col_persistent(
 /// thread per output element with a single load + store + L1-cached bias[r].
 const GPU_ADD_ROW_BIAS_MIN: usize = 2_048;
 
+/// Minimum total element count before engaging the GPU same-shape add. Same
+/// scale as `GPU_ELEMENTWISE_MIN` — the kernel is one thread per output
+/// element with two coalesced loads + one store. ResNet's smallest residual
+/// add (stage 4 of R50, `2048 * 7 * 7 = 100K` elements) is well above; only
+/// truly tiny tensors fall back to CPU.
+const GPU_ADD_ELEMENTWISE_MIN: usize = 2_048;
+
 /// GPU-resident `[rows, cols] + bias[rows]` (column-broadcast). Bias buffer
 /// length must equal `rows`; an `[rows, 1]` shape is also accepted by the
 /// caller. Returns `None` when the GPU path is unavailable or the workload is
@@ -803,6 +824,46 @@ fn gpu_add_row_bias_persistent(
     Some(ScryGpuStorage::Gpu {
         buf: Arc::new(out),
         len: total,
+    })
+}
+
+/// GPU-resident same-shape elementwise add (`out[i] = a[i] + b[i]`). Both
+/// inputs must have length `n`. Returns `None` when the GPU path is
+/// unavailable, the workload is below threshold, or either operand isn't
+/// device-resident (shape-driven branching is the caller's job).
+fn gpu_add_elementwise_persistent(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    n: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.add_elementwise.as_ref()?;
+    if n == 0 || n < GPU_ADD_ELEMENTWISE_MIN {
+        return None;
+    }
+    if a.len() != n || b.len() != n {
+        return None;
+    }
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+    let out = ctx.dev.alloc_uninit::<f32>(n).ok()?;
+
+    let dims_pc: [u32; 1] = [n as u32];
+    let groups = (n as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_a, &*buf_b, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: Arc::new(out),
+        len: n,
     })
 }
 
@@ -1255,13 +1316,23 @@ impl MathBackend for ScryGpuBackend {
         b_shape: &Shape,
         out_shape: &Shape,
     ) -> ScryGpuStorage {
+        let a_dims = a_shape.dims();
+        let b_dims = b_shape.dims();
+        let out_dims = out_shape.dims();
+
+        // Fast path: same-shape add — ResNet residual adds, attention output
+        // sums, etc. Most common case; checked first so we don't fall through
+        // the row-bias branch.
+        if a_dims == out_dims && b_dims == out_dims {
+            if let Some(gpu_out) = gpu_add_elementwise_persistent(a, b, out_shape.numel()) {
+                return gpu_out;
+            }
+        }
+
         // Fast path: column broadcast `[rows, cols] + [rows, 1]` — Conv2d's
         // bias add post-matmul. Mirrors the same pattern in `CpuBackend::add`
         // (and its swapped-operand twin). Kept on-device so the conv result
         // chains into the next layer without a round trip.
-        let a_dims = a_shape.dims();
-        let b_dims = b_shape.dims();
-        let out_dims = out_shape.dims();
         if out_dims.len() == 2 {
             let (rows, cols) = (out_dims[0], out_dims[1]);
             if a_dims == out_dims && b_dims == [rows, 1] {
@@ -1988,6 +2059,65 @@ mod tests {
         let storage = ScryGpuStorage::Cpu(input);
         let out = ScryGpuBackend::im2col_2d(&storage, c_in, h, w, k, k, stride, padding);
         assert!(!out.is_gpu(), "small im2col should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_add_elementwise_matches_cpu_within_tolerance() {
+        // Same-shape add — ResNet residual case. Use a 3D shape sized like a
+        // mid-network feature map (above GPU_ADD_ELEMENTWISE_MIN so the
+        // kernel engages) to exercise the actual call site.
+        let shape = Shape::new(&[256, 14, 14]);
+        let total = shape.numel();
+        let a: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.03 - 1.5).collect();
+        let b: Vec<f32> = (0..total).map(|i| ((i % 71) as f32) * 0.07 + 0.5).collect();
+
+        let gpu_a = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_add_elementwise_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
+            .expect("upload b after upload a succeeded");
+
+        let gpu_out = ScryGpuBackend::add(&gpu_a, &gpu_b, &shape, &shape, &shape);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "same-shape add over Gpu inputs should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::add(&a, &b, &shape, &shape, &shape);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_add_elementwise_below_threshold_falls_back_to_cpu() {
+        // Below GPU_ADD_ELEMENTWISE_MIN — even with both inputs Gpu-resident,
+        // the helper should return None and the path should fall through to
+        // the CPU add.
+        let shape = Shape::new(&[16, 16]);
+        let total = shape.numel();
+        assert!(total < GPU_ADD_ELEMENTWISE_MIN);
+        let a: Vec<f32> = (0..total).map(|i| i as f32 * 0.1).collect();
+        let b: Vec<f32> = (0..total).map(|i| i as f32 * 0.2).collect();
+
+        let gpu_a = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_add_elementwise_below_threshold_falls_back_to_cpu: {e}");
+                return;
+            }
+        };
+        let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
+            .expect("upload b after upload a succeeded");
+        let out = ScryGpuBackend::add(&gpu_a, &gpu_b, &shape, &shape, &shape);
+        assert!(!out.is_gpu(), "small same-shape add should fall back to Cpu");
     }
 
     #[test]

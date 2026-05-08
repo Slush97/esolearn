@@ -502,6 +502,45 @@ extern \"C\" __global__ void gelu(
     out[i] = 0.5f * x * (1.0f + tanhf(inner));
 }";
 
+    /// Same-shape elementwise add: `out[i] = a[i] + b[i]`.
+    ///
+    /// Distinct from [`BIAS_ADD`] (column-broadcast over a row vector) and
+    /// [`ADD_ROW_BIAS_CUDA`] (column-broadcast over a column vector). Use this
+    /// when both operands have identical shape — e.g. ResNet residual adds.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `a: array<f32>` (read)
+    ///   - `@binding(1)` `b: array<f32>` (read)
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`)
+    pub const ADD_ELEMENTWISE: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> a: array<f32>;
+@group(0) @binding(1) var<storage, read> b: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = a[i] + b[i];
+}";
+
+    /// CUDA C equivalent of [`ADD_ELEMENTWISE`].
+    #[cfg(feature = "cuda")]
+    pub const ADD_ELEMENTWISE_CUDA: &str = "\
+extern \"C\" __global__ void add_elementwise(
+    const float* a, const float* b, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = a[i] + b[i];
+}";
+
     /// Row-wise softmax over the last dimension (numerically stable).
     ///
     /// For an input tensor reshaped as `[n_rows, d]`, computes
