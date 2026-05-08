@@ -781,6 +781,81 @@ extern \"C\" __global__ void add_row_bias(
     out[idx] = a[idx] + bias[r];
 }";
 
+    /// Split a fused-QKV tensor and reshape to per-head layout.
+    ///
+    /// Reads `[seq, 3 * d_model]` row-major where columns `[0, d_model)` are
+    /// Q, `[d_model, 2*d_model)` are K, `[2*d_model, 3*d_model)` are V.
+    /// Writes three `[n_heads, seq, d_head]` row-major tensors with the head
+    /// dimension folded out:
+    ///
+    /// ```text
+    /// q[h, s, d] = qkv[s, h*d_head + d]
+    /// k[h, s, d] = qkv[s, d_model + h*d_head + d]
+    /// v[h, s, d] = qkv[s, 2*d_model + h*d_head + d]
+    /// ```
+    ///
+    /// One thread per `(h, s, d)` triple — each thread reads three values
+    /// from the same row of `qkv` and writes one each to `q`, `k`, `v`.
+    /// Replaces the trait default's full host round-trip in transformer
+    /// attention.
+    ///
+    /// **Kernel signature:** `split_qkv_reshape_heads(const float* qkv,
+    /// float* q, float* k, float* v,
+    /// unsigned int seq, unsigned int n_heads, unsigned int d_head)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(n_heads*seq*d_head).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const SPLIT_QKV_RESHAPE_HEADS_CUDA: &str = "\
+extern \"C\" __global__ void split_qkv_reshape_heads(
+    const float* qkv,
+    float* q, float* k, float* v,
+    unsigned int seq, unsigned int n_heads, unsigned int d_head
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = n_heads * seq * d_head;
+    if (idx >= total) return;
+    unsigned int d_model = n_heads * d_head;
+    // Decode (h, s, d) from the output index in [n_heads, seq, d_head]
+    // row-major: idx = (h*seq + s)*d_head + d.
+    unsigned int d = idx % d_head;
+    unsigned int rest = idx / d_head;
+    unsigned int s = rest % seq;
+    unsigned int h = rest / seq;
+    unsigned int row_base = s * 3u * d_model + h * d_head + d;
+    q[idx] = qkv[row_base];
+    k[idx] = qkv[row_base + d_model];
+    v[idx] = qkv[row_base + 2u * d_model];
+}";
+
+    /// Reverse of [`SPLIT_QKV_RESHAPE_HEADS_CUDA`]: pack `[n_heads, seq,
+    /// d_head]` back to `[seq, n_heads*d_head]` row-major.
+    ///
+    /// `out[s, h*d_head + d] = in[h, s, d]`. One thread per output element;
+    /// each thread does one strided load + one coalesced store.
+    ///
+    /// **Kernel signature:** `reshape_from_heads(const float* in, float* out,
+    /// unsigned int seq, unsigned int n_heads, unsigned int d_head)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(seq*n_heads*d_head).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const RESHAPE_FROM_HEADS_CUDA: &str = "\
+extern \"C\" __global__ void reshape_from_heads(
+    const float* input, float* out,
+    unsigned int seq, unsigned int n_heads, unsigned int d_head
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int d_model = n_heads * d_head;
+    unsigned int total = seq * d_model;
+    if (idx >= total) return;
+    // Decode (s, h, d) from output index in [seq, n_heads*d_head] row-major:
+    // idx = s*d_model + h*d_head + d.
+    unsigned int s = idx / d_model;
+    unsigned int rem = idx - s * d_model;
+    unsigned int h = rem / d_head;
+    unsigned int d = rem - h * d_head;
+    out[idx] = input[(h * seq + s) * d_head + d];
+}";
+
     /// 2D batch normalization (inference) with stored running stats.
     ///
     /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),

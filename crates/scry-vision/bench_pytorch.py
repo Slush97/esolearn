@@ -90,6 +90,7 @@ def main() -> None:
 
     bench_model("ResNet-18", models.resnet18, dtype)
     bench_model("ResNet-50", models.resnet50, dtype)
+    bench_model("ViT-B/16", models.vit_b_16, dtype)
 
 
 if __name__ == "__main__":

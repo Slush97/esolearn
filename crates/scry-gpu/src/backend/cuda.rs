@@ -350,6 +350,91 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Run cuBLAS strided batched SGEMM without synchronizing.
+    ///
+    /// Computes `C[i] = op_a(A[i]) · op_b(B[i])` for `i in 0..batch`, where
+    /// each per-batch matrix is laid out row-major with the natural stride
+    /// (`m*k` for A, `k*n` for B, `m*n` for C). Single cuBLAS launch covers
+    /// all batches — replaces an N-loop over `cublas_matmul_async` (cheaper
+    /// host launch latency, lets cuBLAS pick a tensor-core-friendly algo
+    /// for the whole batch).
+    ///
+    /// Storage shapes (row-major):
+    /// - A: `[batch, m, k]` if `!trans_a` else `[batch, k, m]`
+    /// - B: `[batch, k, n]` if `!trans_b` else `[batch, n, k]`
+    /// - C: `[batch, m, n]`
+    #[allow(clippy::too_many_arguments)]
+    pub fn cublas_strided_batched_matmul_async(
+        &self,
+        a: &CudaBuffer,
+        b: &CudaBuffer,
+        c: &mut CudaBuffer,
+        batch: u32,
+        m: u32,
+        n: u32,
+        k: u32,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> Result<()> {
+        // Column-major swap trick: row-major `C = op_a(A) · op_b(B)` becomes
+        // col-major `Cᵀ = op_b(B)ᵀ · op_a(A)ᵀ`. We pass `B_buf` as cuBLAS's
+        // first matrix arg and `A_buf` as second. Op flags travel with the
+        // arg they apply to: cuBLAS's op-on-first matches user's trans_b,
+        // and op-on-second matches user's trans_a.
+        let cu_op_for_b = if trans_b {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        let cu_op_for_a = if trans_a {
+            cublasOperation_t::CUBLAS_OP_T
+        } else {
+            cublasOperation_t::CUBLAS_OP_N
+        };
+        // Leading dim is the row-major row size of the buffer (= the
+        // number of rows in the col-major view, which is what cuBLAS
+        // consumes for `lda`/`ldb` regardless of op flag).
+        let row_stride_b = if trans_b { k } else { n };
+        let row_stride_a = if trans_a { m } else { k };
+        let stride_a = (m * k) as i64;
+        let stride_b = (k * n) as i64;
+        let stride_c = (m * n) as i64;
+
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            let blas = self
+                .blas
+                .lock()
+                .map_err(|_| backend_err(BackendOp::MutexPoisoned, "cublas"))?;
+            let (a_ptr, _a_guard) = a.inner.device_ptr(&self.stream);
+            let (b_ptr, _b_guard) = b.inner.device_ptr(&self.stream);
+            let (c_ptr, _c_guard) = c.inner.device_ptr_mut(&self.stream);
+
+            cudarc::cublas::result::sgemm_strided_batched(
+                *blas.handle(),
+                cu_op_for_b,
+                cu_op_for_a,
+                n as i32,
+                m as i32,
+                k as i32,
+                &1.0f32,
+                b_ptr as *const f32,
+                row_stride_b as i32,
+                stride_b,
+                a_ptr as *const f32,
+                row_stride_a as i32,
+                stride_a,
+                &0.0f32,
+                c_ptr as *mut f32,
+                n as i32,
+                stride_c,
+                batch as i32,
+            )
+            .map_err(|e| backend_err(BackendOp::CuBlas, e))?;
+        }
+        Ok(())
+    }
+
     /// Run a cuDNN 2D convolution forward pass without synchronizing.
     ///
     /// Implicit-GEMM (or Winograd / FFT — cuDNN's heuristic picks per shape)

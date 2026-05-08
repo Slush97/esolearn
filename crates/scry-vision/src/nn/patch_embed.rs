@@ -43,6 +43,13 @@ impl<B: MathBackend> PatchEmbedding<B> {
         }
     }
 
+    /// Upload weights and bias to GPU storage (no-op on CPU). Call once
+    /// before benchmarking; subsequent forwards skip the per-call upload.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.proj.data);
+        B::to_device_in_place(&mut self.bias.data);
+    }
+
     /// Forward pass: `[C, H, W]` → `[num_patches, embed_dim]`.
     ///
     /// Panics if H or W is not divisible by `patch_size`.
