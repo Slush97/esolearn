@@ -350,6 +350,16 @@ impl Backend for CudaBackend {
             stream: Arc::clone(&self.stream),
         })
     }
+
+    fn synchronize(&self) -> Result<()> {
+        // Drain every async dispatch issued on this stream. Needed any time
+        // the host needs to observe completion timing (benchmarks) or state
+        // through a path that doesn't already sync (`Buffer::download` does
+        // sync internally; the async dispatch helpers do not).
+        self.stream
+            .synchronize()
+            .map_err(|e| backend_err(BackendOp::StreamSync, e))
+    }
 }
 
 // ── Buffer operations ──

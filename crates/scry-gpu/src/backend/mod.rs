@@ -89,6 +89,17 @@ pub trait Backend: Sized {
     /// Allocates a new buffer and copies `size` bytes from `src` into it.
     /// The copy is synchronous (blocks until complete).
     fn copy_buffer(&self, src: &Self::Buffer, size: u64) -> Result<Self::Buffer>;
+
+    /// Block until all previously-issued work on the backend's stream/queue
+    /// has completed.
+    ///
+    /// Needed by benchmarks (the host needs to wait for async dispatches to
+    /// finish before stopping the timer) and any caller that observes GPU
+    /// state through a non-`Buffer::download` path. The default impl is a
+    /// no-op for backends whose dispatch path is already synchronous.
+    fn synchronize(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Operations available on a backend buffer.

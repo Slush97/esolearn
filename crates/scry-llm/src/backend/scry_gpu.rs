@@ -1036,6 +1036,24 @@ impl ScryGpuBackend {
         }
     }
 
+    /// Block until every previously-issued GPU dispatch has completed.
+    ///
+    /// Bench-only and diagnostic use: the persistent path runs async on
+    /// CUDA so that chains of dispatches don't pay a sync per op. A
+    /// benchmark needs to wait for the work to actually finish before
+    /// stopping the timer, otherwise it measures host-side launch latency
+    /// rather than GPU execution time. Production callers either trigger
+    /// sync via `Buffer::download` (which already syncs internally) or
+    /// don't need to observe completion at all.
+    ///
+    /// Returns `Err` only if scry-gpu is unavailable.
+    pub fn synchronize() -> Result<(), String> {
+        let ctx = get_ctx().ok_or_else(|| "scry-gpu unavailable".to_string())?;
+        ctx.dev
+            .synchronize()
+            .map_err(|e| format!("scry-gpu synchronize: {e}"))
+    }
+
     /// Move storage to CPU residency. No-op if already on CPU.
     pub fn to_cpu(storage: &ScryGpuStorage) -> ScryGpuStorage {
         match storage {

@@ -68,6 +68,10 @@ fn run_resnet18(input: &[f32]) {
     let gpu_input = Tensor::<ScryGpuBackend>::from_vec(input.to_vec(), Shape::new(&[3, 224, 224]));
     let gpu_lazy_ms = time_ms(2, 5, || {
         let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
+        // Persistent path uses async dispatch on CUDA — sync the stream
+        // before stopping the timer so we measure GPU execution, not host
+        // launch latency. Mirrors PyTorch's `torch.cuda.synchronize()`.
+        ScryGpuBackend::synchronize().expect("synchronize");
     });
     println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
 
@@ -82,6 +86,7 @@ fn run_resnet18(input: &[f32]) {
         Tensor::<ScryGpuBackend>::new(input_storage, Shape::new(&[3, 224, 224]));
     let gpu_resident_ms = time_ms(2, 5, || {
         let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
+        ScryGpuBackend::synchronize().expect("synchronize");
     });
     println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
         cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
@@ -101,6 +106,7 @@ fn run_resnet50(input: &[f32]) {
     let gpu_input = Tensor::<ScryGpuBackend>::from_vec(input.to_vec(), Shape::new(&[3, 224, 224]));
     let gpu_lazy_ms = time_ms(2, 5, || {
         let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
+        ScryGpuBackend::synchronize().expect("synchronize");
     });
     println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
 
@@ -112,6 +118,7 @@ fn run_resnet50(input: &[f32]) {
         Tensor::<ScryGpuBackend>::new(input_storage, Shape::new(&[3, 224, 224]));
     let gpu_resident_ms = time_ms(2, 5, || {
         let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
+        ScryGpuBackend::synchronize().expect("synchronize");
     });
     println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
         cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);

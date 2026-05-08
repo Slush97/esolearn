@@ -356,6 +356,23 @@ impl Device {
         }
     }
 
+    /// Block until every previously-issued dispatch has completed.
+    ///
+    /// Async paths ([`Self::run_configured_async`],
+    /// [`Self::cublas_matmul_async`]) elide the per-call host sync to keep
+    /// chained dispatches cheap, but a benchmark needs to wait for the GPU
+    /// to actually finish before stopping the timer. This is the explicit
+    /// drain. On the synchronous Vulkan path it's a no-op since each
+    /// dispatch already waits for its own fence.
+    pub fn synchronize(&self) -> Result<()> {
+        match &self.inner {
+            #[cfg(feature = "vulkan")]
+            DeviceInner::Vulkan(b) => b.synchronize(),
+            #[cfg(feature = "cuda")]
+            DeviceInner::Cuda(b) => b.synchronize(),
+        }
+    }
+
     /// Device name (for diagnostics / logging).
     pub fn name(&self) -> &str {
         match &self.inner {
