@@ -64,7 +64,9 @@ impl<B: MathBackend> BasicBlock<B> {
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
             Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
-            None => Tensor::from_vec(input.to_vec(), input.shape.clone()),
+            // Cheap clone — on ScryGpuBackend this is an Arc bump on the
+            // device buffer, not a download.
+            None => Tensor::<B>::new(B::clone_storage(&input.data), input.shape.clone()),
         };
 
         let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
@@ -122,7 +124,9 @@ impl<B: MathBackend> Bottleneck<B> {
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let identity = match self.downsample {
             Some((ref ds_conv, ref ds_bn)) => ds_bn.forward(&ds_conv.forward(input)),
-            None => Tensor::from_vec(input.to_vec(), input.shape.clone()),
+            // Cheap clone — on ScryGpuBackend this is an Arc bump on the
+            // device buffer, not a download.
+            None => Tensor::<B>::new(B::clone_storage(&input.data), input.shape.clone()),
         };
 
         let x = relu(&self.bn1.forward(&self.conv1.forward(input)));
@@ -319,14 +323,13 @@ impl<B: MathBackend> ResNet<B> {
         // Global average pool: [C, H, W] → [C, 1, 1]
         let x = self.avgpool.forward(&x);
         let feature_dim = x.shape.dims()[0];
-        let features = Tensor::<B>::from_vec(x.to_vec(), Shape::new(&[feature_dim]));
 
-        // FC layer (if classification mode)
+        // FC layer (if classification mode). Avgpool's [C, 1, 1] output has
+        // C*1*1 = feature_dim elements in the same row-major layout as
+        // [1, feature_dim], so the matmul reads it directly — no copy.
         if let (Some(weight), Some(bias)) = (&self.fc_weight, &self.fc_bias) {
-            // features[1, feature_dim] @ weight[feature_dim, num_classes] + bias
-            let features_2d = B::from_vec(features.to_vec(), &Shape::new(&[1, feature_dim]));
             let logits = B::matmul(
-                &features_2d,
+                &x.data,
                 &weight.data,
                 1,
                 feature_dim,
@@ -337,9 +340,10 @@ impl<B: MathBackend> ResNet<B> {
             let out_shape = Shape::new(&[self.config.num_classes]);
             let bias_shape = Shape::new(&[self.config.num_classes]);
             let result = B::add(&logits, &bias.data, &out_shape, &bias_shape, &out_shape);
-            Tensor::new(result, out_shape)
+            Tensor::<B>::new(result, out_shape)
         } else {
-            features
+            // Reshape [feature_dim, 1, 1] → [feature_dim] (same storage).
+            Tensor::<B>::new(x.data, Shape::new(&[feature_dim]))
         }
     }
 }

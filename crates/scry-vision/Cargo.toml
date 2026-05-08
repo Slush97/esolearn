@@ -47,6 +47,10 @@ name = "bench"
 required-features = ["safetensors"]
 
 [[example]]
+name = "bench_gpu"
+required-features = ["scry-gpu-cuda"]
+
+[[example]]
 name = "inspect_keys"
 required-features = ["safetensors"]
 
