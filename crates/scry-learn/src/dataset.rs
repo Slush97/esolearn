@@ -866,6 +866,7 @@ fn parse_target_column(rows: &[Vec<String>], col_idx: usize) -> (Vec<f64>, Optio
 /// Returns `(encoded_values, label_map)` where `label_map` is `None` for purely
 /// numeric columns and `Some(Vec<String>)` for label-encoded columns. The label
 /// map index `i` corresponds to encoded value `i as f64`.
+#[cfg(feature = "csv")]
 fn parse_feature_column(rows: &[Vec<String>], col_idx: usize) -> (Vec<f64>, Option<Vec<String>>) {
     // Detect whether *every* non-empty cell parses as f64.
     let mut all_numeric = true;
