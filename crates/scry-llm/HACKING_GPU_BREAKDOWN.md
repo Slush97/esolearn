@@ -428,8 +428,59 @@ perf comparison (item #6 above) is where the cumulative wins get
 validated end-to-end. Per-op wins don't count until they show up in a
 full forward pass.
 
+## Threshold tuning (2026-05-08)
+
+`benches/threshold_sweep.rs` sweeps square matmul side ∈ [16, 256] and
+elementwise n ∈ [1 KiB, 1 Mi], comparing CPU vs GPU-resident. Results on
+RTX 5070 Ti, post-async-dispatch + uninit alloc:
+
+**Matmul** (square M=K=N, GPU includes one `to_vec` sync at end):
+
+| side | FMAs    | cpu µs | gpu µs | speedup |
+|---:|---:|---:|---:|---:|
+|  16 |   4 096 |  1.39 | 10.28 | 0.14× cpu |
+|  24 |  13 824 |  3.38 | 11.74 | 0.29× cpu |
+|  32 |  32 768 |  6.46 | 12.95 | 0.50× cpu |
+|  40 |  64 000 | 16.26 | 13.29 | **1.22× gpu** |
+|  48 | 110 592 | 23.33 | 13.20 | 1.77× gpu |
+|  64 | 262 144 | 45.00 | 13.75 | 3.27× gpu |
+| 128 |   2.1 M | 108.88 | 18.03 | 6.04× gpu |
+| 256 |  16.8 M | 728.06 | 34.86 | 20.88× gpu |
+
+**Elementwise (GELU)**:
+
+| n       | cpu µs  | gpu µs  | speedup |
+|---:|---:|---:|---:|
+|  1 024  |    6.09 |   7.71 | 0.79× cpu |
+|  2 048  |   12.18 |   8.67 | **1.40× gpu** |
+|  4 096  |   24.57 |   9.50 | 2.59× gpu |
+| 16 384  |  182.28 |  12.93 | 14.10× gpu |
+| 65 536  |  878.71 |  28.69 | 30.63× gpu |
+|  1 Mi   | 1206.56 | 1059.75| 1.14× gpu |
+
+Single-op crossovers: matmul ~50K FMAs (between side 32 and 40),
+elementwise ~1.5K elements. Chain-mode crossovers are lower in both
+cases — the bench's GPU column includes a `to_vec` sync that a real
+chain pays once per chain, not per op.
+
+Constants in `crates/scry-llm/src/backend/scry_gpu.rs` updated:
+
+| const                  | before  | after   |
+|---|---:|---:|
+| `GPU_MIN_ELEMENTS`     | 65 536  | **32 768** |
+| `GPU_ELEMENTWISE_MIN`  | 16 384  | **2 048**  |
+
+`GPU_MIN_ELEMENTS = 32 768` admits side-32 matmul to GPU, where the
+single-op cost is ~6 µs slower than CPU, but any chain at that size or
+larger is now unambiguously faster. `GPU_ELEMENTWISE_MIN = 2 048` lands
+just above the empirical breakeven — the previous 16 384 was set when
+GELU dispatch carried a wasted `cuMemsetD8Async` (now skipped) and a
+per-call `stream.synchronize()` (now async). Breakdown bench unchanged
+across all three sizes (within noise).
+
 ## Source
 
 - Bench: `crates/scry-llm/benches/gpu_breakdown.rs`
+- Threshold sweep: `crates/scry-llm/benches/threshold_sweep.rs`
 - Companion: `HANDOFF_gpu_resident.md` (next-experiment selection rationale)
 - Memory: `project_scry_vision_gpu_residency.md`

@@ -26,7 +26,14 @@ use crate::tensor::shape::Shape;
 
 /// Minimum M*K*N product before engaging GPU (below this, CPU/BLAS is faster
 /// due to per-dispatch overhead: buffer creation, submission, readback).
-const GPU_MIN_ELEMENTS: usize = 65_536;
+///
+/// Empirical crossover on RTX 5070 Ti / cuBLAS / async dispatch is ~50K FMAs
+/// for an isolated matmul; in chains the GPU wins from much lower sizes
+/// because the kernel dispatch is the only cost (no upload, no sync until
+/// the chain ends). 32_768 splits the difference: side ≥ 32 goes GPU,
+/// which loses ~6 µs/op at exactly side 32 in single-op mode but wins
+/// big in chains. See `benches/threshold_sweep.rs`.
+const GPU_MIN_ELEMENTS: usize = 32_768;
 
 /// Maximum GPU buffer size in bytes (128 MiB).
 const MAX_GPU_BUFFER_BYTES: u64 = 128 * 1024 * 1024;
@@ -347,9 +354,15 @@ fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer
 }
 
 /// Below this element count, elementwise ops are not worth the GPU dispatch
-/// overhead. Higher than the matmul threshold because elementwise ops are
-/// memory-bound (no compute reuse).
-const GPU_ELEMENTWISE_MIN: usize = 16_384;
+/// overhead.
+///
+/// Empirical crossover (n=1024 CPU 6 µs / GPU 7.7 µs; n=2048 CPU 12 µs /
+/// GPU 8.7 µs) is around 1.5K elements on async-dispatched CUDA. Set just
+/// above the breakeven so single-op GELU never regresses; chain-mode GPU
+/// wins from any size. The previous 16_384 cutoff was set when GELU
+/// dispatch carried a wasted `cuMemsetD8Async` (now skipped via uninit
+/// alloc) and per-call sync (now async). See `benches/threshold_sweep.rs`.
+const GPU_ELEMENTWISE_MIN: usize = 2_048;
 
 /// Run a single-input elementwise kernel (RELU/GELU/etc) on `input`.
 /// Returns a fresh GPU buffer of the same length.
@@ -510,6 +523,34 @@ impl ScryGpuBackend {
                 ScryGpuStorage::Cpu(v)
             }
         }
+    }
+
+    /// Bench-only: run the persistent GPU matmul without the
+    /// [`GPU_MIN_ELEMENTS`] gate, so a sweep can probe sub-threshold sizes.
+    /// Returns `None` if the GPU is unavailable. Production callers should go
+    /// through [`MathBackend::matmul`].
+    pub fn matmul_force_gpu_for_bench(
+        a: &ScryGpuStorage,
+        b: &ScryGpuStorage,
+        m: usize,
+        k: usize,
+        n: usize,
+    ) -> Option<ScryGpuStorage> {
+        gpu_matmul_persistent(a, b, m, k, n, false, false)
+    }
+
+    /// Bench-only: run the persistent GPU GELU without the
+    /// [`GPU_ELEMENTWISE_MIN`] gate. Returns `None` if the GPU is unavailable.
+    pub fn gelu_force_gpu_for_bench(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
+        let ctx = get_ctx()?;
+        let kernel = ctx.gelu.as_ref()?;
+        let n = input.len();
+        let buf_in = as_gpu_buffer(input)?;
+        let out = run_unary_elementwise(kernel, &buf_in, n)?;
+        Some(ScryGpuStorage::Gpu {
+            buf: Arc::new(out),
+            len: n,
+        })
     }
 
     /// Experimental: record `matmul` + `gelu` into a single `Device::batch()`
