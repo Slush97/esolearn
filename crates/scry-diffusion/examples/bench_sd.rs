@@ -73,6 +73,7 @@ struct Args {
     warmup: u32,
     bf16_matmul: bool,
     no_cudnn: bool,
+    profile: bool,
 }
 
 impl Args {
@@ -88,6 +89,7 @@ impl Args {
         let mut warmup: u32 = 1;
         let mut bf16_matmul = false;
         let mut no_cudnn = false;
+        let mut profile = false;
 
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -143,6 +145,7 @@ impl Args {
                 }
                 "--bf16-matmul" => bf16_matmul = true,
                 "--no-cudnn" => no_cudnn = true,
+                "--profile" => profile = true,
                 "-h" | "--help" => {
                     println!("{}", USAGE);
                     std::process::exit(0);
@@ -165,6 +168,7 @@ impl Args {
             warmup,
             bf16_matmul,
             no_cudnn,
+            profile,
         })
     }
 }
@@ -186,7 +190,8 @@ Options:
   --runs N              Timed runs after warmup (default: 3)
   --warmup N            Discarded warmup runs (default: 1)
   --bf16-matmul         Enable bf16 matmul fast-path (requires scry-gpu-bf16)
-  --no-cudnn            Disable cuDNN conv fast-path (requires scry-gpu-cudnn)";
+  --no-cudnn            Disable cuDNN conv fast-path (requires scry-gpu-cudnn)
+  --profile             Print per-section timing breakdown (requires `profile` feature)";
 
 fn median(mut xs: Vec<f64>) -> f64 {
     if xs.is_empty() {
@@ -279,6 +284,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_times = Vec::with_capacity(args.runs as usize);
     let mut all_step_times: Vec<f64> = Vec::new();
 
+    // Profile collector (no-op when `profile` feature is off). Reset
+    // before the first timed run so warmup-phase sections don't pollute
+    // the breakdown.
+    if args.profile {
+        scry_diffusion::profile::reset();
+    }
+
     for r in 0..args.runs {
         // Shared mutable state for the progress callback. The callback fires
         // BEFORE each unet step, so successive deltas measure step durations
@@ -333,6 +345,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .fold(f64::NEG_INFINITY, f64::max);
         println!("per-step latency   : median {med_step:6.2} ms  (n={n})");
         println!("  step min/max     : {mn:6.2} / {mx:6.2} ms");
+    }
+
+    if args.profile {
+        scry_diffusion::profile::print_summary();
     }
     Ok(())
 }

@@ -57,39 +57,43 @@ impl<B: MathBackend> ResBlock<B> {
     /// Linear before broadcast-adding it into the channels of the
     /// post-conv1 activation.
     pub fn forward(&mut self, input: &Tensor<B>, time_embed: &Tensor<B>) -> Result<Tensor<B>> {
-        // ---- Main branch: norm1 → silu → conv1 ---------------------
-        let h = self.norm1.forward(input);
-        let h = silu(&h);
-        let h = self.conv1.forward(&h);
+        use crate::profile::time_section;
 
-        // ---- Time embedding projection (SiLU → Linear → channel-bias add).
-        // HF: `temb = nonlinearity(temb); temb = self.time_emb_proj(temb)[:, :, None, None]`
-        // — i.e. broadcast into the spatial dims of the post-conv1 activation.
-        let t_act = silu(time_embed);
-        let t_proj = B::matmul_bias(
-            &t_act.data,
-            &self.time_emb_proj_weight.data,
-            &self.time_emb_proj_bias.data,
-            1,
-            self.time_embed_dim,
-            self.out_channels,
-            false,
-            false,
-        );
-        let t_proj_tensor = Tensor::new(t_proj, Shape::new(&[self.out_channels]));
-        let h = add_channel_bias(&h, &t_proj_tensor);
+        Ok(time_section("resblock.forward", || {
+            // ---- Main branch: norm1 → silu → conv1 -----------------
+            let h = self.norm1.forward(input);
+            let h = silu(&h);
+            let h = self.conv1.forward(&h);
 
-        // ---- norm2 → silu → conv2 ----------------------------------
-        let h = self.norm2.forward(&h);
-        let h = silu(&h);
-        let h = self.conv2.forward(&h);
+            // ---- Time embedding projection (SiLU → Linear → channel-bias add).
+            // HF: `temb = nonlinearity(temb); temb = self.time_emb_proj(temb)[:, :, None, None]`
+            // — i.e. broadcast into the spatial dims of the post-conv1 activation.
+            let t_act = silu(time_embed);
+            let t_proj = B::matmul_bias(
+                &t_act.data,
+                &self.time_emb_proj_weight.data,
+                &self.time_emb_proj_bias.data,
+                1,
+                self.time_embed_dim,
+                self.out_channels,
+                false,
+                false,
+            );
+            let t_proj_tensor = Tensor::new(t_proj, Shape::new(&[self.out_channels]));
+            let h = add_channel_bias(&h, &t_proj_tensor);
 
-        // ---- Residual: 1x1 shortcut conv when channels change, else identity.
-        let shortcut = match &self.conv_shortcut {
-            Some(c) => c.forward(input),
-            None => super::common::clone_tensor(input),
-        };
-        Ok(add_same(&shortcut, &h))
+            // ---- norm2 → silu → conv2 ------------------------------
+            let h = self.norm2.forward(&h);
+            let h = silu(&h);
+            let h = self.conv2.forward(&h);
+
+            // ---- Residual: 1x1 shortcut conv when channels change, else identity.
+            let shortcut = match &self.conv_shortcut {
+                Some(c) => c.forward(input),
+                None => super::common::clone_tensor(input),
+            };
+            add_same(&shortcut, &h)
+        }))
     }
 }
 

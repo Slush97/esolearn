@@ -22,6 +22,7 @@ pub mod conditioning;
 pub mod error;
 pub mod ops;
 pub mod pipeline;
+pub mod profile;
 pub mod scheduler;
 pub mod text_encoder;
 pub mod tokenizer;

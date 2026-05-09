@@ -10,6 +10,7 @@ description = "Diffusion-model inference (Stable Diffusion family) on the scry s
 
 [features]
 default = []
+profile = []
 cuda = ["scry-llm/cuda", "scry-vision/cuda"]
 scry-gpu = ["scry-llm/scry-gpu", "scry-vision/scry-gpu"]
 scry-gpu-cuda = ["scry-llm/scry-gpu-cuda", "scry-vision/scry-gpu-cuda"]

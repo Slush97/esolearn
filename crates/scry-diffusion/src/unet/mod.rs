@@ -110,56 +110,70 @@ impl<B: MathBackend> Unet<B> {
             )));
         }
 
+        use crate::profile::time_section;
+
         // ---- 1. conv_in ---------------------------------------------
-        let mut x = self.conv_in.forward(noisy_latent);
+        let mut x = time_section("unet.conv_in", || self.conv_in.forward(noisy_latent));
 
         // ---- 2. timestep embedding ---------------------------------
         // `block_out_channels[0]` sized sinusoidal embed → linear → silu →
         // linear → `[time_embed_dim]`.
         let bc0 = self.config.block_out_channels[0];
-        let t_sin = sinusoidal_timestep_embedding::<B>(timestep, bc0, 10_000.0)?;
-        let t1 = B::matmul_bias(
-            &t_sin.data,
-            &self.time_embed.linear_1_weight.data,
-            &self.time_embed.linear_1_bias.data,
-            1,
-            bc0,
-            self.config.time_embed_dim,
-            false,
-            false,
-        );
-        let t1_t: Tensor<B> = Tensor::new(t1, Shape::new(&[self.config.time_embed_dim]));
-        let t1_silu = silu(&t1_t);
-        let t2 = B::matmul_bias(
-            &t1_silu.data,
-            &self.time_embed.linear_2_weight.data,
-            &self.time_embed.linear_2_bias.data,
-            1,
-            self.config.time_embed_dim,
-            self.config.time_embed_dim,
-            false,
-            false,
-        );
-        let time_embed = Tensor::new(t2, Shape::new(&[self.config.time_embed_dim]));
+        let time_embed = time_section("unet.time_embed", || -> Result<Tensor<B>> {
+            let t_sin = sinusoidal_timestep_embedding::<B>(timestep, bc0, 10_000.0)?;
+            let t1 = B::matmul_bias(
+                &t_sin.data,
+                &self.time_embed.linear_1_weight.data,
+                &self.time_embed.linear_1_bias.data,
+                1,
+                bc0,
+                self.config.time_embed_dim,
+                false,
+                false,
+            );
+            let t1_t: Tensor<B> = Tensor::new(t1, Shape::new(&[self.config.time_embed_dim]));
+            let t1_silu = silu(&t1_t);
+            let t2 = B::matmul_bias(
+                &t1_silu.data,
+                &self.time_embed.linear_2_weight.data,
+                &self.time_embed.linear_2_bias.data,
+                1,
+                self.config.time_embed_dim,
+                self.config.time_embed_dim,
+                false,
+                false,
+            );
+            Ok(Tensor::new(t2, Shape::new(&[self.config.time_embed_dim])))
+        })?;
 
         // ---- 3. down blocks ----------------------------------------
         // Diffusers' `down_block_res_samples = (sample,) + ...` — the
         // conv_in output itself is the first skip.
         let mut skips: Vec<Tensor<B>> = Vec::with_capacity(16);
         skips.push(clone_tensor(&x));
-        for db in &mut self.down_blocks {
-            let (out, mut emitted) = db.forward(&x, &time_embed, conditioning)?;
-            x = out;
-            skips.append(&mut emitted);
-        }
+        x = time_section("unet.down_blocks", || -> Result<Tensor<B>> {
+            let mut cur = x;
+            for db in &mut self.down_blocks {
+                let (out, mut emitted) = db.forward(&cur, &time_embed, conditioning)?;
+                cur = out;
+                skips.append(&mut emitted);
+            }
+            Ok(cur)
+        })?;
 
         // ---- 4. mid block ------------------------------------------
-        x = self.mid_block.forward(&x, &time_embed, conditioning)?;
+        x = time_section("unet.mid_block", || {
+            self.mid_block.forward(&x, &time_embed, conditioning)
+        })?;
 
         // ---- 5. up blocks ------------------------------------------
-        for ub in &mut self.up_blocks {
-            x = ub.forward(&x, &mut skips, &time_embed, conditioning)?;
-        }
+        x = time_section("unet.up_blocks", || -> Result<Tensor<B>> {
+            let mut cur = x;
+            for ub in &mut self.up_blocks {
+                cur = ub.forward(&cur, &mut skips, &time_embed, conditioning)?;
+            }
+            Ok(cur)
+        })?;
         if !skips.is_empty() {
             return Err(Error::Llm(format!(
                 "unet forward: {} skips left unused after up blocks",
@@ -168,9 +182,11 @@ impl<B: MathBackend> Unet<B> {
         }
 
         // ---- 6. final norm + silu + conv_out -----------------------
-        x = self.conv_norm_out.forward(&x);
-        let x_silu = silu(&x);
-        Ok(self.conv_out.forward(&x_silu))
+        Ok(time_section("unet.tail", || {
+            x = self.conv_norm_out.forward(&x);
+            let x_silu = silu(&x);
+            self.conv_out.forward(&x_silu)
+        }))
     }
 }
 

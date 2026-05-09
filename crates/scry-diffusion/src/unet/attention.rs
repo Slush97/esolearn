@@ -230,20 +230,28 @@ impl<B: MathBackend> BasicTransformerBlock<B> {
         latent: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
+        use crate::profile::time_section;
+
         // Self-attention with pre-LN, residual-added.
-        let n1 = self.norm1.forward(latent);
-        let attn1_out = self.attn1.forward(&n1, &n1);
+        let attn1_out = time_section("xfblock.self_attn", || {
+            let n1 = self.norm1.forward(latent);
+            self.attn1.forward(&n1, &n1)
+        });
         let x = add_same(latent, &attn1_out);
 
         // Cross-attention with pre-LN; K/V come from the conditioning
         // text embeddings `[seq_len, cross_dim]`.
-        let n2 = self.norm2.forward(&x);
-        let attn2_out = self.attn2.forward(&n2, &conditioning.embeddings);
+        let attn2_out = time_section("xfblock.cross_attn", || {
+            let n2 = self.norm2.forward(&x);
+            self.attn2.forward(&n2, &conditioning.embeddings)
+        });
         let x = add_same(&x, &attn2_out);
 
         // FF MLP with pre-LN.
-        let n3 = self.norm3.forward(&x);
-        let ff_out = self.ff.forward(&n3);
+        let ff_out = time_section("xfblock.ff", || {
+            let n3 = self.norm3.forward(&x);
+            self.ff.forward(&n3)
+        });
         Ok(add_same(&x, &ff_out))
     }
 }
