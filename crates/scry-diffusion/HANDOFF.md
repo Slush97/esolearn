@@ -154,18 +154,91 @@ or HF `diffusers` are part of the "done" criterion, not optional polish.
 - Write `examples/txt2img.rs` properly — CLI args for prompt, output path,
   seed, steps, CFG scale.
 
-**M9 — Bench + perf pass**
+**M9a — `python/bench_pytorch.py`** (done 2026-05-08)
 
-- Add `crates/scry-diffusion/bench_pytorch.py` mirroring
-  `crates/scry-vision/bench_pytorch.py` — same prompt + seed, time per-step
-  + total wall-clock.
-- Add `examples/bench_sd.rs` with the equivalent on our side.
-- Expected wall-clock at 30 steps + CFG, RTX 5070 Ti: PyTorch ~3-5s,
-  us probably 15-30s on first land, target 5-10s after a perf pass.
-- Largest expected wins: bf16 routing for UNet matmuls (already wired in
-  `scry-llm`, just flip the toggle), CUDA graphs for the UNet step,
-  fused-attention kernel (the same one ViT round 3 in the project memory
-  flags as the next attack surface — this work makes it gating).
+Builds the diffusers `StableDiffusionPipeline` programmatically from the
+per-component dirs (no `model_index.json` in the snapshot — we keep the
+asset tree minimal). Reports per-step median latency via
+`callback_on_step_end` and total wall-clock; supports fp32/fp16/bf16.
+
+**M9b — `examples/bench_sd.rs`** (done 2026-05-08)
+
+Backend type is cfg-selected: `CpuBackend` by default, `ScryGpuBackend`
+under `--features scry-gpu-cuda`. Exposes `--bf16-matmul` and `--no-cudnn`
+toggles for the perf-pass sweep.
+
+**M9c — Perf pass** (open)
+
+Baseline numbers landed 2026-05-08 (RTX 5070 Ti, prompt + seed
+matched between Python and Rust):
+
+| Backend | Size | Steps | Total | Per-step |
+|---|---|---|---|---|
+| CPU | 64×64 | 2 | 8.78 s | 3815 ms |
+| GPU fp32 | 64×64 | 4 | 2.41 s | 423 ms |
+| GPU bf16 | 64×64 | 4 | 1.88 s | 446 ms |
+| GPU bf16 | 512×512 | 2 | 5.21 s | 2066 ms |
+| **PyTorch fp16** | **512×512** | **30** | **1.04 s** | **32.9 ms** |
+
+So our untuned GPU path is ~60× slower than PyTorch at full SD shape.
+The handoff's "first-land 15-30s" estimate was optimistic; projected
+30-step + 512×512 with current code is ~60 s. The gap is *not* a kernel
+quality gap — it's a residency / fusion gap.
+
+**Confirmed bottleneck — denoise-loop residency.** `pipeline.rs:141-158`
+incurs **4 GPU↔CPU transfers per step** under `ScryGpuBackend`:
+`scheduler.scale_model_input` takes/returns `Vec<f32>` (host), CFG combine
+runs on host (`cond_eps.to_vec()` + `uncond_eps.to_vec()`), and
+`scheduler.step` takes/returns `&[f32]`/`Vec<f32>`. With 30 steps × CFG
+batch=2 that's 120 transfers per image. The latent never stays on GPU.
+
+**Phased plan.** Land in order; gate each phase with a re-run of
+`bench_sd --steps 30 --size 512` so the wins are auditable.
+
+1. **Genericize the scheduler.** Change `Scheduler` to
+   `Scheduler<B: MathBackend>` with `scale_model_input(&self, &Tensor<B>, t) -> Tensor<B>`
+   and `step(&mut self, &Tensor<B>, t, &Tensor<B>) -> Result<Tensor<B>>`.
+   The math `ddim::step` actually uses (sqrt of two scalars,
+   element-wise mul/add, scalar scale of the eps term) is already in
+   `MathBackend` — no new kernels. CFG combine moves to a tiny
+   `MathBackend::axpby` (or just two `mul_elementwise` + `add`). Update
+   call sites: `pipeline.rs`, `txt2img.rs`, `bench_sd.rs`,
+   `check_ddim.rs`. Expected win: 4×→0× round-trips per step.
+
+2. **Flip bf16 by default for UNet matmuls.** The `scry-gpu-bf16` feature
+   plus `set_bf16_matmul(true)` is already wired and benched (row 3 vs
+   row 2 above is roughly free on small shapes; ~2× win at SD shapes is
+   expected once round-trips are gone). Either set the env var
+   `SCRY_GPU_MATMUL_BF16=1` from inside `Txt2ImgPipeline::generate` when
+   `scry-gpu-bf16` is enabled, or expose a `bf16` field on
+   `GenerationParams` that flips the toggle at the start of `generate`.
+
+3. **Fused attention kernel** (the "ViT round 3 attack surface" callout
+   in `project_scry_vision_gpu_residency`). SD 1.5's UNet has 16
+   `BasicTransformerBlock`s, each running self-attn + cross-attn. The
+   current path goes Q/K/V projections → reshape → matmul (Q·K^T) →
+   softmax → matmul (·V) → reshape → out_proj — 4 kernel dispatches
+   plus 2 reshape kernels per attention. A single fused-attn kernel
+   (FlashAttention-style with online softmax, or just a matmul-softmax-
+   matmul fusion via `Device::batch()`) collapses that. Pattern to
+   follow: `matmul_then_gelu_batched_for_bench` at
+   `scry-llm/src/backend/scry_gpu.rs:1975` is the existing PoC for
+   `Device::batch()`-mediated fusion; lift it into a real `MathBackend`
+   path or write the fused-attn shader directly.
+
+4. **CUDA graphs for the UNet step** (largest, do last). Once (1) keeps
+   the latent on GPU, the UNet forward is a stable graph of dispatches
+   per timestep — the only varying input is `t`'s sinusoidal embedding.
+   Record once, replay 30×. Requires extending `Device::batch()` /
+   `Device::run_configured_async` to expose a recordable graph
+   primitive; cuBLAS dispatches won't capture into a Vulkan-style batch,
+   so the bf16 path may need its own cuBLAS-graph recording.
+
+The reference implementation to crib from in cases (3)/(4) is HF
+diffusers' `xformers_memory_efficient_attention` and the cuBLAS
+`cublasLtMatmulAlgoCapGetAttribute` graph-capture pattern. Don't try to
+port FlashAttention's Triton kernel — write the WGSL/CUDA equivalents
+in-tree.
 
 **M10 — SDXL** (optional / opportunistic)
 
