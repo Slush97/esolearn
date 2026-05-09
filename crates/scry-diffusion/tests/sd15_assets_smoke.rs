@@ -169,8 +169,7 @@ fn unet_forward_shape_smoke() {
     let in_ch = cfg.in_channels;
     let out_ch = cfg.out_channels;
     let cross_dim = cfg.cross_attention_dim;
-    let mut unet =
-        Unet::<CpuBackend>::from_safetensors(cfg, &ckpt).expect("from_safetensors");
+    let mut unet = Unet::<CpuBackend>::from_safetensors(cfg, &ckpt).expect("from_safetensors");
 
     // Tiny 16×16 latent (vs the production 64×64 = 512px). The deepest
     // stage downsamples 3×, so we need spatial size ≥ 8 — 16 keeps the
@@ -178,15 +177,11 @@ fn unet_forward_shape_smoke() {
     // attention/upsample/downsample once.
     let h = 16;
     let w = 16;
-    let latent = Tensor::<CpuBackend>::from_vec(
-        vec![0.1f32; in_ch * h * w],
-        Shape::new(&[in_ch, h, w]),
-    );
+    let latent =
+        Tensor::<CpuBackend>::from_vec(vec![0.1f32; in_ch * h * w], Shape::new(&[in_ch, h, w]));
     // Fake conditioning: 77 tokens × cross_attention_dim, all zeros works.
-    let embeddings = Tensor::<CpuBackend>::from_vec(
-        vec![0.0f32; 77 * cross_dim],
-        Shape::new(&[77, cross_dim]),
-    );
+    let embeddings =
+        Tensor::<CpuBackend>::from_vec(vec![0.0f32; 77 * cross_dim], Shape::new(&[77, cross_dim]));
     let cond = Conditioning {
         embeddings,
         extras: None,

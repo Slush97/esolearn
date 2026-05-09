@@ -49,10 +49,10 @@ use scry_diffusion::vae::decoder::{VaeDecoder, VaeDecoderConfig};
 use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
 
-#[cfg(feature = "scry-gpu-cuda")]
-use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 #[cfg(not(feature = "scry-gpu-cuda"))]
 use scry_llm::backend::cpu::CpuBackend as Backend;
+#[cfg(feature = "scry-gpu-cuda")]
+use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 
 const BACKEND_NAME: &str = if cfg!(feature = "scry-gpu-cuda") {
     "scry-gpu (CUDA)"
@@ -92,7 +92,9 @@ impl Args {
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--snapshot" => snapshot = PathBuf::from(args.next().ok_or("--snapshot needs path")?),
+                "--snapshot" => {
+                    snapshot = PathBuf::from(args.next().ok_or("--snapshot needs path")?)
+                }
                 "--prompt" => prompt = args.next().ok_or("--prompt needs string")?,
                 "--negative-prompt" | "--negative" => {
                     negative_prompt = args.next().ok_or("--negative-prompt needs string")?;
@@ -217,7 +219,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg = args.cfg,
         s = args.seed,
     );
-    println!("Runs        : {} timed (after {} warmup)", args.runs, args.warmup);
+    println!(
+        "Runs        : {} timed (after {} warmup)",
+        args.runs, args.warmup
+    );
 
     // ---- Apply runtime backend toggles before any forward pass. ----
     apply_backend_toggles(args.bf16_matmul, args.no_cudnn)?;
@@ -230,11 +235,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SafetensorsCheckpoint::open(args.snapshot.join("text_encoder/model.safetensors"))?;
     let text_encoder =
         ClipTextEncoder::<Backend>::from_safetensors(ClipTextConfig::clip_vit_l(), &text_ckpt)?;
-    let unet_ckpt =
-        SafetensorsCheckpoint::open(args.snapshot.join("unet/diffusion_pytorch_model.safetensors"))?;
+    let unet_ckpt = SafetensorsCheckpoint::open(
+        args.snapshot
+            .join("unet/diffusion_pytorch_model.safetensors"),
+    )?;
     let unet = Unet::<Backend>::from_safetensors(UnetConfig::sd_1_5(), &unet_ckpt)?;
-    let vae_ckpt =
-        SafetensorsCheckpoint::open(args.snapshot.join("vae/diffusion_pytorch_model.safetensors"))?;
+    let vae_ckpt = SafetensorsCheckpoint::open(
+        args.snapshot
+            .join("vae/diffusion_pytorch_model.safetensors"),
+    )?;
     let vae = VaeDecoder::<Backend>::from_safetensors(VaeDecoderConfig::sd_1_5(), &vae_ckpt)?;
     let scheduler = DdimScheduler::new(DdimConfig::sd_1_5())?;
     println!("  loaded in {:.1}s", t_load.elapsed().as_secs_f64());
@@ -276,7 +285,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 0..N-2 (the last step's time runs after the final callback and is
         // not captured here). Total wall-clock covers everything including
         // the un-callbacked tail.
-        let marks = Arc::new(Mutex::new(Vec::<Instant>::with_capacity(args.steps as usize + 1)));
+        let marks = Arc::new(Mutex::new(Vec::<Instant>::with_capacity(
+            args.steps as usize + 1,
+        )));
         let marks_cb = marks.clone();
         pipeline.progress = Some(Box::new(move |_i, _total, _t| {
             // Cheap host-side timestamp; on GPU we accept some launch-latency
@@ -315,10 +326,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !all_step_times.is_empty() {
         let med_step = median(all_step_times.clone());
         let n = all_step_times.len();
-        let mn = all_step_times
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
+        let mn = all_step_times.iter().copied().fold(f64::INFINITY, f64::min);
         let mx = all_step_times
             .iter()
             .copied()
@@ -343,7 +351,10 @@ fn backend_sync() {
 #[cfg(not(feature = "scry-gpu-cuda"))]
 fn backend_sync() {}
 
-fn apply_backend_toggles(bf16_matmul: bool, no_cudnn: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn apply_backend_toggles(
+    bf16_matmul: bool,
+    no_cudnn: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     if bf16_matmul {
         apply_bf16_matmul()?;
     }

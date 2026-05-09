@@ -13,6 +13,14 @@
 //! ```
 //! where `ε_θ` is the UNet's predicted noise. With η=0 (DDIM default) the
 //! sampler is fully deterministic.
+//!
+//! The per-step update collapses to `out = c_x · x_t + c_eps · ε` with
+//! two host-side scalar coefficients, so the on-device work is just two
+//! [`MathBackend::scale`] dispatches plus one [`MathBackend::add`] —
+//! latents stay on the device they came in on.
+
+use scry_llm::backend::MathBackend;
+use scry_llm::tensor::Tensor;
 
 use super::Scheduler;
 use crate::error::{Error, Result};
@@ -70,6 +78,10 @@ impl DdimConfig {
 }
 
 /// DDIM scheduler.
+///
+/// All scheduler state is host-side scalars (no per-step tensors), which
+/// keeps the type backend-agnostic — the same `DdimScheduler` instance
+/// satisfies `Scheduler<CpuBackend>` and `Scheduler<ScryGpuBackend>`.
 pub struct DdimScheduler {
     /// Configuration.
     pub config: DdimConfig,
@@ -91,9 +103,7 @@ impl DdimScheduler {
     pub fn new(config: DdimConfig) -> Result<Self> {
         let t = config.num_train_timesteps as usize;
         if t == 0 {
-            return Err(Error::Scheduler(
-                "num_train_timesteps must be > 0".into(),
-            ));
+            return Err(Error::Scheduler("num_train_timesteps must be > 0".into()));
         }
         let betas = build_betas(&config);
         let mut alphas_cumprod = Vec::with_capacity(t);
@@ -108,6 +118,52 @@ impl DdimScheduler {
             alphas_cumprod,
             step_size: 0,
         })
+    }
+
+    /// Resolve the two scalar coefficients `(c_in, c_pred)` so that the
+    /// next latent equals `c_in · x_t + c_pred · model_output` in either
+    /// the ε-prediction (`model_output == ε`) or v-prediction
+    /// (`model_output == v`) parameterization.
+    fn step_coefficients(&self, timestep: f32) -> Result<(f32, f32)> {
+        if self.step_size == 0 {
+            return Err(Error::Scheduler(
+                "set_timesteps must be called before step".into(),
+            ));
+        }
+        let t_idx = timestep_to_index(timestep, self.alphas_cumprod.len())?;
+        let prev_signed = i64::from(t_idx) - i64::from(self.step_size);
+        let alpha_prod_t = self.alphas_cumprod[t_idx as usize];
+        let alpha_prod_t_prev = if prev_signed >= 0 {
+            self.alphas_cumprod[prev_signed as usize]
+        } else if self.config.set_alpha_to_one {
+            1.0
+        } else {
+            self.alphas_cumprod[0]
+        };
+
+        let sqrt_alpha_t = alpha_prod_t.sqrt();
+        let sqrt_one_minus_t = (1.0 - alpha_prod_t).sqrt();
+        let sqrt_alpha_prev = alpha_prod_t_prev.sqrt();
+        let sqrt_one_minus_prev = (1.0 - alpha_prod_t_prev).sqrt();
+
+        if self.config.epsilon_prediction {
+            // pred_x0 = (x - sqrt_one_minus_t * eps) / sqrt_alpha_t
+            // out     = sqrt_alpha_prev * pred_x0 + sqrt_one_minus_prev * eps
+            //         = (sqrt_alpha_prev / sqrt_alpha_t) * x
+            //           + (sqrt_one_minus_prev
+            //              - sqrt_alpha_prev * sqrt_one_minus_t / sqrt_alpha_t) * eps
+            let c_in = sqrt_alpha_prev / sqrt_alpha_t;
+            let c_eps = sqrt_one_minus_prev - c_in * sqrt_one_minus_t;
+            Ok((c_in, c_eps))
+        } else {
+            // v-prediction: pred_x0 = sqrt_alpha_t * x - sqrt_one_minus_t * v
+            //               eps     = sqrt_alpha_t * v + sqrt_one_minus_t * x
+            //               out     = sqrt_alpha_prev * pred_x0
+            //                       + sqrt_one_minus_prev * eps
+            let c_in = sqrt_alpha_prev * sqrt_alpha_t + sqrt_one_minus_prev * sqrt_one_minus_t;
+            let c_v = sqrt_one_minus_prev * sqrt_alpha_t - sqrt_alpha_prev * sqrt_one_minus_t;
+            Ok((c_in, c_v))
+        }
     }
 }
 
@@ -144,7 +200,7 @@ fn lerp(a: f32, b: f32, i: usize, n: usize) -> f32 {
     }
 }
 
-impl Scheduler for DdimScheduler {
+impl<B: MathBackend> Scheduler<B> for DdimScheduler {
     fn set_timesteps(&mut self, num_inference_steps: u32) -> Result<()> {
         if num_inference_steps == 0 {
             return Err(Error::Scheduler("num_inference_steps must be > 0".into()));
@@ -177,57 +233,23 @@ impl Scheduler for DdimScheduler {
 
     fn step(
         &mut self,
-        model_output: &[f32],
+        model_output: &Tensor<B>,
         timestep: f32,
-        latent: &[f32],
-    ) -> Result<Vec<f32>> {
-        if self.step_size == 0 {
-            return Err(Error::Scheduler(
-                "set_timesteps must be called before step".into(),
-            ));
-        }
-        if model_output.len() != latent.len() {
+        latent: &Tensor<B>,
+    ) -> Result<Tensor<B>> {
+        if model_output.shape.numel() != latent.shape.numel() {
             return Err(Error::Scheduler(format!(
                 "model_output ({}) and latent ({}) length mismatch",
-                model_output.len(),
-                latent.len()
+                model_output.shape.numel(),
+                latent.shape.numel()
             )));
         }
-        let t_idx = timestep_to_index(timestep, self.alphas_cumprod.len())?;
-        let prev_signed = i64::from(t_idx) - i64::from(self.step_size);
-        let alpha_prod_t = self.alphas_cumprod[t_idx as usize];
-        let alpha_prod_t_prev = if prev_signed >= 0 {
-            self.alphas_cumprod[prev_signed as usize]
-        } else if self.config.set_alpha_to_one {
-            1.0
-        } else {
-            self.alphas_cumprod[0]
-        };
-
-        let sqrt_alpha_t = alpha_prod_t.sqrt();
-        let sqrt_one_minus_t = (1.0 - alpha_prod_t).sqrt();
-        let sqrt_alpha_prev = alpha_prod_t_prev.sqrt();
-        let sqrt_one_minus_prev = (1.0 - alpha_prod_t_prev).sqrt();
-
-        let mut out = Vec::with_capacity(latent.len());
-        if self.config.epsilon_prediction {
-            for (&x, &eps) in latent.iter().zip(model_output) {
-                let pred_x0 = (x - sqrt_one_minus_t * eps) / sqrt_alpha_t;
-                let dir_xt = sqrt_one_minus_prev * eps;
-                out.push(sqrt_alpha_prev * pred_x0 + dir_xt);
-            }
-        } else {
-            // v-prediction (SD 2.x with v-objective): convert v -> (x0, eps)
-            // then apply the same DDIM update. Matches diffusers
-            // `DDIMScheduler.step` with `prediction_type="v_prediction"`.
-            for (&x, &v) in latent.iter().zip(model_output) {
-                let pred_x0 = sqrt_alpha_t * x - sqrt_one_minus_t * v;
-                let eps = sqrt_alpha_t * v + sqrt_one_minus_t * x;
-                let dir_xt = sqrt_one_minus_prev * eps;
-                out.push(sqrt_alpha_prev * pred_x0 + dir_xt);
-            }
-        }
-        Ok(out)
+        let (c_in, c_pred) = self.step_coefficients(timestep)?;
+        let scaled_x = B::scale(&latent.data, c_in);
+        let scaled_pred = B::scale(&model_output.data, c_pred);
+        let out_shape = latent.shape.clone();
+        let storage = B::add(&scaled_x, &scaled_pred, &out_shape, &out_shape, &out_shape);
+        Ok(Tensor::new(storage, out_shape))
     }
 }
 
@@ -251,6 +273,15 @@ fn timestep_to_index(timestep: f32, table_len: usize) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scry_llm::backend::cpu::CpuBackend;
+    use scry_llm::tensor::shape::Shape;
+
+    type CpuTensor = Tensor<CpuBackend>;
+
+    fn cpu_tensor(data: Vec<f32>) -> CpuTensor {
+        let len = data.len();
+        Tensor::from_vec(data, Shape::new(&[len]))
+    }
 
     #[test]
     fn scaled_linear_first_and_last_betas_match_hf() {
@@ -266,32 +297,25 @@ mod tests {
         for w in s.alphas_cumprod.windows(2) {
             assert!(w[0] >= w[1], "alphas_cumprod not monotonic");
         }
-        // alphas_cumprod[T-1] should equal product of (1 - beta_i); we just
-        // sanity-check it's finite and within the expected SD range.
-        // HF's alphas_cumprod[-1] for SD 1.5 is ~0.00466 — small but not
-        // microscopic; the schedule keeps a tiny floor so the model can still
-        // recover signal at t=999.
         let last = *s.alphas_cumprod.last().unwrap();
         assert!(last > 0.0 && last < 0.01, "got {last}");
-        // Ensure the very last beta we consume to build that value matches HF.
         let betas = build_betas(&DdimConfig::sd_1_5());
         assert!((betas[999] - betas_last).abs() < 1e-7);
     }
 
     #[test]
     fn set_timesteps_30_matches_hf_leading_spacing() {
-        // HF DDIMScheduler with steps_offset=1, num_train=1000, num_inf=30:
-        // [958, 925, 892, 859, 826, 793, 760, 727, 694, 661,
-        //  628, 595, 562, 529, 496, 463, 430, 397, 364, 331,
-        //  298, 265, 232, 199, 166, 133, 100,  67,  34,   1]
         let mut s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
-        s.set_timesteps(30).unwrap();
+        <DdimScheduler as Scheduler<CpuBackend>>::set_timesteps(&mut s, 30).unwrap();
         let expected: [f32; 30] = [
             958.0, 925.0, 892.0, 859.0, 826.0, 793.0, 760.0, 727.0, 694.0, 661.0, 628.0, 595.0,
             562.0, 529.0, 496.0, 463.0, 430.0, 397.0, 364.0, 331.0, 298.0, 265.0, 232.0, 199.0,
             166.0, 133.0, 100.0, 67.0, 34.0, 1.0,
         ];
-        assert_eq!(s.timesteps(), &expected);
+        assert_eq!(
+            <DdimScheduler as Scheduler<CpuBackend>>::timesteps(&s),
+            &expected
+        );
     }
 
     #[test]
@@ -299,10 +323,8 @@ mod tests {
         // Smoke test independent of HF — proves the chain runs end to end
         // and produces a different latent than it started with.
         let mut s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
-        s.set_timesteps(30).unwrap();
+        <DdimScheduler as Scheduler<CpuBackend>>::set_timesteps(&mut s, 30).unwrap();
         let n = 4 * 16 * 16;
-        // Deterministic pseudo-noise (Park-Miller LCG) — keeps the test
-        // self-contained and reproducible.
         let mut rng_state = 1_u64;
         let mut next = || -> f32 {
             rng_state = rng_state.wrapping_mul(48_271).wrapping_rem(2_147_483_647);
@@ -310,20 +332,22 @@ mod tests {
             let u = rng_state as f32 / 2_147_483_647_f32;
             u * 2.0 - 1.0
         };
-        let mut latent: Vec<f32> = (0..n).map(|_| next()).collect();
-        let starting: Vec<f32> = latent.clone();
-        let timesteps = s.timesteps().to_vec();
+        let mut latent: CpuTensor = cpu_tensor((0..n).map(|_| next()).collect());
+        let starting: Vec<f32> = latent.to_vec();
+        let timesteps = <DdimScheduler as Scheduler<CpuBackend>>::timesteps(&s).to_vec();
         for &t in &timesteps {
-            let eps: Vec<f32> = (0..n).map(|_| next()).collect();
-            latent = s.step(&eps, t, &latent).unwrap();
+            let eps: CpuTensor = cpu_tensor((0..n).map(|_| next()).collect());
+            latent =
+                <DdimScheduler as Scheduler<CpuBackend>>::step(&mut s, &eps, t, &latent).unwrap();
         }
+        let final_v = latent.to_vec();
         let max_diff = starting
             .iter()
-            .zip(&latent)
+            .zip(&final_v)
             .map(|(a, b)| (a - b).abs())
             .fold(0.0_f32, f32::max);
         assert!(max_diff > 1e-3, "latent did not change: {max_diff}");
-        for v in &latent {
+        for v in &final_v {
             assert!(v.is_finite(), "non-finite latent: {v}");
         }
     }
@@ -331,15 +355,19 @@ mod tests {
     #[test]
     fn step_size_mismatch_errors() {
         let mut s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
-        s.set_timesteps(30).unwrap();
-        let err = s.step(&[0.0; 4], 958.0, &[0.0; 8]);
+        <DdimScheduler as Scheduler<CpuBackend>>::set_timesteps(&mut s, 30).unwrap();
+        let eps = cpu_tensor(vec![0.0; 4]);
+        let latent = cpu_tensor(vec![0.0; 8]);
+        let err = <DdimScheduler as Scheduler<CpuBackend>>::step(&mut s, &eps, 958.0, &latent);
         assert!(err.is_err());
     }
 
     #[test]
     fn step_without_set_timesteps_errors() {
         let mut s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
-        let err = s.step(&[0.0; 4], 958.0, &[0.0; 4]);
+        let eps = cpu_tensor(vec![0.0; 4]);
+        let latent = cpu_tensor(vec![0.0; 4]);
+        let err = <DdimScheduler as Scheduler<CpuBackend>>::step(&mut s, &eps, 958.0, &latent);
         assert!(err.is_err());
     }
 }

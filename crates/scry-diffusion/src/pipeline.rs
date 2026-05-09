@@ -57,7 +57,7 @@ pub struct Txt2ImgPipeline<B, T, S>
 where
     B: MathBackend,
     T: TextEncoder<B>,
-    S: Scheduler,
+    S: Scheduler<B>,
 {
     /// CLIP BPE tokenizer.
     pub tokenizer: Tokenizer,
@@ -78,7 +78,7 @@ impl<B, T, S> Txt2ImgPipeline<B, T, S>
 where
     B: MathBackend,
     T: TextEncoder<B>,
-    S: Scheduler,
+    S: Scheduler<B>,
 {
     /// Run a single generation and return an `[3, H, W]` RGB tensor in `[0, 1]`.
     ///
@@ -120,47 +120,56 @@ where
 
         // ---- 3. Init latent. ----
         let init_sigma = self.scheduler.init_noise_sigma();
-        let mut latent_vec = sample_standard_normal(elements, params.seed);
+        let mut latent_host = sample_standard_normal(elements, params.seed);
         if (init_sigma - 1.0).abs() > f32::EPSILON {
-            for v in &mut latent_vec {
+            for v in &mut latent_host {
                 *v *= init_sigma;
             }
         }
+        let latent_shape = Shape::new(&[LATENT_CHANNELS, latent_h, latent_w]);
+        let mut latent: Tensor<B> = Tensor::from_vec(latent_host, latent_shape.clone());
 
         // ---- 4. Denoising loop. ----
+        // Latent stays on the device the backend lives on across all steps:
+        // `scale_model_input`, the UNet forwards, the CFG combine, and the
+        // scheduler step are all tensor-typed. CFG combine is rewritten as
+        // `out = s · cond + (1 − s) · uncond` (algebraically equivalent to
+        // `uncond + s · (cond − uncond)`) so it composes from existing
+        // `MathBackend::scale` + `add` without a dedicated kernel.
         self.scheduler.set_timesteps(params.num_inference_steps)?;
         let timesteps: Vec<f32> = self.scheduler.timesteps().to_vec();
         let total_steps = u32::try_from(timesteps.len()).unwrap_or(u32::MAX);
         let do_cfg = params.guidance_scale > 1.0 + f32::EPSILON;
+        let s = params.guidance_scale;
 
-        let latent_shape = Shape::new(&[LATENT_CHANNELS, latent_h, latent_w]);
         for (i, &t) in timesteps.iter().enumerate() {
             if let Some(cb) = self.progress.as_mut() {
                 cb(u32::try_from(i).unwrap_or(u32::MAX), total_steps, t);
             }
-            let scaled = self.scheduler.scale_model_input(latent_vec.clone(), t);
-            let latent_t: Tensor<B> = Tensor::from_vec(scaled, latent_shape.clone());
+            let model_input = self.scheduler.scale_model_input(&latent, t)?;
 
-            let cond_eps = self.unet.forward(&latent_t, t, &cond_embed)?;
-            let cond_eps_v = cond_eps.to_vec();
+            let cond_eps = self.unet.forward(&model_input, t, &cond_embed)?;
             let combined = if do_cfg {
-                let uncond_eps = self.unet.forward(&latent_t, t, &uncond_embed)?;
-                let uncond_eps_v = uncond_eps.to_vec();
-                let mut out = uncond_eps_v;
-                for (o, &c) in out.iter_mut().zip(&cond_eps_v) {
-                    *o += params.guidance_scale * (c - *o);
-                }
-                out
+                let uncond_eps = self.unet.forward(&model_input, t, &uncond_embed)?;
+                let scaled_cond = B::scale(&cond_eps.data, s);
+                let scaled_uncond = B::scale(&uncond_eps.data, 1.0 - s);
+                let storage = B::add(
+                    &scaled_cond,
+                    &scaled_uncond,
+                    &cond_eps.shape,
+                    &uncond_eps.shape,
+                    &cond_eps.shape,
+                );
+                Tensor::new(storage, cond_eps.shape.clone())
             } else {
-                cond_eps_v
+                cond_eps
             };
 
-            latent_vec = self.scheduler.step(&combined, t, &latent_vec)?;
+            latent = self.scheduler.step(&combined, t, &latent)?;
         }
 
         // ---- 5. VAE decode + range remap. ----
-        let final_latent = Tensor::<B>::from_vec(latent_vec, latent_shape);
-        let decoded = self.vae.decode(&final_latent)?;
+        let decoded = self.vae.decode(&latent)?;
         let mut pixels = decoded.to_vec();
         for v in &mut pixels {
             // Clamp to (-1, 1) then rescale to [0, 1].

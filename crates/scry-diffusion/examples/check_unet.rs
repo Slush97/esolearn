@@ -81,7 +81,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     if timestep_arr.len() != 1 {
-        return Err(format!("timestep tensor must have 1 element, got {}", timestep_arr.len()).into());
+        return Err(format!(
+            "timestep tensor must have 1 element, got {}",
+            timestep_arr.len()
+        )
+        .into());
     }
     let timestep = timestep_arr[0];
 
@@ -125,10 +129,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  loaded in {:.1}s", t0.elapsed().as_secs_f32());
 
     // ---- Forward ---------------------------------------------------
-    let latent = Tensor::<CpuBackend>::from_vec(
-        latent_flat,
-        Shape::new(&[in_ch, latent_size, latent_size]),
-    );
+    let latent =
+        Tensor::<CpuBackend>::from_vec(latent_flat, Shape::new(&[in_ch, latent_size, latent_size]));
     let embeddings = Tensor::<CpuBackend>::from_vec(cond_flat, Shape::new(&[seq_len, cross_dim]));
     let cond = Conditioning {
         embeddings,

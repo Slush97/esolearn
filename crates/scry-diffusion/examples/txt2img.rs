@@ -51,7 +51,9 @@ impl Args {
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--snapshot" => snapshot = PathBuf::from(args.next().ok_or("--snapshot needs path")?),
+                "--snapshot" => {
+                    snapshot = PathBuf::from(args.next().ok_or("--snapshot needs path")?)
+                }
                 "--out" => out = PathBuf::from(args.next().ok_or("--out needs path")?),
                 "--prompt" => prompt = args.next().ok_or("--prompt needs string")?,
                 "--negative-prompt" | "--negative" => {
@@ -118,7 +120,11 @@ Options:
   --seed N              Latent noise seed (default: 42)
   --size N              Output side length, multiple of 8 (default: 512)";
 
-#[allow(clippy::too_many_lines, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
     println!("scry-diffusion txt2img");
@@ -139,7 +145,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     println!("\n[1/4] loading tokenizer + CLIP text encoder…");
     let tokenizer = Tokenizer::from_dir(args.snapshot.join("tokenizer"))?;
-    let text_ckpt = SafetensorsCheckpoint::open(args.snapshot.join("text_encoder/model.safetensors"))?;
+    let text_ckpt =
+        SafetensorsCheckpoint::open(args.snapshot.join("text_encoder/model.safetensors"))?;
     let text_encoder =
         ClipTextEncoder::<CpuBackend>::from_safetensors(ClipTextConfig::clip_vit_l(), &text_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
@@ -147,14 +154,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---- Load UNet. ----
     let t0 = Instant::now();
     println!("\n[2/4] loading UNet…");
-    let unet_ckpt = SafetensorsCheckpoint::open(args.snapshot.join("unet/diffusion_pytorch_model.safetensors"))?;
+    let unet_ckpt = SafetensorsCheckpoint::open(
+        args.snapshot
+            .join("unet/diffusion_pytorch_model.safetensors"),
+    )?;
     let unet = Unet::<CpuBackend>::from_safetensors(UnetConfig::sd_1_5(), &unet_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
 
     // ---- Load VAE decoder. ----
     let t0 = Instant::now();
     println!("\n[3/4] loading VAE decoder…");
-    let vae_ckpt = SafetensorsCheckpoint::open(args.snapshot.join("vae/diffusion_pytorch_model.safetensors"))?;
+    let vae_ckpt = SafetensorsCheckpoint::open(
+        args.snapshot
+            .join("vae/diffusion_pytorch_model.safetensors"),
+    )?;
     let vae = VaeDecoder::<CpuBackend>::from_safetensors(VaeDecoderConfig::sd_1_5(), &vae_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
 
@@ -171,7 +184,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut pipeline = pipeline.with_progress(move |i, total, t| {
         let elapsed = progress_start.elapsed().as_secs_f32();
-        println!("  step {:>3}/{total} (t={t:>5.0})  [{elapsed:.1}s elapsed]", i + 1);
+        println!(
+            "  step {:>3}/{total} (t={t:>5.0})  [{elapsed:.1}s elapsed]",
+            i + 1
+        );
     });
 
     let params = GenerationParams {
@@ -186,7 +202,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n[4/4] generating…");
     let t0 = Instant::now();
     let img = pipeline.generate(&params)?;
-    println!("\n  total denoise+decode: {:.1}s", t0.elapsed().as_secs_f32());
+    println!(
+        "\n  total denoise+decode: {:.1}s",
+        t0.elapsed().as_secs_f32()
+    );
 
     // ---- Save PNG. ----
     let dims = img.shape.dims().to_vec();
@@ -198,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("expected 3 channels, got {channels}").into());
     }
     let pixels = img.to_vec(); // [3, H, W] in [0, 1]
-    // Repack CHW -> HWC u8.
+                               // Repack CHW -> HWC u8.
     let mut hwc = vec![0_u8; h * w * 3];
     let plane = h * w;
     for y in 0..h {
@@ -218,8 +237,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::create_dir_all(parent)?;
         }
     }
-    let img_buf = image::RgbImage::from_raw(w as u32, h as u32, hwc)
-        .ok_or("failed to pack image buffer")?;
+    let img_buf =
+        image::RgbImage::from_raw(w as u32, h as u32, hwc).ok_or("failed to pack image buffer")?;
     img_buf.save(&args.out)?;
     println!("\nsaved {} ({}×{})", args.out.display(), w, h);
     Ok(())

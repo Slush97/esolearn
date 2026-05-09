@@ -27,13 +27,16 @@ use std::path::PathBuf;
 use scry_diffusion::scheduler::ddim::{DdimConfig, DdimScheduler};
 use scry_diffusion::scheduler::Scheduler;
 use scry_diffusion::weights::SafetensorsCheckpoint;
+use scry_llm::backend::cpu::CpuBackend;
+use scry_llm::tensor::shape::Shape;
+use scry_llm::tensor::Tensor;
 
 const TOL_ABS: f32 = 1e-4;
 const ALPHAS_TOL: f32 = 5e-5;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let ref_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".assets/refs/ddim_seed42.safetensors");
+    let ref_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".assets/refs/ddim_seed42.safetensors");
     if !ref_path.exists() {
         return Err(format!(
             "reference dump not found at {}\n\
@@ -66,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg = DdimConfig::sd_1_5();
     let mut sched = DdimScheduler::new(cfg)?;
-    sched.set_timesteps(u32::try_from(num_steps)?)?;
+    <DdimScheduler as Scheduler<CpuBackend>>::set_timesteps(&mut sched, u32::try_from(num_steps)?)?;
 
     // ---- Sanity: alphas_cumprod table matches HF ----
     if sched.alphas_cumprod.len() != alphas_cumprod_ref.len() {
@@ -92,27 +95,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ---- Sanity: timestep trajectory matches HF ----
-    if sched.timesteps() != timesteps.as_slice() {
+    let our_timesteps = <DdimScheduler as Scheduler<CpuBackend>>::timesteps(&sched).to_vec();
+    if our_timesteps != timesteps {
         return Err(format!(
-            "timestep trajectory mismatch:\n  ours: {:?}\n  HF:   {:?}",
-            sched.timesteps(),
-            timesteps
+            "timestep trajectory mismatch:\n  ours: {our_timesteps:?}\n  HF:   {timesteps:?}",
         )
         .into());
     }
     println!("timesteps match HF exactly ({num_steps} steps)");
 
     // ---- Replay the step chain ----
-    let mut latent = init_latent.clone();
+    let latent_shape = Shape::new(&[elements]);
+    let mut latent: Tensor<CpuBackend> =
+        Tensor::from_vec(init_latent.clone(), latent_shape.clone());
     for (i, &t) in timesteps.iter().enumerate() {
-        let eps = &eps_seq[i * elements..(i + 1) * elements];
-        latent = sched.step(eps, t, &latent)?;
+        let eps = eps_seq[i * elements..(i + 1) * elements].to_vec();
+        let eps_tensor = Tensor::<CpuBackend>::from_vec(eps, latent_shape.clone());
+        latent =
+            <DdimScheduler as Scheduler<CpuBackend>>::step(&mut sched, &eps_tensor, t, &latent)?;
     }
+    let latent_v = latent.to_vec();
 
-    if latent.len() != final_latent_ref.len() {
+    if latent_v.len() != final_latent_ref.len() {
         return Err(format!(
             "final latent length: ours {} vs HF {}",
-            latent.len(),
+            latent_v.len(),
             final_latent_ref.len()
         )
         .into());
@@ -120,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut max_diff = 0.0_f32;
     let mut sum_diff = 0.0_f64;
     let mut max_pos = 0usize;
-    for (i, (a, b)) in latent.iter().zip(&final_latent_ref).enumerate() {
+    for (i, (a, b)) in latent_v.iter().zip(&final_latent_ref).enumerate() {
         let d = (a - b).abs();
         sum_diff += f64::from(d);
         if d > max_diff {
@@ -129,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     #[allow(clippy::cast_precision_loss)]
-    let mean_diff = sum_diff / latent.len() as f64;
+    let mean_diff = sum_diff / latent_v.len() as f64;
     println!(
         "final latent diff vs HF: max abs {max_diff:.3e} at index {max_pos}, mean abs {mean_diff:.3e}"
     );

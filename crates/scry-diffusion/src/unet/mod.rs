@@ -174,7 +174,6 @@ impl<B: MathBackend> Unet<B> {
     }
 }
 
-
 #[cfg(feature = "safetensors")]
 impl<B: MathBackend> Unet<B> {
     /// Load a UNet from a HF `unet/diffusion_pytorch_model.safetensors`.

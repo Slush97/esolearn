@@ -112,11 +112,7 @@ pub(crate) fn concat_channels<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> T
 /// Reshape `[C, H, W]` (NCHW row-major) into `[H*W, C]` (HWC row-major).
 /// This is a transpose, not a reshape — channel data is interleaved per
 /// spatial location in the output.
-pub(crate) fn transpose_chw_to_hwc<B: MathBackend>(
-    t: &Tensor<B>,
-    c: usize,
-    n: usize,
-) -> Tensor<B> {
+pub(crate) fn transpose_chw_to_hwc<B: MathBackend>(t: &Tensor<B>, c: usize, n: usize) -> Tensor<B> {
     let v = B::to_vec(&t.data);
     debug_assert_eq!(v.len(), c * n);
     let mut out = vec![0.0f32; v.len()];
