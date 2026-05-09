@@ -243,6 +243,23 @@ batch=2 that's 120 transfers per image. The latent never stays on GPU.
    `Device::batch()`-mediated fusion; lift it into a real `MathBackend`
    path or write the fused-attn shader directly.
 
+   **What was tried and DIDN'T work — fused KV projection (2026-05-08).**
+   The intuition was: K and V both project from the same `kv_input`,
+   so collapse the two `[n_kv, cross_dim] × [cross_dim, inner_dim]`
+   matmuls into one `[n_kv, cross_dim] × [cross_dim, 2·inner_dim]`
+   call, gather_columns to slice K and V halves per head. M6
+   numerical-equivalence gate confirmed the math was correct
+   (1.549e-4 max abs vs HF, bit-identical to pre-fuse). **But the
+   bench regressed by ~5% at 512×512** (2186 vs 2075 ms/step) and
+   was neutral at 64×64 (456 vs 458 ms/step). At SD self-attention
+   shapes (n_kv=4096, cross_dim=320, inner_dim=320), cuBLAS GemmEx
+   in bf16 picks a measurably worse algorithm for the wider M=640
+   output than for two M=320 calls. The "fewer launches" intuition
+   loses to cuBLAS algorithm selection. Don't retry this fusion in
+   isolation — only as part of a full fused-attn kernel where the
+   K/V output gets directly consumed by the next matmul without a
+   gather_columns trip through global memory.
+
 4. **CUDA graphs for the UNet step** (largest, do last). Once (1) keeps
    the latent on GPU, the UNet forward is a stable graph of dispatches
    per timestep — the only varying input is `t`'s sinusoidal embedding.
