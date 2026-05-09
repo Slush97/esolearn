@@ -227,6 +227,12 @@ struct ScryCtx {
     /// matmul batch — replaces a per-head `gather_columns` loop that
     /// went through host on every dispatch.
     reshape_to_heads: Option<::scry_gpu::Kernel>,
+    /// On-device row concatenation `[a_rows, cols] + [b_rows, cols] →
+    /// [a_rows + b_rows, cols]`. CUDA-only. Used by SD UNet's UpBlock
+    /// skip-concat (12×/forward) and by the Llama KV cache —
+    /// replaces a `concat_rows` default that round-tripped both inputs
+    /// through host.
+    concat_rows: Option<::scry_gpu::Kernel>,
     /// On-device elementwise scale `out[i] = in[i] * alpha`. Used to keep
     /// `scaled_softmax`'s pre-softmax scale step on-device. CUDA-only.
     scale: Option<::scry_gpu::Kernel>,
@@ -421,6 +427,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: reshape_to_heads_cuda compile: {e}"))?;
+        let concat_rows = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::CONCAT_ROWS_CUDA,
+                "concat_rows",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: concat_rows_cuda compile: {e}"))?;
         let scale = dev
             .compile_cuda(
                 ::scry_gpu::shaders::backward::SCALE_CUDA,
@@ -464,6 +478,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             split_qkv_heads: Some(split_qkv_heads),
             reshape_from_heads: Some(reshape_from_heads),
             reshape_to_heads: Some(reshape_to_heads),
+            concat_rows: Some(concat_rows),
             scale: Some(scale),
             #[cfg(feature = "scry-gpu-bf16")]
             cast_f32_bf16: Some(cast_f32_bf16),
@@ -504,6 +519,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         split_qkv_heads: None,
         reshape_from_heads: None,
         reshape_to_heads: None,
+        concat_rows: None,
         scale: None,
         #[cfg(feature = "scry-gpu-bf16")]
         cast_f32_bf16: None,
@@ -693,6 +709,46 @@ fn as_gpu_buffer_bf16(storage: &ScryGpuStorage) -> Option<Arc<Buffer<half::bf16>
         Ok(()) => Some(bf16_arc),
         Err(_) => Some(Arc::clone(buf.bf16.get().expect("just lost a race; cache populated"))),
     }
+}
+
+/// GPU-resident concat along axis 0. Returns `None` when the GPU path
+/// is unavailable, the kernel slot is missing (Vulkan), or the
+/// workload is below `GPU_ELEMENTWISE_MIN`. Used by SD UNet UpBlock
+/// skip-concat and by the Llama KV cache.
+fn gpu_concat_rows_persistent(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    a_total: usize,
+    b_total: usize,
+) -> Option<ScryGpuStorage> {
+    let total = a_total.checked_add(b_total)?;
+    if total < GPU_ELEMENTWISE_MIN {
+        return None;
+    }
+    if a.len() != a_total || b.len() != b_total {
+        return None;
+    }
+    let ctx = get_ctx()?;
+    let kernel = ctx.concat_rows.as_ref()?;
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    let dims_pc: [u32; 2] = [a_total as u32, b_total as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_a, &*buf_b, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
 }
 
 /// Top-level wrapper for `MathBackend::transpose_2d`: dispatch the
@@ -2802,6 +2858,11 @@ impl MathBackend for ScryGpuBackend {
         b_rows: usize,
         cols: usize,
     ) -> ScryGpuStorage {
+        let a_total = a_rows * cols;
+        let b_total = b_rows * cols;
+        if let Some(out) = gpu_concat_rows_persistent(a, b, a_total, b_total) {
+            return out;
+        }
         cpu(CpuBackend::concat_rows(
             &a.as_vec(),
             &b.as_vec(),
@@ -3666,6 +3727,42 @@ mod tests {
                     "transpose mismatch at (r={r}, c={c}): src={src} dst={dst}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gpu_concat_rows_matches_cpu() {
+        // Two row-major matrices with the same number of cols, well above
+        // GPU_ELEMENTWISE_MIN so the kernel path engages.
+        let cols = 256;
+        let a_rows = 192;
+        let b_rows = 64;
+        let a: Vec<f32> = (0..a_rows * cols)
+            .map(|i| ((i % 211) as f32 - 100.0) * 0.011)
+            .collect();
+        let b: Vec<f32> = (0..b_rows * cols)
+            .map(|i| ((i % 173) as f32 - 80.0) * 0.013)
+            .collect();
+        let a_storage = ScryGpuStorage::Cpu(a.clone());
+        let b_storage = ScryGpuStorage::Cpu(b.clone());
+        let a_gpu = match ScryGpuBackend::to_gpu(&a_storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_concat_rows test: {e}");
+                return;
+            }
+        };
+        let b_gpu = ScryGpuBackend::to_gpu(&b_storage).unwrap();
+        let out = ScryGpuBackend::concat_rows(&a_gpu, &b_gpu, a_rows, b_rows, cols);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(out.is_gpu(), "concat_rows should stay Gpu on CUDA");
+
+        let cpu_out = CpuBackend::concat_rows(&a, &b, a_rows, b_rows, cols);
+        let g = ScryGpuBackend::to_vec(&out);
+        assert_eq!(g.len(), cpu_out.len());
+        // Pure memcpy — exact match expected.
+        for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-9, "idx={i}: gpu={gv} cpu={cv}");
         }
     }
 

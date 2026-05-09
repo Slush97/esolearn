@@ -101,9 +101,17 @@ pub(crate) fn matmul_bias_2d<B: MathBackend>(
     Tensor::new(out, Shape::new(&[m, n]))
 }
 
-/// Concatenate two `[C_i, H, W]` tensors along the channel axis, host-side.
-/// Both inputs must share spatial dims; output is `[C1+C2, H, W]`. The
-/// SD UNet's UpBlock skip-concat is the only caller.
+/// Concatenate two `[C_i, H, W]` tensors along the channel axis. Both
+/// inputs must share spatial dims; output is `[C1+C2, H, W]`.
+///
+/// Stays on the device the inputs live on by routing through
+/// `B::concat_rows`: a `[C, H, W]` tensor viewed as `[C, H*W]`
+/// row-major concatenated along axis 0 with another `[C', H*W]` gives
+/// `[C+C', H*W]`, which is the same flat byte layout as `[C+C', H, W]`.
+///
+/// Called once per UpBlock resnet (12×/UNet forward) — at the
+/// shallowest up-stage the output is `[2560, 64, 64]` = 10 MB, so a
+/// host roundtrip here is expensive.
 pub(crate) fn concat_channels<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> Tensor<B> {
     let ad = a.shape.dims();
     let bd = b.shape.dims();
@@ -111,10 +119,9 @@ pub(crate) fn concat_channels<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> T
     debug_assert_eq!(bd.len(), 3);
     debug_assert_eq!(ad[1], bd[1]);
     debug_assert_eq!(ad[2], bd[2]);
-    let mut va = B::to_vec(&a.data);
-    let vb = B::to_vec(&b.data);
-    va.extend_from_slice(&vb);
-    Tensor::from_vec(va, Shape::new(&[ad[0] + bd[0], ad[1], ad[2]]))
+    let cols = ad[1] * ad[2];
+    let storage = B::concat_rows(&a.data, &b.data, ad[0], bd[0], cols);
+    Tensor::new(storage, Shape::new(&[ad[0] + bd[0], ad[1], ad[2]]))
 }
 
 /// Reshape `[C, H, W]` (NCHW row-major) into `[H*W, C]` (HWC row-major).

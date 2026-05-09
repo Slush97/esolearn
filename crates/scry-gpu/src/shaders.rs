@@ -906,6 +906,40 @@ extern \"C\" __global__ void reshape_from_heads(
     out[idx] = input[(h * seq + s) * d_head + d];
 }";
 
+    /// Concatenate two row-major matrices along axis 0 (rows). For
+    /// `a: [a_rows, cols]` and `b: [b_rows, cols]`, the output is
+    /// `[a_rows + b_rows, cols]`. Because both inputs are row-major
+    /// with the same `cols`, the operation is a flat append: `a`'s
+    /// `a_total` elements followed by `b`'s `b_total` elements.
+    ///
+    /// One thread per output element. The branch on `i < a_total` is
+    /// uniform across each warp until exactly one warp crosses the
+    /// boundary, so divergence is bounded.
+    ///
+    /// Used by the SD UNet's UpBlock skip-concat (12×/forward, on
+    /// tensors up to `[2560, 64, 64]` = 10 MB at the shallowest
+    /// up-stage) and by the Llama KV cache. Replaces a host-roundtrip
+    /// default that this trait method had on `ScryGpuBackend`.
+    ///
+    /// **Kernel signature:** `concat_rows(const float* a, const float* b, float* out, uint a_total, uint b_total)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(a_total+b_total).div_ceil(256), 1, 1]`.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const CONCAT_ROWS_CUDA: &str = "\
+extern \"C\" __global__ void concat_rows(
+    const float* a, const float* b, float* out,
+    unsigned int a_total, unsigned int b_total
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = a_total + b_total;
+    if (i >= total) return;
+    if (i < a_total) {
+        out[i] = a[i];
+    } else {
+        out[i] = b[i - a_total];
+    }
+}";
+
     /// Forward permute for multi-head attention: `[seq, n_heads*d_head]` →
     /// `[n_heads, seq, d_head]`. Inverse of [`RESHAPE_FROM_HEADS_CUDA`].
     ///
