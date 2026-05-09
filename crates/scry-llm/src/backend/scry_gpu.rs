@@ -221,6 +221,12 @@ struct ScryCtx {
     /// On-device reshape `[n_heads, seq, d_head]` → `[seq, n_heads*d_head]`.
     /// CUDA-only; Vulkan path is `None`.
     reshape_from_heads: Option<::scry_gpu::Kernel>,
+    /// On-device reshape `[seq, n_heads*d_head]` → `[n_heads, seq, d_head]`.
+    /// Forward direction of [`Self::reshape_from_heads`]. CUDA-only.
+    /// Used by SD UNet attention to permute Q/K/V before the per-head
+    /// matmul batch — replaces a per-head `gather_columns` loop that
+    /// went through host on every dispatch.
+    reshape_to_heads: Option<::scry_gpu::Kernel>,
     /// On-device elementwise scale `out[i] = in[i] * alpha`. Used to keep
     /// `scaled_softmax`'s pre-softmax scale step on-device. CUDA-only.
     scale: Option<::scry_gpu::Kernel>,
@@ -407,6 +413,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: reshape_from_heads_cuda compile: {e}"))?;
+        let reshape_to_heads = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::RESHAPE_TO_HEADS_CUDA,
+                "reshape_to_heads",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: reshape_to_heads_cuda compile: {e}"))?;
         let scale = dev
             .compile_cuda(
                 ::scry_gpu::shaders::backward::SCALE_CUDA,
@@ -449,6 +463,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             group_norm: Some(group_norm),
             split_qkv_heads: Some(split_qkv_heads),
             reshape_from_heads: Some(reshape_from_heads),
+            reshape_to_heads: Some(reshape_to_heads),
             scale: Some(scale),
             #[cfg(feature = "scry-gpu-bf16")]
             cast_f32_bf16: Some(cast_f32_bf16),
@@ -488,6 +503,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         group_norm: None,
         split_qkv_heads: None,
         reshape_from_heads: None,
+        reshape_to_heads: None,
         scale: None,
         #[cfg(feature = "scry-gpu-bf16")]
         cast_f32_bf16: None,
@@ -1180,6 +1196,47 @@ fn gpu_reshape_from_heads_persistent(
 ) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
     let kernel = ctx.reshape_from_heads.as_ref()?;
+    let total = seq.checked_mul(n_heads)?.checked_mul(d_head)?;
+    if total < GPU_SPLIT_QKV_MIN {
+        return None;
+    }
+    if input.len() != total {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 3] = [seq as u32, n_heads as u32, d_head as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
+/// Forward direction of [`gpu_reshape_from_heads_persistent`]:
+/// `[seq, n_heads*d_head]` → `[n_heads, seq, d_head]`. Returns `None`
+/// when the GPU path is unavailable (Vulkan kernel slot is `None`),
+/// the workload is below `GPU_SPLIT_QKV_MIN`, or the input length
+/// doesn't match `seq * n_heads * d_head`.
+fn gpu_reshape_to_heads_persistent(
+    input: &ScryGpuStorage,
+    seq: usize,
+    n_heads: usize,
+    d_head: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.reshape_to_heads.as_ref()?;
     let total = seq.checked_mul(n_heads)?.checked_mul(d_head)?;
     if total < GPU_SPLIT_QKV_MIN {
         return None;
@@ -2239,6 +2296,39 @@ impl MathBackend for ScryGpuBackend {
             }
         }
         Self::from_vec(out, &Shape::new(&[batch * seq, d_model]))
+    }
+
+    fn reshape_for_heads(
+        storage: &ScryGpuStorage,
+        batch: usize,
+        seq: usize,
+        n_heads: usize,
+        d_head: usize,
+    ) -> ScryGpuStorage {
+        // GPU path is `batch=1` only — same shape constraint as
+        // `reshape_from_heads`. Anything else falls back to the host
+        // default until the kernel grows a batch dim.
+        if batch == 1 {
+            if let Some(out) = gpu_reshape_to_heads_persistent(storage, seq, n_heads, d_head) {
+                return out;
+            }
+        }
+        // Default impl (CPU bouncing) — same scalar permute the trait does.
+        let data = Self::to_vec(storage);
+        let d_model = n_heads * d_head;
+        let total = batch * n_heads * seq * d_head;
+        let mut out = vec![0.0f32; total];
+        for b in 0..batch {
+            for h in 0..n_heads {
+                for s in 0..seq {
+                    for d in 0..d_head {
+                        out[(b * n_heads + h) * seq * d_head + s * d_head + d] =
+                            data[(b * seq + s) * d_model + h * d_head + d];
+                    }
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[batch * n_heads, seq, d_head]))
     }
 
     fn matmul_strided_batched(
@@ -3468,6 +3558,64 @@ mod tests {
         assert_eq!(g.len(), seq * d_model);
         for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
             assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_reshape_for_heads_matches_cpu_within_tolerance() {
+        // Forward direction: [seq, n_heads*d_head] -> [n_heads, seq, d_head].
+        // Same ViT attention shape, batch=1.
+        let seq = 197;
+        let n_heads = 12;
+        let d_head = 64;
+        let d_model = n_heads * d_head;
+        let total = seq * d_model;
+        let input: Vec<f32> = (0..total).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_reshape_for_heads test: {e}");
+                return;
+            }
+        };
+        let out = ScryGpuBackend::reshape_for_heads(&gpu_in, 1, seq, n_heads, d_head);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(out.is_gpu(), "reshape_for_heads should stay Gpu on CUDA");
+
+        let cpu_out = CpuBackend::reshape_for_heads(&input, 1, seq, n_heads, d_head);
+        let g = ScryGpuBackend::to_vec(&out);
+        assert_eq!(g.len(), n_heads * seq * d_head);
+        for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_reshape_round_trip_is_identity() {
+        // reshape_for_heads then reshape_from_heads should restore the
+        // original tensor byte-for-byte. Catches index-decode bugs in
+        // either kernel.
+        let seq = 64;
+        let n_heads = 8;
+        let d_head = 80;
+        let d_model = n_heads * d_head;
+        let total = seq * d_model;
+        let input: Vec<f32> = (0..total).map(|i| ((i % 251) as f32 - 120.0) * 0.017).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_reshape_round_trip test: {e}");
+                return;
+            }
+        };
+        let permuted = ScryGpuBackend::reshape_for_heads(&gpu_in, 1, seq, n_heads, d_head);
+        let restored = ScryGpuBackend::reshape_from_heads(&permuted, 1, seq, n_heads, d_head);
+        let r = ScryGpuBackend::to_vec(&restored);
+        assert_eq!(r.len(), input.len());
+        for (i, (rv, iv)) in r.iter().zip(input.iter()).enumerate() {
+            assert!((rv - iv).abs() < 1e-6, "round trip idx={i}: r={rv} in={iv}");
         }
     }
 

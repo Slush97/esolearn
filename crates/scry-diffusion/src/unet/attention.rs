@@ -125,14 +125,20 @@ impl<B: MathBackend> Attention<B> {
     /// Multi-head attention. `q_input` is `[n_q, d_model]`; `kv_input` is
     /// `[n_kv, cross_dim]`. For self-attention, pass the same tensor and
     /// `cross_dim == d_model`. Returns `[n_q, d_model]`.
+    ///
+    /// Implementation: pre-permute Q/K/V to `[h, n, d_h]` once via
+    /// `B::reshape_for_heads` (CUDA kernel on `ScryGpuBackend`), then
+    /// run all heads in two `B::matmul_strided_batched` calls (cuBLAS
+    /// strided batched gemm). Replaces a `num_heads`-deep loop that
+    /// previously called `gather_columns`/`scatter_columns` per head —
+    /// those have host-roundtrip defaults on `ScryGpuBackend`, which
+    /// the profile identified as the dominant cost in attention.
     fn forward(&self, q_input: &Tensor<B>, kv_input: &Tensor<B>) -> Tensor<B> {
         let inner_dim = self.num_heads * self.head_dim;
         let n_q = q_input.shape.dims()[0];
         let n_kv = kv_input.shape.dims()[0];
 
         // Q/K/V projections — bias is zero (HF SD attention uses bias=False).
-        // We still go through `matmul_bias` so backends with a fused path
-        // pick it up; the loader fills the bias with zeros.
         let q = B::matmul(
             &q_input.data,
             &self.q_weight.data,
@@ -161,24 +167,49 @@ impl<B: MathBackend> Attention<B> {
             false,
         );
 
-        // Scaled dot-product attention, per head. Use scatter_columns to
-        // reassemble heads into the [n_q, inner_dim] concat.
+        // Permute Q/K/V to per-head layout `[h, n, d_h]` in one dispatch
+        // each. On `ScryGpuBackend` this is a single CUDA reshape kernel
+        // per tensor; on CPU it falls back to a scalar permute.
+        let q_h = B::reshape_for_heads(&q, 1, n_q, self.num_heads, self.head_dim);
+        let k_h = B::reshape_for_heads(&k, 1, n_kv, self.num_heads, self.head_dim);
+        let v_h = B::reshape_for_heads(&v, 1, n_kv, self.num_heads, self.head_dim);
+
+        // Scores = Q · Kᵀ across all heads in one strided batched gemm:
+        // `[h, n_q, d_h] · [h, n_kv, d_h]ᵀ → [h, n_q, n_kv]`. cuBLAS
+        // dispatches one cublasGemmStridedBatchedEx call.
         let scale = 1.0f32 / (self.head_dim as f32).sqrt();
-        let mut head_concat = B::zeros(&Shape::new(&[n_q, inner_dim]));
-        for h in 0..self.num_heads {
-            let off = h * self.head_dim;
-            let q_h = B::gather_columns(&q, n_q, inner_dim, off, self.head_dim);
-            let k_h = B::gather_columns(&k, n_kv, inner_dim, off, self.head_dim);
-            let v_h = B::gather_columns(&v, n_kv, inner_dim, off, self.head_dim);
-
-            // scores = q_h @ k_h^T → [n_q, n_kv]
-            let scores = B::matmul(&q_h, &k_h, n_q, self.head_dim, n_kv, false, true);
-            let attn = B::scaled_softmax(&scores, scale, &Shape::new(&[n_q, n_kv]));
-            // out_h = attn @ v_h → [n_q, head_dim]
-            let out_h = B::matmul(&attn, &v_h, n_q, n_kv, self.head_dim, false, false);
-
-            B::scatter_columns(&mut head_concat, &out_h, n_q, inner_dim, off, self.head_dim);
-        }
+        let scores = B::matmul_strided_batched(
+            &q_h,
+            &k_h,
+            self.num_heads,
+            n_q,
+            self.head_dim,
+            n_kv,
+            false,
+            true,
+        );
+        // Fused scale + softmax along the last axis. Storage is
+        // [h * n_q, n_kv]; softmax-along-last-axis treats each row
+        // independently which is exactly per-head per-query softmax.
+        let attn = B::scaled_softmax(
+            &scores,
+            scale,
+            &Shape::new(&[self.num_heads * n_q, n_kv]),
+        );
+        // Out per head = attn · V: `[h, n_q, n_kv] · [h, n_kv, d_h] → [h, n_q, d_h]`.
+        let out_per_head = B::matmul_strided_batched(
+            &attn,
+            &v_h,
+            self.num_heads,
+            n_q,
+            n_kv,
+            self.head_dim,
+            false,
+            false,
+        );
+        // Permute back to `[n_q, h*d_h]` — one dispatch (kernel on GPU).
+        let head_concat =
+            B::reshape_from_heads(&out_per_head, 1, n_q, self.num_heads, self.head_dim);
 
         // Output projection (with bias).
         let out = B::matmul_bias(

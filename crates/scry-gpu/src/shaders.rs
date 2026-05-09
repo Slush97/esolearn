@@ -906,6 +906,37 @@ extern \"C\" __global__ void reshape_from_heads(
     out[idx] = input[(h * seq + s) * d_head + d];
 }";
 
+    /// Forward permute for multi-head attention: `[seq, n_heads*d_head]` →
+    /// `[n_heads, seq, d_head]`. Inverse of [`RESHAPE_FROM_HEADS_CUDA`].
+    ///
+    /// Used by SD UNet attention to lay out Q/K/V projection outputs into
+    /// per-head buffers in one dispatch, replacing a `num_heads`-deep loop
+    /// of `gather_columns` calls (each of which is itself a host
+    /// roundtrip on `ScryGpuBackend` because there's no kernel override).
+    ///
+    /// **Kernel signature:** `reshape_to_heads(const float* input, float* out, uint seq, uint n_heads, uint d_head)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[total.div_ceil(256), 1, 1]`.
+    /// **Shared memory:** none. Strided gather pattern but each thread
+    /// reads / writes one element, so memory access is fully coalescable.
+    #[cfg(feature = "cuda")]
+    pub const RESHAPE_TO_HEADS_CUDA: &str = "\
+extern \"C\" __global__ void reshape_to_heads(
+    const float* input, float* out,
+    unsigned int seq, unsigned int n_heads, unsigned int d_head
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int d_model = n_heads * d_head;
+    unsigned int total = seq * d_model;
+    if (idx >= total) return;
+    // Decode (h, s, d) from output index in [n_heads, seq, d_head] row-major:
+    // idx = (h * seq + s) * d_head + d.
+    unsigned int hs = idx / d_head;
+    unsigned int d = idx - hs * d_head;
+    unsigned int h = hs / seq;
+    unsigned int s = hs - h * seq;
+    out[idx] = input[s * d_model + h * d_head + d];
+}";
+
     /// 2D batch normalization (inference) with stored running stats.
     ///
     /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),
