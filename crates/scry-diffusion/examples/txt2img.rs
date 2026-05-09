@@ -23,7 +23,17 @@ use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::decoder::{VaeDecoder, VaeDecoderConfig};
 use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
-use scry_llm::backend::cpu::CpuBackend;
+
+#[cfg(not(feature = "scry-gpu-cuda"))]
+use scry_llm::backend::cpu::Backend as Backend;
+#[cfg(feature = "scry-gpu-cuda")]
+use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
+
+const BACKEND_NAME: &str = if cfg!(feature = "scry-gpu-cuda") {
+    "scry-gpu (CUDA)"
+} else {
+    "CPU"
+};
 
 #[derive(Debug)]
 struct Args {
@@ -128,6 +138,8 @@ Options:
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse()?;
     println!("scry-diffusion txt2img");
+    println!("  backend:  {BACKEND_NAME}");
+    enable_bf16_matmul_if_available();
     println!("  snapshot: {}", args.snapshot.display());
     println!("  prompt:   {:?}", args.prompt);
     if !args.negative_prompt.is_empty() {
@@ -148,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let text_ckpt =
         SafetensorsCheckpoint::open(args.snapshot.join("text_encoder/model.safetensors"))?;
     let text_encoder =
-        ClipTextEncoder::<CpuBackend>::from_safetensors(ClipTextConfig::clip_vit_l(), &text_ckpt)?;
+        ClipTextEncoder::<Backend>::from_safetensors(ClipTextConfig::clip_vit_l(), &text_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
 
     // ---- Load UNet. ----
@@ -158,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.snapshot
             .join("unet/diffusion_pytorch_model.safetensors"),
     )?;
-    let unet = Unet::<CpuBackend>::from_safetensors(UnetConfig::sd_1_5(), &unet_ckpt)?;
+    let unet = Unet::<Backend>::from_safetensors(UnetConfig::sd_1_5(), &unet_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
 
     // ---- Load VAE decoder. ----
@@ -168,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.snapshot
             .join("vae/diffusion_pytorch_model.safetensors"),
     )?;
-    let vae = VaeDecoder::<CpuBackend>::from_safetensors(VaeDecoderConfig::sd_1_5(), &vae_ckpt)?;
+    let vae = VaeDecoder::<Backend>::from_safetensors(VaeDecoderConfig::sd_1_5(), &vae_ckpt)?;
     println!("  done in {:.1}s", t0.elapsed().as_secs_f32());
 
     // ---- Build pipeline. ----
@@ -243,3 +255,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nsaved {} ({}×{})", args.out.display(), w, h);
     Ok(())
 }
+
+#[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
+fn enable_bf16_matmul_if_available() {
+    if let Err(e) = scry_llm::backend::scry_gpu::ScryGpuBackend::set_bf16_matmul(true) {
+        eprintln!("warning: bf16 matmul opt-in failed ({e}); falling back to fp32");
+    } else {
+        println!("  matmul:   bf16 (cuBLAS GemmEx)");
+    }
+}
+
+#[cfg(not(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16")))]
+fn enable_bf16_matmul_if_available() {}
