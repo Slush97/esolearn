@@ -250,6 +250,29 @@ struct ScryCtx {
     /// On-device elementwise scale `out[i] = in[i] * alpha`. Used to keep
     /// `scaled_softmax`'s pre-softmax scale step on-device. CUDA-only.
     scale: Option<::scry_gpu::Kernel>,
+    /// On-device embedding lookup: gathers rows of a `[vocab, dim]` weight
+    /// table by index. CUDA-only; Vulkan path is `None` and callers fall
+    /// back to CPU. Used by `ScryGpuBackend::embedding` so SD CLIP's token
+    /// and positional lookups don't download the full token table to host
+    /// on every text-encode (~145 MiB at SD 1.5).
+    embedding: Option<::scry_gpu::Kernel>,
+    /// On-device contiguous-column gather (`out[r, c] = in[r, col_start + c]`).
+    /// CUDA-only. Powers the per-head Q/K/V split inside
+    /// `CausalSelfAttention::forward` — 432 calls per CLIP text-encode at
+    /// SD 1.5, each round-tripping the full `[77, 2304]` qkv tensor on the
+    /// trait default before this override existed.
+    gather_columns: Option<::scry_gpu::Kernel>,
+    /// On-device additive contiguous-column scatter
+    /// (`dst[r, col_start + c] += src[r, c]`). CUDA-only. Mirror of
+    /// [`Self::gather_columns`]; used to merge per-head attention outputs
+    /// back into a `[seq, d_model]` accumulator. 144 calls per CLIP encode
+    /// at SD 1.5; trait default downloaded both `dst` and `src` per call.
+    scatter_columns: Option<::scry_gpu::Kernel>,
+    /// On-device causal-mask + scale fused over a `[seq, seq]` score
+    /// matrix. CUDA-only. Replaces the trait default's host loop so the
+    /// scaled-and-masked scores stay device-resident through the softmax
+    /// → matmul chain. 144 calls per CLIP encode at SD 1.5.
+    apply_causal_mask_and_scale: Option<::scry_gpu::Kernel>,
     /// f32 → bf16 elementwise cast. Used to feed the bf16 GemmEx fast-path.
     /// CUDA + `scry-gpu-bf16` only. The reverse (bf16 → f32) cast is no
     /// longer needed on the matmul path — `cublas_matmul_bf16_in_f32_out_async`
@@ -473,6 +496,38 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: scale_cuda compile: {e}"))?;
+        let embedding = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::EMBEDDING_FWD_CUDA,
+                "embedding_fwd",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: embedding_fwd_cuda compile: {e}"))?;
+        let gather_columns = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::GATHER_COLUMNS_CUDA,
+                "gather_columns",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: gather_columns_cuda compile: {e}"))?;
+        let scatter_columns = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::SCATTER_COLUMNS_ADD_CUDA,
+                "scatter_columns_add",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: scatter_columns_add_cuda compile: {e}"))?;
+        let apply_causal_mask_and_scale = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::APPLY_CAUSAL_MASK_AND_SCALE_CUDA,
+                "apply_causal_mask_and_scale",
+                1,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: apply_causal_mask_and_scale_cuda compile: {e}"))?;
         #[cfg(feature = "scry-gpu-bf16")]
         let cast_f32_bf16 = dev
             .compile_cuda(
@@ -512,6 +567,10 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             reshape_to_heads: Some(reshape_to_heads),
             concat_rows: Some(concat_rows),
             scale: Some(scale),
+            embedding: Some(embedding),
+            gather_columns: Some(gather_columns),
+            scatter_columns: Some(scatter_columns),
+            apply_causal_mask_and_scale: Some(apply_causal_mask_and_scale),
             #[cfg(feature = "scry-gpu-bf16")]
             cast_f32_bf16: Some(cast_f32_bf16),
             #[cfg(feature = "scry-gpu-bf16")]
@@ -555,6 +614,10 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         reshape_to_heads: None,
         concat_rows: None,
         scale: None,
+        embedding: None,
+        gather_columns: None,
+        scatter_columns: None,
+        apply_causal_mask_and_scale: None,
         #[cfg(feature = "scry-gpu-bf16")]
         cast_f32_bf16: None,
         #[cfg(feature = "scry-gpu-bf16")]
@@ -1651,6 +1714,238 @@ fn gpu_mul_elementwise_persistent(
     })
 }
 
+/// Minimum output element count for the GPU embedding path. SD 1.5 CLIP is
+/// `seq_len=77 × dim=768 = 59_136` outputs, well above. Tiny tests below the
+/// threshold bypass the GPU and use the host loop, where the index-decode
+/// overhead matters more than the gather bandwidth.
+const GPU_EMBEDDING_MIN_OUTPUT_ELEMENTS: usize = 32_768;
+
+/// GPU-resident embedding lookup: gathers rows of `weight[vocab, dim]` by
+/// index. The previous trait override downloaded the entire weight table to
+/// host before the gather (~145 MiB for SD 1.5 CLIP's `[49408, 768]` token
+/// table), defeating `to_device` residency on every text-encode. Single
+/// kernel launch keeps both the table and the result on-device.
+///
+/// `indices` arrive as `&[usize]` from the trait; uploaded as `Vec<u32>` so
+/// the kernel can index with native 32-bit lane width. Returns `None` when
+/// the GPU is unavailable, the workload is below threshold, or `weight`'s
+/// length disagrees with `vocab * dim`.
+fn gpu_embedding_persistent(
+    weight: &ScryGpuStorage,
+    indices: &[usize],
+    vocab: usize,
+    dim: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.embedding.as_ref()?;
+    let n_indices = indices.len();
+    let total = n_indices.checked_mul(dim)?;
+    if total == 0 || total < GPU_EMBEDDING_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if weight.len() != vocab.checked_mul(dim)? {
+        return None;
+    }
+
+    let buf_w = as_gpu_buffer(weight)?;
+    let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
+    let buf_idx = ctx.dev.upload::<u32>(&indices_u32).ok()?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 2] = [n_indices as u32, dim as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_w, &buf_idx, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
+/// Minimum output element count for the GPU column-gather/scatter path. The
+/// trait default downloads the entire `[rows, total_cols]` source on every
+/// call, so even small outputs are worth a kernel launch — using the same
+/// 2_048 floor as `gpu_split_qkv_persistent`. SD CLIP per-head Q/K/V
+/// (77 × 64 = 4_928 outputs) clears it.
+const GPU_COLUMN_GS_MIN_OUTPUT_ELEMENTS: usize = 2_048;
+
+/// GPU-resident contiguous-column gather. Single kernel launch reads
+/// `input[r, col_start..col_start + col_count]` for every row and writes the
+/// `[rows, col_count]` output device-side. Replaces the trait default's
+/// `to_vec` → CPU loop → `from_vec` chain, which fired 432 times per CLIP
+/// text-encode at SD 1.5.
+fn gpu_gather_columns_persistent(
+    input: &ScryGpuStorage,
+    rows: usize,
+    total_cols: usize,
+    col_start: usize,
+    col_count: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.gather_columns.as_ref()?;
+    if rows == 0 || col_count == 0 || total_cols == 0 {
+        return None;
+    }
+    if col_start.checked_add(col_count)? > total_cols {
+        return None;
+    }
+    let total = rows.checked_mul(col_count)?;
+    if total < GPU_COLUMN_GS_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    if input.len() != rows.checked_mul(total_cols)? {
+        return None;
+    }
+
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    let dims_pc: [u32; 4] = [
+        rows as u32,
+        total_cols as u32,
+        col_start as u32,
+        col_count as u32,
+    ];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
+/// GPU-resident additive contiguous-column scatter. Mutates `dst` in place
+/// — the kernel does `dst[r, col_start + c] += src[r, c]`. Used to merge
+/// per-head attention outputs back into a `[seq, d_model]` accumulator;
+/// 144 calls per CLIP encode. Returns `None` (and the caller falls back
+/// to the host loop) when the GPU is unavailable, the workload is below
+/// threshold, the column range overflows, or `src.len() != rows * col_count`.
+fn gpu_scatter_columns_persistent(
+    dst: &mut ScryGpuStorage,
+    src: &ScryGpuStorage,
+    rows: usize,
+    total_cols: usize,
+    col_start: usize,
+    col_count: usize,
+) -> Option<()> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.scatter_columns.as_ref()?;
+    if rows == 0 || col_count == 0 || total_cols == 0 {
+        return None;
+    }
+    if col_start.checked_add(col_count)? > total_cols {
+        return None;
+    }
+    let total = rows.checked_mul(col_count)?;
+    if total < GPU_COLUMN_GS_MIN_OUTPUT_ELEMENTS {
+        return None;
+    }
+    let dst_total = rows.checked_mul(total_cols)?;
+    if dst.len() != dst_total || src.len() != total {
+        return None;
+    }
+
+    // Both buffers must be device-resident so the scatter writes back to
+    // the caller's `dst`. The trait default's `B::zeros` returns a Cpu
+    // variant, so promote on first call — replace `*dst` with a Gpu
+    // variant pointing at the freshly-uploaded buffer, and write through
+    // it. Subsequent scatters in the per-head loop see the Gpu variant
+    // directly.
+    let dst_buf = match dst {
+        ScryGpuStorage::Gpu { buf, .. } => Arc::clone(&buf.f32),
+        ScryGpuStorage::Cpu(v) => {
+            let buf = ctx.dev.upload::<f32>(v).ok()?;
+            let arc = Arc::new(buf);
+            *dst = ScryGpuStorage::Gpu {
+                buf: GpuTensorStorage::from_arc(Arc::clone(&arc)),
+                len: dst_total,
+            };
+            arc
+        }
+    };
+    let src_buf = as_gpu_buffer(src)?;
+
+    let dims_pc: [u32; 4] = [
+        rows as u32,
+        total_cols as u32,
+        col_start as u32,
+        col_count as u32,
+    ];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*src_buf, &*dst_buf],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(())
+}
+
+/// GPU-resident causal-mask + scale fused over a `[seq, seq]` score block.
+/// Mutates `scores` in place: `scores[s, t] = (t > s) ? mask : scores[s,t]*scale`.
+/// 144 calls per CLIP encode at SD 1.5; trait default round-tripped each
+/// `[77, 77]` block through host. Returns `None` when the GPU is
+/// unavailable or `scores` is currently CPU-resident (the scatter
+/// write-back would otherwise be lost).
+fn gpu_apply_causal_mask_and_scale_persistent(
+    scores: &mut ScryGpuStorage,
+    seq: usize,
+    scale: f32,
+    mask_value: f32,
+) -> Option<()> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.apply_causal_mask_and_scale.as_ref()?;
+    if seq == 0 {
+        return None;
+    }
+    let total = seq.checked_mul(seq)?;
+    if scores.len() != total {
+        return None;
+    }
+    let scores_buf = match scores {
+        ScryGpuStorage::Gpu { buf, .. } => Arc::clone(&buf.f32),
+        ScryGpuStorage::Cpu(_) => return None,
+    };
+
+    // Push constants pack [seq: u32, scale: f32, mask_value: f32]. Same
+    // bit-pun trick as `gpu_scale_persistent` — the dispatcher reads each
+    // 4-byte slot as u32 and the kernel reinterprets the float-typed slots.
+    let dims_pc: [u32; 3] = [seq as u32, scale.to_bits(), mask_value.to_bits()];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*scores_buf],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(())
+}
+
 /// Minimum number of output elements before engaging the GPU pool path. Below
 /// this, CPU rayon parallelism plus warm-cache locality wins; the per-launch
 /// grid setup dominates a small handful of output elements. Same scale as
@@ -2672,6 +2967,22 @@ impl MathBackend for ScryGpuBackend {
                     return gpu_out;
                 }
             }
+
+            // Fast path: row broadcast `[rows, cols] + [1, cols]` — every
+            // transformer attention block adds a `[1, 3*d_model]` qkv-bias
+            // and a `[1, d_model]` proj-bias in this shape. Reuses the
+            // `bias_add` kernel that already powers `matmul_bias` (a
+            // `[cols]`-shaped bias is the same gather pattern as a
+            // `[1, cols]` one). 24 calls per CLIP encode at SD 1.5.
+            if a_dims == out_dims && b_dims == [1, cols] {
+                if let Some(gpu_out) = gpu_bias_add_persistent(a, b, rows, cols) {
+                    return gpu_out;
+                }
+            } else if b_dims == out_dims && a_dims == [1, cols] {
+                if let Some(gpu_out) = gpu_bias_add_persistent(b, a, rows, cols) {
+                    return gpu_out;
+                }
+            }
         }
         cpu(CpuBackend::add(
             &a.as_vec(),
@@ -2782,6 +3093,77 @@ impl MathBackend for ScryGpuBackend {
             return gpu_out;
         }
         cpu(CpuBackend::softmax(&input.as_vec(), shape))
+    }
+
+    fn gather_columns(
+        storage: &ScryGpuStorage,
+        rows: usize,
+        total_cols: usize,
+        col_start: usize,
+        col_count: usize,
+    ) -> ScryGpuStorage {
+        if let Some(gpu_out) =
+            gpu_gather_columns_persistent(storage, rows, total_cols, col_start, col_count)
+        {
+            return gpu_out;
+        }
+        // Trait-default body: download, scalar gather, re-upload.
+        let data = Self::to_vec(storage);
+        let mut out = vec![0.0f32; rows * col_count];
+        for r in 0..rows {
+            for c in 0..col_count {
+                out[r * col_count + c] = data[r * total_cols + col_start + c];
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[rows, col_count]))
+    }
+
+    fn scatter_columns(
+        dst: &mut ScryGpuStorage,
+        src: &ScryGpuStorage,
+        rows: usize,
+        total_cols: usize,
+        col_start: usize,
+        col_count: usize,
+    ) {
+        if gpu_scatter_columns_persistent(dst, src, rows, total_cols, col_start, col_count)
+            .is_some()
+        {
+            return;
+        }
+        // Trait-default body: download, scalar scatter, re-upload.
+        let mut dst_vec = Self::to_vec(dst);
+        let src_vec = Self::to_vec(src);
+        for r in 0..rows {
+            for c in 0..col_count {
+                dst_vec[r * total_cols + col_start + c] += src_vec[r * col_count + c];
+            }
+        }
+        *dst = Self::from_vec(dst_vec, &Shape::new(&[rows, total_cols]));
+    }
+
+    fn apply_causal_mask_and_scale(
+        scores: &mut ScryGpuStorage,
+        seq_len: usize,
+        scale: f32,
+        mask_value: f32,
+    ) {
+        if gpu_apply_causal_mask_and_scale_persistent(scores, seq_len, scale, mask_value).is_some()
+        {
+            return;
+        }
+        // Trait-default body: download, scalar mask + scale, re-upload.
+        let mut data = Self::to_vec(scores);
+        for s in 0..seq_len {
+            for t in 0..seq_len {
+                if t > s {
+                    data[s * seq_len + t] = mask_value;
+                } else {
+                    data[s * seq_len + t] *= scale;
+                }
+            }
+        }
+        *scores = Self::from_vec(data, &Shape::new(&[seq_len, seq_len]));
     }
 
     fn layernorm(
@@ -2991,6 +3373,9 @@ impl MathBackend for ScryGpuBackend {
         vocab: usize,
         dim: usize,
     ) -> ScryGpuStorage {
+        if let Some(out) = gpu_embedding_persistent(weight, indices, vocab, dim) {
+            return out;
+        }
         cpu(CpuBackend::embedding(&weight.as_vec(), indices, vocab, dim))
     }
 
@@ -4144,6 +4529,62 @@ mod tests {
     }
 
     #[test]
+    fn gpu_embedding_matches_cpu_and_stays_gpu() {
+        // SD 1.5 CLIP token-table shape: vocab=49408, dim=768. Sized down
+        // here so the test is fast but well above GPU_EMBEDDING_MIN_OUTPUT_ELEMENTS
+        // — 128 indices × 768 dim = 98_304 outputs.
+        let vocab = 1024;
+        let dim = 768;
+        let n_indices = 128;
+        let weight: Vec<f32> = (0..vocab * dim)
+            .map(|i| ((i % 257) as f32) * 0.013 - 1.5)
+            .collect();
+        let indices: Vec<usize> = (0..n_indices).map(|i| (i * 7) % vocab).collect();
+
+        let gpu_w = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(weight.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_embedding_matches_cpu_and_stays_gpu: {e}");
+                return;
+            }
+        };
+        let gpu_out = ScryGpuBackend::embedding(&gpu_w, &indices, vocab, dim);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "embedding over Gpu weight should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::embedding(&weight, &indices, vocab, dim);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_embedding_below_threshold_falls_back_to_cpu() {
+        // Below GPU_EMBEDDING_MIN_OUTPUT_ELEMENTS — host loop wins.
+        let vocab = 32;
+        let dim = 16;
+        let n_indices = 8;
+        assert!(n_indices * dim < GPU_EMBEDDING_MIN_OUTPUT_ELEMENTS);
+        let weight: Vec<f32> = (0..vocab * dim).map(|i| i as f32 * 0.01).collect();
+        let indices: Vec<usize> = vec![0, 5, 31, 10, 2, 17, 0, 8];
+
+        let gpu_w = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(weight)) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_embedding_below_threshold_falls_back_to_cpu: {e}");
+                return;
+            }
+        };
+        let out = ScryGpuBackend::embedding(&gpu_w, &indices, vocab, dim);
+        assert!(!out.is_gpu(), "small embedding should fall back to Cpu");
+    }
+
+    #[test]
     fn gpu_mul_elementwise_below_threshold_falls_back_to_cpu() {
         // Below GPU_ADD_ELEMENTWISE_MIN — same threshold as add_elementwise,
         // since the kernel cost profile is identical.
@@ -4199,6 +4640,179 @@ mod tests {
         assert_eq!(g.len(), c.len());
         for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
             assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_add_row_broadcast_matches_cpu_within_tolerance() {
+        // [seq, cols] + [1, cols] — every transformer attention block adds
+        // a [1, 3*d_model] qkv-bias and a [1, d_model] proj-bias in this
+        // shape. CLIP-L sized: seq=77, cols=2304.
+        let rows = 77;
+        let cols = 2304;
+        let total = rows * cols;
+        let a: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.013 - 1.5).collect();
+        let bias: Vec<f32> = (0..cols).map(|c| (c as f32) * 0.0007 - 0.8).collect();
+
+        let a_s = ScryGpuStorage::Cpu(a.clone());
+        let b_s = ScryGpuStorage::Cpu(bias.clone());
+        let gpu_a = match ScryGpuBackend::to_gpu(&a_s) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_add_row_broadcast_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_b = ScryGpuBackend::to_gpu(&b_s).expect("upload bias after upload a");
+
+        let a_shape = Shape::new(&[rows, cols]);
+        let b_shape = Shape::new(&[1, cols]);
+        let gpu_out = ScryGpuBackend::add(&gpu_a, &gpu_b, &a_shape, &b_shape, &a_shape);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "row-broadcast add should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::add(&a, &bias, &a_shape, &b_shape, &a_shape);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+
+        // Swapped operands ([1, cols] + [rows, cols]) — same fast path.
+        let gpu_swapped = ScryGpuBackend::add(&gpu_b, &gpu_a, &b_shape, &a_shape, &a_shape);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_swapped.is_gpu(),
+            "swapped row-broadcast add should stay Gpu on CUDA"
+        );
+        let g_sw = ScryGpuBackend::to_vec(&gpu_swapped);
+        for (i, (gv, cv)) in g_sw.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "swapped idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_gather_columns_matches_cpu_and_stays_gpu() {
+        // SD CLIP per-head Q gather: [seq=77, total_cols=2304] → [77, 64]
+        // starting at col 0. Sized above GPU_COLUMN_GS_MIN_OUTPUT_ELEMENTS
+        // (4_928 outputs >> 2_048 floor).
+        let rows = 77;
+        let total_cols = 2304;
+        let col_count = 64;
+        let col_start = 768;
+        let total_in = rows * total_cols;
+        let input: Vec<f32> = (0..total_in)
+            .map(|i| ((i % 191) as f32) * 0.011 - 1.0)
+            .collect();
+
+        let gpu_in = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(input.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_gather_columns_matches_cpu_and_stays_gpu: {e}");
+                return;
+            }
+        };
+        let gpu_out =
+            ScryGpuBackend::gather_columns(&gpu_in, rows, total_cols, col_start, col_count);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "gather_columns over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::gather_columns(&input, rows, total_cols, col_start, col_count);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_scatter_columns_promotes_cpu_dst_and_accumulates() {
+        // Two non-overlapping head writes into a `[seq, d_model]` accumulator
+        // — mirrors the per-head attention concat. First call promotes a
+        // Cpu zeros() dst to Gpu; second call hits the Gpu fast path.
+        let rows = 77;
+        let total_cols = 768;
+        let col_count = 64;
+
+        let mut dst_cpu = vec![0.0f32; rows * total_cols];
+        let src1: Vec<f32> = (0..rows * col_count)
+            .map(|i| ((i % 73) as f32) * 0.07 - 0.5)
+            .collect();
+        let src2: Vec<f32> = (0..rows * col_count)
+            .map(|i| ((i * 13 + 5) as f32) * 0.013 + 0.2)
+            .collect();
+        let mut dst = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols])) {
+            // Use a Cpu zeros to mirror what the trait does, then forget the
+            // Gpu attempt — we want the override to do the promotion.
+            Ok(_) => ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols]),
+            Err(e) => {
+                eprintln!("skipping gpu_scatter_columns_promotes_cpu_dst_and_accumulates: {e}");
+                return;
+            }
+        };
+        let gpu_src1 = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src1.clone()))
+            .expect("upload src1");
+        let gpu_src2 = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src2.clone()))
+            .expect("upload src2");
+
+        ScryGpuBackend::scatter_columns(&mut dst, &gpu_src1, rows, total_cols, 0, col_count);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(dst.is_gpu(), "scatter promoted Cpu dst to Gpu");
+        ScryGpuBackend::scatter_columns(&mut dst, &gpu_src2, rows, total_cols, 64, col_count);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(dst.is_gpu(), "second scatter stays on Gpu");
+
+        // Build CPU reference.
+        CpuBackend::scatter_columns(&mut dst_cpu, &src1, rows, total_cols, 0, col_count);
+        CpuBackend::scatter_columns(&mut dst_cpu, &src2, rows, total_cols, 64, col_count);
+
+        let g = ScryGpuBackend::to_vec(&dst);
+        for (i, (gv, cv)) in g.iter().zip(dst_cpu.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_apply_causal_mask_and_scale_matches_cpu() {
+        // CLIP causal-mask shape: seq=77.
+        let seq = 77;
+        let total = seq * seq;
+        let scale = 1.0_f32 / (64.0_f32).sqrt();
+        let mask_value = f32::NEG_INFINITY;
+        let scores: Vec<f32> = (0..total).map(|i| ((i % 89) as f32) * 0.04 - 1.5).collect();
+
+        let mut gpu_scores =
+            match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(scores.clone())) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_apply_causal_mask_and_scale_matches_cpu: {e}");
+                    return;
+                }
+            };
+        ScryGpuBackend::apply_causal_mask_and_scale(&mut gpu_scores, seq, scale, mask_value);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(gpu_scores.is_gpu(), "mask+scale over Gpu input stays Gpu");
+
+        let mut cpu_scores = scores;
+        CpuBackend::apply_causal_mask_and_scale(&mut cpu_scores, seq, scale, mask_value);
+
+        let g = ScryGpuBackend::to_vec(&gpu_scores);
+        for (i, (gv, cv)) in g.iter().zip(cpu_scores.iter()).enumerate() {
+            // -INF compares with itself fine; finite cells should match.
+            if cv.is_finite() {
+                assert!(
+                    (gv - cv).abs() < 1e-6,
+                    "idx={i}: gpu={gv} cpu={cv}"
+                );
+            } else {
+                assert!(gv.is_infinite() && gv.is_sign_negative(), "idx={i}: expected -INF got {gv}");
+            }
         }
     }
 

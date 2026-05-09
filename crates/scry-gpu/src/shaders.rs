@@ -556,7 +556,7 @@ extern \"C\" __global__ void gelu(
     ///
     /// Distinct from [`BIAS_ADD`] (column-broadcast over a row vector) and
     /// [`ADD_ROW_BIAS_CUDA`] (column-broadcast over a column vector). Use this
-    /// when both operands have identical shape — e.g. ResNet residual adds.
+    /// when both operands have identical shape — e.g. `ResNet` residual adds.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
     /// **Workgroup size:** 256 — dispatch `N` invocations
@@ -593,8 +593,8 @@ extern \"C\" __global__ void add_elementwise(
 
     /// Same-shape elementwise multiply: `out[i] = a[i] * b[i]`.
     ///
-    /// Mirror of [`ADD_ELEMENTWISE`]. Used by GeGLU's `values * gelu(gate)`
-    /// gating step in scry-diffusion's UNet feed-forward, where the deepest
+    /// Mirror of [`ADD_ELEMENTWISE`]. Used by `GeGLU`'s `values * gelu(gate)`
+    /// gating step in scry-diffusion's `UNet` feed-forward, where the deepest
     /// stage multiplies `[1024, 5120]` tensors.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
@@ -1357,6 +1357,131 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     /// handled specially. Activation tensors should never carry NaN/Inf in
     /// practice, so the naive form suffices.
     ///
+    /// Gather a contiguous column range from a `[rows, total_cols]` matrix.
+    ///
+    /// `out[r, c] = input[r, col_start + c]` for `r ∈ [0, rows)`,
+    /// `c ∈ [0, col_count)`. One thread per output element. Used by
+    /// `MathBackend::gather_columns`, which the per-head transformer
+    /// attention loop calls 3× per head — at SD 1.5 CLIP that's 432
+    /// calls per text-encode and the trait default round-trips the full
+    /// `[77, 2304]` qkv tensor through host on every one.
+    ///
+    /// **Kernel signature:** `gather_columns(const float* input, float* out, unsigned int rows, unsigned int total_cols, unsigned int col_start, unsigned int col_count)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*col_count).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const GATHER_COLUMNS_CUDA: &str = "\
+extern \"C\" __global__ void gather_columns(
+    const float* input, float* out,
+    unsigned int rows, unsigned int total_cols,
+    unsigned int col_start, unsigned int col_count
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * col_count;
+    if (idx >= total) return;
+    unsigned int r = idx / col_count;
+    unsigned int c = idx - r * col_count;
+    out[idx] = input[r * total_cols + col_start + c];
+}";
+
+    /// Additive scatter: write `src[r, c]` into `dst[r, col_start + c]`,
+    /// adding to whatever's already there.
+    ///
+    /// `dst[r, col_start + c] += src[r, c]` for `r ∈ [0, rows)`,
+    /// `c ∈ [0, col_count)`. One thread per source element. The kernel
+    /// accumulates into `dst` rather than overwriting because the
+    /// `MathBackend::scatter_columns` contract is additive (so the same
+    /// destination row can be the target of multiple per-head writes).
+    ///
+    /// Caller is expected to have zeroed `dst` if a fresh accumulator is
+    /// wanted — same convention as the trait default.
+    ///
+    /// **Kernel signature:** `scatter_columns_add(const float* src, float* dst, unsigned int rows, unsigned int total_cols, unsigned int col_start, unsigned int col_count)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*col_count).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none. Disjoint per-head column ranges → no
+    /// atomics needed; each `(r, col_start + c)` written by exactly one
+    /// thread per dispatch.
+    #[cfg(feature = "cuda")]
+    pub const SCATTER_COLUMNS_ADD_CUDA: &str = "\
+extern \"C\" __global__ void scatter_columns_add(
+    const float* src, float* dst,
+    unsigned int rows, unsigned int total_cols,
+    unsigned int col_start, unsigned int col_count
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * col_count;
+    if (idx >= total) return;
+    unsigned int r = idx / col_count;
+    unsigned int c = idx - r * col_count;
+    dst[r * total_cols + col_start + c] += src[idx];
+}";
+
+    /// Apply a strict-upper-triangle causal mask and scale to a `[seq, seq]`
+    /// score matrix in-place.
+    ///
+    /// `out[s, t] = (t > s) ? mask_value : in[s, t] * scale`. One thread
+    /// per `(s, t)` cell. The mask sentinel is typically `-INF` so the
+    /// subsequent softmax row driver zeros the masked positions.
+    ///
+    /// Used by transformer attention's pre-softmax step. Trait default
+    /// runs `to_vec` → CPU loop → `from_vec` per call — at SD 1.5 CLIP
+    /// that's 144 launches per encode, each round-tripping the small
+    /// `[77, 77]` score block through host.
+    ///
+    /// **Kernel signature:** `apply_causal_mask_and_scale(float* scores, unsigned int seq, float scale, float mask_value)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(seq*seq).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const APPLY_CAUSAL_MASK_AND_SCALE_CUDA: &str = "\
+extern \"C\" __global__ void apply_causal_mask_and_scale(
+    float* scores,
+    unsigned int seq, float scale, float mask_value
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = seq * seq;
+    if (idx >= total) return;
+    unsigned int s = idx / seq;
+    unsigned int t = idx - s * seq;
+    if (t > s) {
+        scores[idx] = mask_value;
+    } else {
+        scores[idx] = scores[idx] * scale;
+    }
+}";
+
+    /// Embedding lookup: gather rows of `weight[vocab, dim]` by index.
+    ///
+    /// `out[i, d] = weight[indices[i], d]` for `i ∈ [0, n_indices)`,
+    /// `d ∈ [0, dim)`. One thread per output element; each thread does one
+    /// load from the index buffer (broadcast across a warp when threads share
+    /// `i`) and one strided gather from the weight table. Replaces the
+    /// `ScryGpuBackend::embedding` trait override that downloaded the entire
+    /// device-resident weight table to host before doing the gather on CPU
+    /// — at SD 1.5 CLIP that's a ~145 MiB round-trip per text-encode.
+    ///
+    /// No bounds-check on `indices[i] < vocab` — caller validates (the
+    /// trait-level [`crate::backend::MathBackend::embedding`] contract).
+    ///
+    /// **Kernel signature:** `embedding_fwd(const float* weight, const unsigned int* indices, float* out, unsigned int n_indices, unsigned int dim)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(n_indices*dim).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const EMBEDDING_FWD_CUDA: &str = "\
+extern \"C\" __global__ void embedding_fwd(
+    const float* weight,
+    const unsigned int* indices,
+    float* out,
+    unsigned int n_indices, unsigned int dim
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = n_indices * dim;
+    if (idx >= total) return;
+    unsigned int i = idx / dim;
+    unsigned int d = idx - i * dim;
+    unsigned int row = indices[i];
+    out[idx] = weight[row * dim + d];
+}";
+
     /// **Kernel signature:** `cast_f32_bf16(const float* input, unsigned short* out, unsigned int N)`
     /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
     #[cfg(feature = "bf16")]
