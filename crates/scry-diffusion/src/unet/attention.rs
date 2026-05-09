@@ -76,17 +76,28 @@ pub(crate) struct Attention<B: MathBackend> {
 }
 
 /// GeGLU feed-forward block (`ff.*` in HF). Two linears with a GELU gate
-/// in between: `proj_in` produces `[d_model -> 2*d_ff]`, the result is
-/// chunked into `(x, gate)` along the last dim, multiplied by `gelu(gate)`,
-/// and projected back to `d_model` via `proj_out`.
+/// in between.
+///
+/// HF stores the input projection as a single `[2·d_ff, d_model]` weight
+/// whose output is chunked along the last dim into `(values, gate)`. We
+/// **split that into two independent `[d_model, d_ff]` matmuls at load
+/// time** — empirically, cuBLAS bf16 GemmEx picks a faster algorithm for
+/// two narrower matmuls than for one with 2× wider M, and splitting also
+/// eliminates the post-projection `gather_columns` step (each matmul
+/// produces exactly its half of the output).
 pub(crate) struct GeGluFf<B: MathBackend> {
     pub(crate) d_model: usize,
     pub(crate) d_ff: usize,
 
-    /// `proj_in`: `[d_model, 2*d_ff]`, scry-llm `[in, out]` convention.
-    pub(crate) proj_in_weight: Tensor<B>,
-    /// `[2*d_ff]`.
-    pub(crate) proj_in_bias: Tensor<B>,
+    /// First half of HF's `proj_in` — the **values**. Shape
+    /// `[d_model, d_ff]`, scry-llm `[in, out]` convention.
+    pub(crate) proj_values_weight: Tensor<B>,
+    /// `[d_ff]`.
+    pub(crate) proj_values_bias: Tensor<B>,
+    /// Second half of HF's `proj_in` — the **gate**. Shape `[d_model, d_ff]`.
+    pub(crate) proj_gate_weight: Tensor<B>,
+    /// `[d_ff]`.
+    pub(crate) proj_gate_bias: Tensor<B>,
     /// `proj_out`: `[d_ff, d_model]`.
     pub(crate) proj_out_weight: Tensor<B>,
     /// `[d_model]`.
@@ -186,33 +197,43 @@ impl<B: MathBackend> Attention<B> {
 
 impl<B: MathBackend> GeGluFf<B> {
     /// GeGLU feed-forward on `[n, d_model]`. Returns `[n, d_model]`.
+    ///
+    /// Two independent `[d_model, d_ff]` matmuls produce values and gate
+    /// directly — no `gather_columns` step needed. This is faster than
+    /// one wide `[d_model, 2·d_ff]` matmul + chunk at SD shapes
+    /// (cuBLAS bf16 GemmEx prefers the narrower-M algorithm).
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         use crate::profile::time_section;
 
         let n = input.shape.dims()[0];
-        let proj = time_section("ff.proj_in", || {
+
+        let values_t = time_section("ff.proj_values", || {
             matmul_bias_2d::<B>(
                 input,
-                &self.proj_in_weight,
-                &self.proj_in_bias,
+                &self.proj_values_weight,
+                &self.proj_values_bias,
                 n,
                 self.d_model,
-                2 * self.d_ff,
+                self.d_ff,
+            )
+        });
+        let gate_t = time_section("ff.proj_gate", || {
+            matmul_bias_2d::<B>(
+                input,
+                &self.proj_gate_weight,
+                &self.proj_gate_bias,
+                n,
+                self.d_model,
+                self.d_ff,
             )
         });
 
-        // Chunk along the last axis: HF `chunk(2, dim=-1)` returns
-        // `(first_half, second_half)`, with the *first half* being the
-        // values and the *second half* being the gate.
         let gated_t = time_section("ff.gate", || {
-            let x = B::gather_columns(&proj.data, n, 2 * self.d_ff, 0, self.d_ff);
-            let gate = B::gather_columns(&proj.data, n, 2 * self.d_ff, self.d_ff, self.d_ff);
             // HF GeGLU uses `F.gelu(approximate="none")` (erf-based exact GELU).
             // `B::gelu` is the tanh approximation, which drifts enough across
             // SD 1.5's 16 transformer blocks to push the M6 1e-3 parity gate.
-            let gate_t: Tensor<B> = Tensor::new(gate, Shape::new(&[n, self.d_ff]));
             let gelu_gate = time_section("ff.gate.exact_gelu", || exact_gelu(&gate_t));
-            let gated = B::mul_elementwise(&x, &gelu_gate.data);
+            let gated = B::mul_elementwise(&values_t.data, &gelu_gate.data);
             Tensor::new(gated, Shape::new(&[n, self.d_ff]))
         });
 
@@ -389,16 +410,21 @@ impl<B: MathBackend> GeGluFf<B> {
         d_ff: usize,
         consume: &mut impl FnMut(&str),
     ) -> Result<Self> {
-        use super::common::load_linear;
+        use super::common::{load_linear, load_split2_linear};
 
-        let (proj_in_weight, proj_in_bias) = load_linear::<B>(
-            view,
-            &format!("{prefix}.net.0.proj"),
-            d_model,
-            2 * d_ff,
-            true,
-            consume,
-        )?;
+        // HF stores `ff.net.0.proj` as one [2*d_ff, d_model] tensor; we
+        // split it column-wise into independent values + gate matmuls
+        // at load time. First half = values, second half = gate (matches
+        // HF `chunk(2, dim=-1)` semantics).
+        let ((proj_values_weight, proj_values_bias), (proj_gate_weight, proj_gate_bias)) =
+            load_split2_linear::<B>(
+                view,
+                &format!("{prefix}.net.0.proj"),
+                d_model,
+                d_ff,
+                true,
+                consume,
+            )?;
         let (proj_out_weight, proj_out_bias) = load_linear::<B>(
             view,
             &format!("{prefix}.net.2"),
@@ -410,8 +436,10 @@ impl<B: MathBackend> GeGluFf<B> {
         Ok(Self {
             d_model,
             d_ff,
-            proj_in_weight,
-            proj_in_bias,
+            proj_values_weight,
+            proj_values_bias,
+            proj_gate_weight,
+            proj_gate_bias,
             proj_out_weight,
             proj_out_bias,
         })

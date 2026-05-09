@@ -254,6 +254,85 @@ pub(crate) fn load_linear<B: MathBackend>(
     Ok((weight, bias))
 }
 
+/// Load one HF linear projection of HF shape `[2·M, in]` and split it
+/// column-wise into **two** `[in, M]` weights (in scry-llm convention).
+/// Bias is similarly split into two `[M]` halves.
+///
+/// Used to convert the HF GeGLU `ff.net.0.proj` (HF
+/// `[2·d_ff, d_model]` → scry-llm `[d_model, 2·d_ff]`) into two
+/// independent `[d_model, d_ff]` matmuls. Empirically, two narrower
+/// matmuls hit a faster cuBLAS algorithm than one wide one at SD
+/// shapes — and the post-projection `gather_columns` step disappears
+/// because each matmul produces exactly the right half directly.
+///
+/// The first returned `(weight, bias)` pair corresponds to HF rows
+/// `[0, M)`; the second to rows `[M, 2·M)`. For HF GeGLU that means
+/// **first = values, second = gate**, matching `tensor.chunk(2, dim=-1)`.
+#[cfg(feature = "safetensors")]
+pub(crate) fn load_split2_linear<B: MathBackend>(
+    view: &safetensors::SafeTensors<'_>,
+    prefix: &str,
+    in_features: usize,
+    out_features: usize,
+    has_bias: bool,
+    consume: &mut impl FnMut(&str),
+) -> Result<((Tensor<B>, Tensor<B>), (Tensor<B>, Tensor<B>))> {
+    use scry_vision::checkpoint::load_f32;
+
+    let two_m = 2 * out_features;
+    let w_key = format!("{prefix}.weight");
+    let raw = load_f32(view, &w_key).map_err(|e| Error::Llm(format!("load {w_key}: {e}")))?;
+    let expected = two_m * in_features;
+    if raw.len() != expected {
+        return Err(Error::Llm(format!(
+            "{w_key}: expected {expected} elements ({two_m}×{in_features}), got {}",
+            raw.len()
+        )));
+    }
+    // Transpose-and-split in one pass. HF row r holds output unit r;
+    // we want our `[in, M]` matrices indexed by [in_i * M + out_i].
+    // First half (values): HF rows [0, M); second half (gate): rows [M, 2M).
+    let total = in_features * out_features;
+    let mut w_a = vec![0.0f32; total];
+    let mut w_b = vec![0.0f32; total];
+    for in_i in 0..in_features {
+        let dst_row = in_i * out_features;
+        for out_i in 0..out_features {
+            w_a[dst_row + out_i] = raw[out_i * in_features + in_i];
+            w_b[dst_row + out_i] = raw[(out_features + out_i) * in_features + in_i];
+        }
+    }
+    let weight_a = Tensor::from_vec(w_a, Shape::new(&[in_features, out_features]));
+    let weight_b = Tensor::from_vec(w_b, Shape::new(&[in_features, out_features]));
+    consume(&w_key);
+
+    let (bias_a, bias_b) = if has_bias {
+        let b_key = format!("{prefix}.bias");
+        let raw_bias = load_f32(view, &b_key)
+            .map_err(|e| Error::Llm(format!("load {b_key}: {e}")))?;
+        if raw_bias.len() != two_m {
+            return Err(Error::Llm(format!(
+                "{b_key}: expected {two_m} elements, got {}",
+                raw_bias.len()
+            )));
+        }
+        let ba: Vec<f32> = raw_bias[..out_features].to_vec();
+        let bb: Vec<f32> = raw_bias[out_features..].to_vec();
+        consume(&b_key);
+        (
+            Tensor::from_vec(ba, Shape::new(&[out_features])),
+            Tensor::from_vec(bb, Shape::new(&[out_features])),
+        )
+    } else {
+        (
+            Tensor::from_vec(vec![0.0; out_features], Shape::new(&[out_features])),
+            Tensor::from_vec(vec![0.0; out_features], Shape::new(&[out_features])),
+        )
+    };
+
+    Ok(((weight_a, bias_a), (weight_b, bias_b)))
+}
+
 /// Sort + truncate a missing-key set into a `cargo test`-readable error.
 /// Used at the tail of every from_safetensors loader.
 #[cfg(feature = "safetensors")]
