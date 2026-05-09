@@ -167,7 +167,7 @@ Backend type is cfg-selected: `CpuBackend` by default, `ScryGpuBackend`
 under `--features scry-gpu-cuda`. Exposes `--bf16-matmul` and `--no-cudnn`
 toggles for the perf-pass sweep.
 
-**M9c — Perf pass** (phase 1 done; phase 3 next)
+**M9c — Perf pass** (host-roundtrip wins exhausted; F/G/H remaining)
 
 Baseline numbers landed 2026-05-08 (RTX 5070 Ti, prompt + seed
 matched between Python and Rust):
@@ -175,22 +175,79 @@ matched between Python and Rust):
 | Backend | Size | Steps | Total | Per-step |
 |---|---|---|---|---|
 | CPU | 64×64 | 2 | 8.78 s | 3815 ms |
-| GPU fp32 | 64×64 | 4 | 2.41 s | 423 ms |
-| GPU bf16 | 64×64 | 4 | 1.88 s | 446 ms |
-| GPU bf16 | 512×512 | 2 | 5.21 s | 2066 ms |
+| GPU bf16 (start of session) | 512×512 | 2 | 5.21 s | 2066 ms |
+| GPU bf16 (end of session) | 512×512 | 30 | **27.2 s** | **~851 ms** |
 | **PyTorch fp16** | **512×512** | **30** | **1.04 s** | **32.9 ms** |
 
-So our untuned GPU path is ~60× slower than PyTorch at full SD shape.
-The handoff's "first-land 15-30s" estimate was optimistic; projected
-30-step + 512×512 with current code is ~60 s. The gap is *not* a kernel
-quality gap — it's a residency / fusion gap.
+After 7 profile-driven commits, our GPU bf16 path runs the same
+generation in **27.2 s vs 63.3 s** at session start — a **2.4×
+speedup** with M6 HF parity bit-identical at 1.549e-4 throughout.
+Gap to PyTorch fp16: 60× → **25×**.
 
-**Confirmed bottleneck — denoise-loop residency.** `pipeline.rs:141-158`
-incurs **4 GPU↔CPU transfers per step** under `ScryGpuBackend`:
-`scheduler.scale_model_input` takes/returns `Vec<f32>` (host), CFG combine
-runs on host (`cond_eps.to_vec()` + `uncond_eps.to_vec()`), and
-`scheduler.step` takes/returns `&[f32]`/`Vec<f32>`. With 30 steps × CFG
-batch=2 that's 120 transfers per image. The latent never stays on GPU.
+**The big lesson** that ran through the entire perf pass: the original
+"residency-bound" framing was wrong. The actual issue was that *many*
+`MathBackend` trait methods had host-roundtrip defaults on
+`ScryGpuBackend` — every `B::foo(...)` looks identical in source
+whether `foo` is a CUDA kernel or a `to_vec` + scalar loop +
+`from_vec`. Profile, find the host roundtrip masquerading as a kernel
+call, lift it onto the GPU. Repeat.
+
+Wins (each one a separate commit, gates green):
+
+| Commit | Change | Per-step |
+|---|---|---|
+| `4408375` | Phase 1: Scheduler\<B\> (latent stays on device) | 2048 |
+| `c63fbe8` | `MathBackend::gelu_exact` + CUDA shader | 1737 |
+| `b48edc2` | GeGLU `proj_in` split (no gather_columns) | 1480 |
+| `32148f0` | Batched attention (eliminates per-head gather/scatter) | 1113 |
+| `26a42fa` | `MathBackend::transpose_2d` on GPU | 877 |
+| `d52527e` | `clone_tensor` via `B::scale(1.0)` | 859 |
+| `50ca256` | `concat_rows` CUDA shader (skip-concat on device) | 851 |
+
+**The remaining levers (F / G / H)** are all multi-week and are the
+right next chunks of work after the easy wins. Per-UNet-forward profile
+at the post-session steady state:
+
+```
+xfblock.ff           39%  matmul-bound
+resblock.forward     32%  cuDNN-bound, near floor
+xfblock.self_attn    16%  needs FlashAttention
+outer overhead        9%  GroupNorm + 1×1 convs (already on device)
+xfblock.cross_attn    4%
+```
+
+- **F: CFG batching** (UNet at batch=2) — single biggest theoretical
+  win, ~50% step. Major refactor: UNet's op call sites all assume
+  batch=1, plus all the helpers (`transpose_chw_to_hwc`,
+  `concat_channels`) need to handle batched inputs. 1-2 weeks of
+  careful changes.
+- **G: Fused attention** — collapses Q·Kᵀ → softmax → ·V into one
+  streaming kernel. Self-attn drops from 4.1 ms/call to maybe
+  1.5-2 ms. Multi-week kernel work; reference HF `xformers` /
+  FlashAttention but write in-tree (no Triton dep).
+- **H: CUDA graphs** — Phase 1 unblocked this. Records the UNet
+  forward into a `cudaGraph_t`, replays it 60×/image. Eliminates
+  per-kernel launch overhead. Requires extending `Device::batch()` /
+  `Device::run_configured_async` to expose a recordable graph
+  primitive.
+
+The session's **legacy "denoise-loop residency" hypothesis** below was
+the going-in framing for M9c. It turned out to be directionally right
+(transfers ARE expensive) but pointed at the wrong specific transfers
+— the latent itself was small (64 KB) and per-step transfers totaled
+<1 MB. The actual culprits were the *intermediate-tensor* host
+roundtrips inside the UNet forward (gather_columns, transpose_2d,
+concat_rows, etc.) which moved tens of MB per call. Profile-driven
+work found and fixed them. Keep this section as a record of what the
+M9c plan looked like *before* measurement.
+
+**Original M9c framing (pre-profile):** `pipeline.rs:141-158`
+incurred **4 GPU↔CPU transfers per step** under `ScryGpuBackend`:
+`scheduler.scale_model_input` took/returned `Vec<f32>`, CFG combine ran
+on host (`cond_eps.to_vec()` + `uncond_eps.to_vec()`), and
+`scheduler.step` took/returned `&[f32]`/`Vec<f32>`. Phase 1 fixed
+this; the bigger wins came from the *next* layer of host roundtrips
+that profile-driven work surfaced.
 
 **Phased plan.** Land in order; gate each phase with a re-run of
 `bench_sd --steps 30 --size 512` so the wins are auditable.
