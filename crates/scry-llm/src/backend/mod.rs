@@ -8,6 +8,24 @@ pub mod scry_gpu;
 
 use crate::tensor::shape::Shape;
 
+/// Abramowitz–Stegun 7.1.26 approximation to `erf`, accurate to ~1.5e-7
+/// in f64. Shared by the CPU default for `MathBackend::gelu_exact`.
+#[inline]
+fn erf64_for_gelu(x: f64) -> f64 {
+    const P: f64 = 0.327_591_1;
+    const A1: f64 = 0.254_829_592;
+    const A2: f64 = -0.284_496_736;
+    const A3: f64 = 1.421_413_741;
+    const A4: f64 = -1.453_152_027;
+    const A5: f64 = 1.061_405_429;
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let ax = x.abs();
+    let t = 1.0 / (1.0 + P * ax);
+    let poly = ((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t;
+    let y = 1.0 - poly * (-ax * ax).exp();
+    sign * y
+}
+
 /// Memory management trait — allocate, copy, transfer between host/device.
 pub trait DeviceBackend: Sized {
     type Storage: Clone;
@@ -169,6 +187,77 @@ pub trait MathBackend: DeviceBackend {
         output
     }
 
+    /// Group normalization, inference path with per-channel affine.
+    ///
+    /// For input shaped `[batch, channels, spatial]` (where `spatial = H*W`,
+    /// flattened to `batch * channels * spatial` elements), splits channels
+    /// into `num_groups` groups of `channels / num_groups` channels each,
+    /// computes mean/variance per `(batch, group)`, normalizes, then applies
+    /// per-channel affine `out = norm * weight[c] + bias[c]`. `weight` and
+    /// `bias` are length `channels`. `channels` must be evenly divisible by
+    /// `num_groups`.
+    ///
+    /// Stable Diffusion uses `num_groups = 32` everywhere it appears (UNet
+    /// ResBlocks + VAE decoder).
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn group_norm(
+        input: &Self::Storage,
+        weight: &Self::Storage,
+        bias: &Self::Storage,
+        num_groups: usize,
+        channels: usize,
+        spatial: usize,
+        eps: f32,
+    ) -> Self::Storage {
+        assert!(
+            num_groups > 0 && channels % num_groups == 0,
+            "group_norm: channels={channels} must be divisible by num_groups={num_groups}"
+        );
+        let cpg = channels / num_groups;
+        let input_v = Self::to_vec(input);
+        let weight_v = Self::to_vec(weight);
+        let bias_v = Self::to_vec(bias);
+        assert!(weight_v.len() == channels && bias_v.len() == channels);
+
+        let total = input_v.len();
+        let plane = channels * spatial;
+        let n_batch = if plane == 0 { 0 } else { total / plane };
+        let mut out = vec![0.0f32; total];
+        let gsize = cpg * spatial;
+
+        for n in 0..n_batch {
+            for g in 0..num_groups {
+                let c_start = g * cpg;
+                let base = (n * channels + c_start) * spatial;
+
+                let mut sum = 0.0f64;
+                for j in 0..gsize {
+                    sum += f64::from(input_v[base + j]);
+                }
+                let mean = (sum / gsize as f64) as f32;
+
+                let mut sq = 0.0f64;
+                for j in 0..gsize {
+                    let diff = f64::from(input_v[base + j]) - f64::from(mean);
+                    sq += diff * diff;
+                }
+                let var = (sq / gsize as f64) as f32;
+                let rstd = 1.0f32 / (var + eps).sqrt();
+
+                for j in 0..gsize {
+                    let local_c = j / spatial;
+                    let c = c_start + local_c;
+                    let norm = (input_v[base + j] - mean) * rstd;
+                    out[base + j] = norm * weight_v[c] + bias_v[c];
+                }
+            }
+        }
+
+        Self::from_vec(out, &Shape::new(&[total]))
+    }
+
     /// 2D batch normalization, inference-only with stored running statistics.
     ///
     /// For input shaped `[channels, spatial]` (or `[batch, channels, spatial]`
@@ -212,6 +301,35 @@ pub trait MathBackend: DeviceBackend {
     /// GELU activation (tanh approximation).
     fn gelu(input: &Self::Storage) -> Self::Storage;
 
+    /// Exact (erf-based) GELU: `0.5 * x * (1 + erf(x / sqrt(2)))`.
+    ///
+    /// Distinct from [`Self::gelu`] which is the tanh approximation HF
+    /// uses for `approximate="tanh"`. PyTorch's `F.gelu(approximate="none")`
+    /// is this erf form, and the SD UNet's GeGLU MLP uses exactly that —
+    /// the tanh approximation drifts ~3e-4 per block and accumulates over
+    /// SD 1.5's 16 transformer blocks to break the M6 1e-3 parity gate.
+    ///
+    /// CPU default uses Abramowitz–Stegun 7.1.26 in f64 (max error
+    /// ≈ 1.5e-7). GPU backends should override with a CUDA / WGSL shader
+    /// to avoid the host round-trip — at SD 1.5's deepest stage the gate
+    /// tensor is `[4096, 5120]` = 80 MB, and the GeGLU MLP is the
+    /// single largest cost in the UNet forward (47% at 512×512 / bf16).
+    fn gelu_exact(input: &Self::Storage) -> Self::Storage {
+        let v = Self::to_vec(input);
+        let n = v.len();
+        const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+        let out: Vec<f32> = v
+            .into_iter()
+            .map(|x| {
+                let xd = f64::from(x);
+                #[allow(clippy::cast_possible_truncation)]
+                let y = (0.5 * xd * (1.0 + erf64_for_gelu(xd * INV_SQRT_2))) as f32;
+                y
+            })
+            .collect();
+        Self::from_vec(out, &Shape::new(&[n]))
+    }
+
     /// `ReLU` activation: `out[i] = max(0, in[i])`. Default impl runs on
     /// host via `to_vec`/`from_vec`; GPU backends override to keep tensors
     /// device-resident.
@@ -219,6 +337,18 @@ pub trait MathBackend: DeviceBackend {
         let v = Self::to_vec(input);
         let n = v.len();
         let out: Vec<f32> = v.into_iter().map(|x| x.max(0.0)).collect();
+        Self::from_vec(out, &Shape::new(&[n]))
+    }
+
+    /// SiLU / Swish activation: `out[i] = x * sigmoid(x) = x / (1 + exp(-x))`.
+    ///
+    /// Used in every Stable-Diffusion UNet ResBlock and across the SD family.
+    /// Default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn silu(input: &Self::Storage) -> Self::Storage {
+        let v = Self::to_vec(input);
+        let n = v.len();
+        let out: Vec<f32> = v.into_iter().map(|x| x / (1.0 + (-x).exp())).collect();
         Self::from_vec(out, &Shape::new(&[n]))
     }
 
@@ -386,6 +516,42 @@ pub trait MathBackend: DeviceBackend {
         Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
     }
 
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// Input is `[channels, h_in, w_in]`; output is
+    /// `[channels, h_in*scale, w_in*scale]` with
+    /// `out[c, oh, ow] = in[c, oh/scale, ow/scale]` (integer divide). Used in
+    /// SD UNet UpBlocks and the VAE decoder. Matches PyTorch's
+    /// `F.interpolate(mode="nearest")` and `nn.Upsample(mode="nearest")`
+    /// byte-for-byte.
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// override to keep tensors device-resident.
+    fn upsample_2d_nearest(
+        input: &Self::Storage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        scale: usize,
+    ) -> Self::Storage {
+        let h_out = h_in * scale;
+        let w_out = w_in * scale;
+        let input_v = Self::to_vec(input);
+        let mut out = vec![0.0f32; channels * h_out * w_out];
+        for c in 0..channels {
+            let in_plane = c * h_in * w_in;
+            let out_plane = c * h_out * w_out;
+            for oh in 0..h_out {
+                let ih = oh / scale;
+                for ow in 0..w_out {
+                    let iw = ow / scale;
+                    out[out_plane + oh * w_out + ow] = input_v[in_plane + ih * w_in + iw];
+                }
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
+    }
+
     /// Adaptive 2D average pooling: `[channels, h_in, w_in]` →
     /// `[channels, h_out, w_out]` with per-output regions
     /// `h_start = oh*h_in/h_out`, `h_end = (oh+1)*h_in/h_out` (matches
@@ -443,6 +609,25 @@ pub trait MathBackend: DeviceBackend {
 
     /// Scale all elements: `a * scalar`.
     fn scale(a: &Self::Storage, scalar: f32) -> Self::Storage;
+
+    /// 2D transpose: input `[rows, cols]` (row-major) → output `[cols, rows]`
+    /// (row-major). CPU default uses a scalar permute through host memory;
+    /// GPU backends should override with a kernel to avoid the round-trip.
+    ///
+    /// Used inside the SD UNet's `SpatialTransformer` to permute
+    /// `[C, H*W] ↔ [H*W, C]` around the transformer-block stack — at SD
+    /// shapes that's tens of MB per call × 32 calls per UNet forward.
+    fn transpose_2d(input: &Self::Storage, rows: usize, cols: usize) -> Self::Storage {
+        let v = Self::to_vec(input);
+        debug_assert_eq!(v.len(), rows * cols);
+        let mut out = vec![0.0f32; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                out[c * rows + r] = v[r * cols + c];
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[cols, rows]))
+    }
 
     /// Concatenate two row-major matrices along rows (axis 0).
     fn concat_rows(

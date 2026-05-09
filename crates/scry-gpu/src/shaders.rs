@@ -395,6 +395,56 @@ extern \"C\" __global__ void relu(
     out[i] = fmaxf(0.0f, input[i]);
 }";
 
+    /// `SiLU` / Swish activation: `out[i] = x * sigmoid(x) = x / (1 + exp(-x))`.
+    ///
+    /// Used in every Stable-Diffusion `UNet` `ResBlock` (and elsewhere in the
+    /// SD family). Same dispatch shape as [`GELU_CUDA`]; the only arithmetic
+    /// difference is the sigmoid instead of the tanh-approx polynomial.
+    ///
+    /// **Kernel signature:** `silu(const float* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[N.div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const SILU_CUDA: &str = "\
+extern \"C\" __global__ void silu(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    out[i] = x / (1.0f + expf(-x));
+}";
+
+    /// Exact (erf-based) GELU: `0.5 * x * (1 + erf(x / sqrt(2)))`.
+    ///
+    /// Distinct from [`GELU_CUDA`] (the tanh approximation). Used by
+    /// PyTorch's `F.gelu(approximate=\"none\")` and HF's GeGLU MLP — the
+    /// SD UNet's GeGLU layer uses exactly this form, and the tanh
+    /// approximation drifts ~3e-4 per block, accumulating across SD
+    /// 1.5's 16 transformer blocks to break the 1e-3 parity gate.
+    ///
+    /// CUDA's `erff` intrinsic is the right primitive — it's the same
+    /// erf PyTorch uses on device, so post-kernel results match
+    /// PyTorch's bit-for-bit on identical inputs (within fp32
+    /// rounding).
+    ///
+    /// **Kernel signature:** `gelu_exact(const float* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[N.div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const GELU_EXACT_CUDA: &str = "\
+extern \"C\" __global__ void gelu_exact(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    // 1 / sqrt(2) = 0.70710678118654752440f
+    out[i] = 0.5f * x * (1.0f + erff(x * 0.70710678118654752440f));
+}";
+
     /// Tanh activation: `out[i] = tanh(in[i])`.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
@@ -506,7 +556,7 @@ extern \"C\" __global__ void gelu(
     ///
     /// Distinct from [`BIAS_ADD`] (column-broadcast over a row vector) and
     /// [`ADD_ROW_BIAS_CUDA`] (column-broadcast over a column vector). Use this
-    /// when both operands have identical shape — e.g. ResNet residual adds.
+    /// when both operands have identical shape — e.g. `ResNet` residual adds.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
     /// **Workgroup size:** 256 — dispatch `N` invocations
@@ -539,6 +589,45 @@ extern \"C\" __global__ void add_elementwise(
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
     out[i] = a[i] + b[i];
+}";
+
+    /// Same-shape elementwise multiply: `out[i] = a[i] * b[i]`.
+    ///
+    /// Mirror of [`ADD_ELEMENTWISE`]. Used by `GeGLU`'s `values * gelu(gate)`
+    /// gating step in scry-diffusion's `UNet` feed-forward, where the deepest
+    /// stage multiplies `[1024, 5120]` tensors.
+    ///
+    /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)
+    /// **Workgroup size:** 256 — dispatch `N` invocations
+    /// **Bindings:**
+    ///   - `@binding(0)` `a: array<f32>` (read)
+    ///   - `@binding(1)` `b: array<f32>` (read)
+    ///   - `@binding(2)` `out: array<f32>` (`read_write`)
+    pub const MUL_ELEMENTWISE: &str = "\
+struct Dims { N: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> a: array<f32>;
+@group(0) @binding(1) var<storage, read> b: array<f32>;
+@group(0) @binding(2) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if i >= dims.N { return; }
+    out[i] = a[i] * b[i];
+}";
+
+    /// CUDA C equivalent of [`MUL_ELEMENTWISE`].
+    #[cfg(feature = "cuda")]
+    pub const MUL_ELEMENTWISE_CUDA: &str = "\
+extern \"C\" __global__ void mul_elementwise(
+    const float* a, const float* b, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    out[i] = a[i] * b[i];
 }";
 
     /// Row-wise softmax over the last dimension (numerically stable).
@@ -856,6 +945,71 @@ extern \"C\" __global__ void reshape_from_heads(
     out[idx] = input[(h * seq + s) * d_head + d];
 }";
 
+    /// Concatenate two row-major matrices along axis 0 (rows). For
+    /// `a: [a_rows, cols]` and `b: [b_rows, cols]`, the output is
+    /// `[a_rows + b_rows, cols]`. Because both inputs are row-major
+    /// with the same `cols`, the operation is a flat append: `a`'s
+    /// `a_total` elements followed by `b`'s `b_total` elements.
+    ///
+    /// One thread per output element. The branch on `i < a_total` is
+    /// uniform across each warp until exactly one warp crosses the
+    /// boundary, so divergence is bounded.
+    ///
+    /// Used by the SD UNet's UpBlock skip-concat (12×/forward, on
+    /// tensors up to `[2560, 64, 64]` = 10 MB at the shallowest
+    /// up-stage) and by the Llama KV cache. Replaces a host-roundtrip
+    /// default that this trait method had on `ScryGpuBackend`.
+    ///
+    /// **Kernel signature:** `concat_rows(const float* a, const float* b, float* out, uint a_total, uint b_total)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(a_total+b_total).div_ceil(256), 1, 1]`.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const CONCAT_ROWS_CUDA: &str = "\
+extern \"C\" __global__ void concat_rows(
+    const float* a, const float* b, float* out,
+    unsigned int a_total, unsigned int b_total
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = a_total + b_total;
+    if (i >= total) return;
+    if (i < a_total) {
+        out[i] = a[i];
+    } else {
+        out[i] = b[i - a_total];
+    }
+}";
+
+    /// Forward permute for multi-head attention: `[seq, n_heads*d_head]` →
+    /// `[n_heads, seq, d_head]`. Inverse of [`RESHAPE_FROM_HEADS_CUDA`].
+    ///
+    /// Used by SD UNet attention to lay out Q/K/V projection outputs into
+    /// per-head buffers in one dispatch, replacing a `num_heads`-deep loop
+    /// of `gather_columns` calls (each of which is itself a host
+    /// roundtrip on `ScryGpuBackend` because there's no kernel override).
+    ///
+    /// **Kernel signature:** `reshape_to_heads(const float* input, float* out, uint seq, uint n_heads, uint d_head)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[total.div_ceil(256), 1, 1]`.
+    /// **Shared memory:** none. Strided gather pattern but each thread
+    /// reads / writes one element, so memory access is fully coalescable.
+    #[cfg(feature = "cuda")]
+    pub const RESHAPE_TO_HEADS_CUDA: &str = "\
+extern \"C\" __global__ void reshape_to_heads(
+    const float* input, float* out,
+    unsigned int seq, unsigned int n_heads, unsigned int d_head
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int d_model = n_heads * d_head;
+    unsigned int total = seq * d_model;
+    if (idx >= total) return;
+    // Decode (h, s, d) from output index in [n_heads, seq, d_head] row-major:
+    // idx = (h * seq + s) * d_head + d.
+    unsigned int hs = idx / d_head;
+    unsigned int d = idx - hs * d_head;
+    unsigned int h = hs / seq;
+    unsigned int s = hs - h * seq;
+    out[idx] = input[s * d_model + h * d_head + d];
+}";
+
     /// 2D batch normalization (inference) with stored running stats.
     ///
     /// For an input shaped `[batch, channels, spatial]` (where `spatial = H*W`),
@@ -1014,6 +1168,181 @@ extern \"C\" __global__ void adaptive_avg_pool_2d(
     out[idx] = sum / (float)count;
 }";
 
+    /// Group normalization with per-channel affine, inference path.
+    ///
+    /// For input shaped `[batch, channels, spatial]` (where `spatial = H*W`)
+    /// with `channels` evenly divisible by `num_groups` (so
+    /// `channels_per_group = channels / num_groups`), normalizes each
+    /// `(batch, group)` plane independently:
+    ///
+    /// ```text
+    /// mean[n, g]  = sum  over c in [g*cpg, (g+1)*cpg), i in [0, spatial) { in[n, c, i] } / (cpg * spatial)
+    /// var[n, g]   = sum  over c in [g*cpg, (g+1)*cpg), i in [0, spatial) { (in[n, c, i] - mean[n, g])^2 } / (cpg * spatial)
+    /// out[n, c, i] = ((in[n, c, i] - mean[n, g_of_c]) * rsqrt(var[n, g_of_c] + eps)) * weight[c] + bias[c]
+    /// ```
+    ///
+    /// where `g_of_c = c / cpg`. Stable Diffusion uses `num_groups = 32`
+    /// everywhere it appears (`UNet` `ResBlocks` + `VAE` decoder).
+    ///
+    /// 2D grid `[num_groups, batch, 1]` — one block per `(batch, group)`
+    /// plane, 256 threads. Two block-wide reductions (sum → mean,
+    /// sum-of-squared-deviations → variance) sharing one 256-float static
+    /// shared-memory scratchpad. The per-block work is
+    /// `cpg * spatial` elements; threads stride over them.
+    ///
+    /// **Kernel signature:** `group_norm(const float* input,
+    /// const float* weight, const float* bias, float* out,
+    /// unsigned int channels, unsigned int spatial,
+    /// unsigned int num_groups, float eps)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[num_groups, batch, 1]` blocks.
+    /// **Shared memory:** static, 256 floats (1 KiB).
+    #[cfg(feature = "cuda")]
+    pub const GROUP_NORM_CUDA: &str = "\
+extern \"C\" __global__ void group_norm(
+    const float* input, const float* weight, const float* bias, float* out,
+    unsigned int channels, unsigned int spatial,
+    unsigned int num_groups, float eps
+) {
+    __shared__ float smem[256];
+
+    unsigned int g = blockIdx.x;
+    unsigned int n = blockIdx.y;
+    if (g >= num_groups) return;
+
+    unsigned int cpg = channels / num_groups;
+    unsigned int gsize = cpg * spatial;
+    unsigned int c_start = g * cpg;
+    // Base offset of this (n, group)'s first element in the flat
+    // [batch, channels, spatial] input.
+    unsigned int base = (n * channels + c_start) * spatial;
+    const float* in_block = input + base;
+    float* out_block = out + base;
+
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    // Pass 1: per-thread partial sum, block-wide reduction → mean.
+    float local_sum = 0.0f;
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        local_sum += in_block[j];
+    }
+    smem[tid] = local_sum;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float inv_g = 1.0f / (float)gsize;
+    float mean = smem[0] * inv_g;
+    __syncthreads();
+
+    // Pass 2: per-thread partial sum of squared deviations, block-reduce → var.
+    float local_sq = 0.0f;
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        float diff = in_block[j] - mean;
+        local_sq += diff * diff;
+    }
+    smem[tid] = local_sq;
+    __syncthreads();
+    for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            smem[tid] += smem[tid + s];
+        }
+        __syncthreads();
+    }
+    float var = smem[0] * inv_g;
+    float rstd = rsqrtf(var + eps);
+
+    // Pass 3: normalize, scale, shift. weight[c] / bias[c] vary across the
+    // group, so each thread looks them up by channel index. Both lookups
+    // are L1-cached: cpg consecutive channels share `weight`/`bias` reads
+    // across many threads in the same block.
+    for (unsigned int j = tid; j < gsize; j += bs) {
+        unsigned int local_c = j / spatial;
+        unsigned int c = c_start + local_c;
+        float norm = (in_block[j] - mean) * rstd;
+        out_block[j] = norm * weight[c] + bias[c];
+    }
+}";
+
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// For input `[channels, h_in, w_in]` and integer `scale`, writes
+    /// `[channels, h_in*scale, w_in*scale]` where
+    /// `out[c, oh, ow] = in[c, oh/scale, ow/scale]` (integer divide). Used in
+    /// SD `UNet` `UpBlocks` and the `VAE` decoder. `PyTorch`'s
+    /// `F.interpolate(mode="nearest")` and `nn.Upsample(mode="nearest")`
+    /// match this byte-for-byte.
+    ///
+    /// One thread per output element; each thread does one integer-divide
+    /// per axis + one load + one store. The input plane stays in L2 for
+    /// SD-class layers (largest is 1280 × 64 × 64 ≈ 5 MiB), so the kernel
+    /// runs memory-bound.
+    ///
+    /// **Kernel signature:** `upsample_2d_nearest(const float* input,
+    /// float* out, unsigned int channels, unsigned int h_in,
+    /// unsigned int w_in, unsigned int scale)`
+    /// **Block size:** `(256, 1, 1)` — dispatch
+    ///   `[(channels*h_in*scale*w_in*scale).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const UPSAMPLE_2D_NEAREST_CUDA: &str = "\
+extern \"C\" __global__ void upsample_2d_nearest(
+    const float* input, float* out,
+    unsigned int channels, unsigned int h_in, unsigned int w_in,
+    unsigned int scale
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int h_out = h_in * scale;
+    unsigned int w_out = w_in * scale;
+    unsigned int spatial_out = h_out * w_out;
+    unsigned int total = channels * spatial_out;
+    if (idx >= total) return;
+
+    unsigned int c = idx / spatial_out;
+    unsigned int rem = idx - c * spatial_out;
+    unsigned int oh = rem / w_out;
+    unsigned int ow = rem - oh * w_out;
+
+    unsigned int ih = oh / scale;
+    unsigned int iw = ow / scale;
+    out[idx] = input[(c * h_in + ih) * w_in + iw];
+}";
+
+    /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
+    ///
+    /// WGSL equivalent of [`UPSAMPLE_2D_NEAREST_CUDA`]. Currently unused by
+    /// the dispatcher (CUDA-first per project memory) but compiles for
+    /// future Vulkan-path use.
+    ///
+    /// **Push constants:** `struct Dims { channels: u32, h_in: u32, w_in: u32, scale: u32 }` (16 bytes)
+    /// **Workgroup size:** 256
+    pub const UPSAMPLE_2D_NEAREST: &str = "\
+struct Dims { channels: u32, h_in: u32, w_in: u32, scale: u32 }
+var<push_constant> dims: Dims;
+
+@group(0) @binding(0) var<storage, read> input: array<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    let h_out = dims.h_in * dims.scale;
+    let w_out = dims.w_in * dims.scale;
+    let spatial_out = h_out * w_out;
+    let total = dims.channels * spatial_out;
+    if idx >= total { return; }
+    let c = idx / spatial_out;
+    let rem = idx - c * spatial_out;
+    let oh = rem / w_out;
+    let ow = rem - oh * w_out;
+    let ih = oh / dims.scale;
+    let iw = ow / dims.scale;
+    out[idx] = input[(c * dims.h_in + ih) * dims.w_in + iw];
+}";
+
     /// f32 → bf16 elementwise cast: `out[i] = (bf16) in[i]` with RNE rounding.
     ///
     /// bf16 is the high 16 bits of fp32 with round-to-nearest-even — no
@@ -1028,6 +1357,131 @@ extern \"C\" __global__ void adaptive_avg_pool_2d(
     /// handled specially. Activation tensors should never carry NaN/Inf in
     /// practice, so the naive form suffices.
     ///
+    /// Gather a contiguous column range from a `[rows, total_cols]` matrix.
+    ///
+    /// `out[r, c] = input[r, col_start + c]` for `r ∈ [0, rows)`,
+    /// `c ∈ [0, col_count)`. One thread per output element. Used by
+    /// `MathBackend::gather_columns`, which the per-head transformer
+    /// attention loop calls 3× per head — at SD 1.5 CLIP that's 432
+    /// calls per text-encode and the trait default round-trips the full
+    /// `[77, 2304]` qkv tensor through host on every one.
+    ///
+    /// **Kernel signature:** `gather_columns(const float* input, float* out, unsigned int rows, unsigned int total_cols, unsigned int col_start, unsigned int col_count)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*col_count).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const GATHER_COLUMNS_CUDA: &str = "\
+extern \"C\" __global__ void gather_columns(
+    const float* input, float* out,
+    unsigned int rows, unsigned int total_cols,
+    unsigned int col_start, unsigned int col_count
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * col_count;
+    if (idx >= total) return;
+    unsigned int r = idx / col_count;
+    unsigned int c = idx - r * col_count;
+    out[idx] = input[r * total_cols + col_start + c];
+}";
+
+    /// Additive scatter: write `src[r, c]` into `dst[r, col_start + c]`,
+    /// adding to whatever's already there.
+    ///
+    /// `dst[r, col_start + c] += src[r, c]` for `r ∈ [0, rows)`,
+    /// `c ∈ [0, col_count)`. One thread per source element. The kernel
+    /// accumulates into `dst` rather than overwriting because the
+    /// `MathBackend::scatter_columns` contract is additive (so the same
+    /// destination row can be the target of multiple per-head writes).
+    ///
+    /// Caller is expected to have zeroed `dst` if a fresh accumulator is
+    /// wanted — same convention as the trait default.
+    ///
+    /// **Kernel signature:** `scatter_columns_add(const float* src, float* dst, unsigned int rows, unsigned int total_cols, unsigned int col_start, unsigned int col_count)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(rows*col_count).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none. Disjoint per-head column ranges → no
+    /// atomics needed; each `(r, col_start + c)` written by exactly one
+    /// thread per dispatch.
+    #[cfg(feature = "cuda")]
+    pub const SCATTER_COLUMNS_ADD_CUDA: &str = "\
+extern \"C\" __global__ void scatter_columns_add(
+    const float* src, float* dst,
+    unsigned int rows, unsigned int total_cols,
+    unsigned int col_start, unsigned int col_count
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = rows * col_count;
+    if (idx >= total) return;
+    unsigned int r = idx / col_count;
+    unsigned int c = idx - r * col_count;
+    dst[r * total_cols + col_start + c] += src[idx];
+}";
+
+    /// Apply a strict-upper-triangle causal mask and scale to a `[seq, seq]`
+    /// score matrix in-place.
+    ///
+    /// `out[s, t] = (t > s) ? mask_value : in[s, t] * scale`. One thread
+    /// per `(s, t)` cell. The mask sentinel is typically `-INF` so the
+    /// subsequent softmax row driver zeros the masked positions.
+    ///
+    /// Used by transformer attention's pre-softmax step. Trait default
+    /// runs `to_vec` → CPU loop → `from_vec` per call — at SD 1.5 CLIP
+    /// that's 144 launches per encode, each round-tripping the small
+    /// `[77, 77]` score block through host.
+    ///
+    /// **Kernel signature:** `apply_causal_mask_and_scale(float* scores, unsigned int seq, float scale, float mask_value)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(seq*seq).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const APPLY_CAUSAL_MASK_AND_SCALE_CUDA: &str = "\
+extern \"C\" __global__ void apply_causal_mask_and_scale(
+    float* scores,
+    unsigned int seq, float scale, float mask_value
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = seq * seq;
+    if (idx >= total) return;
+    unsigned int s = idx / seq;
+    unsigned int t = idx - s * seq;
+    if (t > s) {
+        scores[idx] = mask_value;
+    } else {
+        scores[idx] = scores[idx] * scale;
+    }
+}";
+
+    /// Embedding lookup: gather rows of `weight[vocab, dim]` by index.
+    ///
+    /// `out[i, d] = weight[indices[i], d]` for `i ∈ [0, n_indices)`,
+    /// `d ∈ [0, dim)`. One thread per output element; each thread does one
+    /// load from the index buffer (broadcast across a warp when threads share
+    /// `i`) and one strided gather from the weight table. Replaces the
+    /// `ScryGpuBackend::embedding` trait override that downloaded the entire
+    /// device-resident weight table to host before doing the gather on CPU
+    /// — at SD 1.5 CLIP that's a ~145 MiB round-trip per text-encode.
+    ///
+    /// No bounds-check on `indices[i] < vocab` — caller validates (the
+    /// trait-level [`crate::backend::MathBackend::embedding`] contract).
+    ///
+    /// **Kernel signature:** `embedding_fwd(const float* weight, const unsigned int* indices, float* out, unsigned int n_indices, unsigned int dim)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[(n_indices*dim).div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const EMBEDDING_FWD_CUDA: &str = "\
+extern \"C\" __global__ void embedding_fwd(
+    const float* weight,
+    const unsigned int* indices,
+    float* out,
+    unsigned int n_indices, unsigned int dim
+) {
+    unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int total = n_indices * dim;
+    if (idx >= total) return;
+    unsigned int i = idx / dim;
+    unsigned int d = idx - i * dim;
+    unsigned int row = indices[i];
+    out[idx] = weight[row * dim + d];
+}";
+
     /// **Kernel signature:** `cast_f32_bf16(const float* input, unsigned short* out, unsigned int N)`
     /// **Block size:** `(256, 1, 1)` — dispatch `ceil(N / 256)` blocks.
     #[cfg(feature = "bf16")]

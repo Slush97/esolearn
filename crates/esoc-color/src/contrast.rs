@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! WCAG contrast ratio checking.
 
-use crate::srgb;
 use crate::Color;
 
 /// Compute the relative luminance of a linear RGB color (ITU-R BT.709).
@@ -32,11 +31,11 @@ pub fn meets_aaa(a: Color, b: Color) -> bool {
     contrast_ratio(a, b) >= 7.0
 }
 
-/// Suggest black or white text color for maximum contrast on a background.
+/// Pick black or white — whichever has the higher WCAG contrast ratio against
+/// the given background. Strictly better than a binary luminance threshold for
+/// mid-luminance backgrounds (e.g. tab10 green #2ca02c sits right on the edge).
 pub fn text_color_on(bg: Color) -> Color {
-    let lum = relative_luminance(bg);
-    // sRGB-encode to get perceptual midpoint
-    if srgb::encode(lum) > 0.5 {
+    if contrast_ratio(Color::BLACK, bg) >= contrast_ratio(Color::WHITE, bg) {
         Color::BLACK
     } else {
         Color::WHITE

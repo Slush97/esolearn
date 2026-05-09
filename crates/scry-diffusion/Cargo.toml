@@ -1,0 +1,71 @@
+[package]
+name = "scry-diffusion"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Diffusion-model inference (Stable Diffusion family) on the scry stack"
+
+[features]
+default = []
+profile = []
+cuda = ["scry-llm/cuda", "scry-vision/cuda"]
+scry-gpu = ["scry-llm/scry-gpu", "scry-vision/scry-gpu"]
+scry-gpu-cuda = ["scry-llm/scry-gpu-cuda", "scry-vision/scry-gpu-cuda"]
+scry-gpu-bf16 = ["scry-llm/scry-gpu-bf16", "scry-vision/scry-gpu-bf16"]
+scry-gpu-cudnn = ["scry-llm/scry-gpu-cudnn", "scry-vision/scry-gpu-cudnn"]
+safetensors = ["dep:safetensors", "dep:memmap2", "dep:half", "scry-vision/safetensors"]
+decode = ["dep:image"]
+
+[dependencies]
+scry-llm = { path = "../scry-llm", default-features = false }
+scry-vision = { path = "../scry-vision", default-features = false }
+thiserror = "2"
+tracing = "0.1"
+serde_json = "1"
+safetensors = { version = "0.4", optional = true }
+memmap2 = { version = "0.9", optional = true }
+half = { version = "2", features = ["num-traits"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[dev-dependencies]
+safetensors = "0.4"
+half = { version = "2", features = ["num-traits"] }
+tempfile = "3"
+
+[[example]]
+name = "txt2img"
+required-features = ["safetensors", "decode"]
+
+[[example]]
+name = "check_text_encoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "check_vae_decoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "inspect_clip_keys"
+required-features = ["safetensors"]
+
+[[example]]
+name = "inspect_unet_keys"
+required-features = ["safetensors"]
+
+[[example]]
+name = "check_unet"
+required-features = ["safetensors"]
+
+[[example]]
+name = "check_ddim"
+required-features = ["safetensors"]
+
+[[example]]
+name = "bench_sd"
+required-features = ["safetensors", "decode"]
+
+[lints]
+workspace = true

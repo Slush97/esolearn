@@ -17,9 +17,21 @@ impl Palette {
         Self { colors }
     }
 
-    /// Get the color at the given index, cycling if needed.
+    /// Get the color at the given index.
+    ///
+    /// For `index < len()` returns the stored color. For `index >= len()`
+    /// procedurally generates an extension color via golden-angle hue rotation
+    /// in OKLCH, so categorical palettes never silently collide on overflow.
     pub fn get(&self, index: usize) -> Color {
-        self.colors[index % self.colors.len()]
+        if index < self.colors.len() {
+            self.colors[index]
+        } else {
+            // Golden angle ≈ 360 / φ² ≈ 137.5077°. Offset by 30° so the first
+            // generated hue doesn't clash with tab10's red at hue ≈ 0°.
+            let extra = (index - self.colors.len()) as f32;
+            let hue = (extra * 137.507_77 + 30.0).rem_euclid(360.0);
+            Color::from_oklch(OkLch::new(0.7, 0.15, hue))
+        }
     }
 
     /// Number of colors.
@@ -166,8 +178,22 @@ mod tests {
     }
 
     #[test]
-    fn cycling() {
+    fn extends_uniquely_past_len() {
         let p = Palette::tab10();
-        assert_eq!(p.get(0).to_hex(), p.get(10).to_hex());
+        // First 10 indices return the stored colors unchanged.
+        for i in 0..10 {
+            assert_eq!(p.get(i).to_hex(), p.colors[i].to_hex());
+        }
+        // Indices past the palette length must NOT collide with stored colors
+        // or with each other (Bug surfaced when treemapping 13 crates onto tab10).
+        let mut seen: Vec<String> = (0..10).map(|i| p.get(i).to_hex()).collect();
+        for i in 10..16 {
+            let hex = p.get(i).to_hex();
+            assert!(
+                !seen.contains(&hex),
+                "extended palette index {i} collides with prior color {hex}"
+            );
+            seen.push(hex);
+        }
     }
 }

@@ -967,10 +967,6 @@ fn generate_heatmap(
     Ok(())
 }
 
-/// Modern system font stack for treemap labels.
-const TREEMAP_FONT: &str =
-    "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif";
-
 /// Generate treemap marks: colored rectangles with top-left labels + values.
 fn generate_treemap(
     scene: &mut SceneGraph,
@@ -1040,13 +1036,14 @@ fn generate_treemap(
 
         let bg = theme.palette.get(cell.index);
         let text_color = esoc_color::contrast::text_color_on(bg);
-        let text_color_muted = text_color.with_alpha(0.7);
 
-        // Adaptive font sizing based on cell area
+        // Adaptive font sizing based on cell area. Snap to integers so the SVG
+        // text rasterizes onto pixel grid without sub-pixel blur.
         let label_size = (w * 0.09)
             .min(h * 0.22)
-            .clamp(9.0, theme.base_font_size * 1.4);
-        let value_size = (label_size * 0.78).max(8.0);
+            .clamp(9.0, theme.base_font_size * 1.4)
+            .round();
+        let value_size = (label_size * 0.78).max(8.0).round();
 
         let x = cell.bounds.x + gap * 0.5 + pad;
         let y_label = cell.bounds.y + gap * 0.5 + pad + label_size;
@@ -1056,7 +1053,7 @@ fn generate_treemap(
             position: [x, y_label],
             text: label,
             font: FontStyle {
-                family: TREEMAP_FONT.into(),
+                family: theme.font_family.clone(),
                 size: label_size,
                 weight: 600,
                 italic: false,
@@ -1088,12 +1085,12 @@ fn generate_treemap(
                 position: [x, y_value],
                 text: value_text,
                 font: FontStyle {
-                    family: TREEMAP_FONT.into(),
+                    family: theme.font_family.clone(),
                     size: value_size,
                     weight: 400,
                     italic: false,
                 },
-                fill: FillStyle::Solid(text_color_muted),
+                fill: FillStyle::Solid(text_color),
                 angle: 0.0,
                 anchor: TextAnchor::Start,
             }))
