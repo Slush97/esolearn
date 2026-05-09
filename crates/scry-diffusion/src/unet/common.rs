@@ -112,19 +112,21 @@ pub(crate) fn concat_channels<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> T
 /// Reshape `[C, H, W]` (NCHW row-major) into `[H*W, C]` (HWC row-major).
 /// This is a transpose, not a reshape — channel data is interleaved per
 /// spatial location in the output.
+///
+/// Routes through `B::transpose_2d`, so on `ScryGpuBackend` the work
+/// stays on the device (CUDA kernel). The `[C, H*W]` view of the input
+/// transposed gives `[H*W, C]` directly. Called once per
+/// `SpatialTransformer` entry — 16× per UNet forward at SD 1.5, on
+/// tensors up to `[320, 4096]` = 5 MB at the shallowest stage.
 pub(crate) fn transpose_chw_to_hwc<B: MathBackend>(t: &Tensor<B>, c: usize, n: usize) -> Tensor<B> {
-    let v = B::to_vec(&t.data);
-    debug_assert_eq!(v.len(), c * n);
-    let mut out = vec![0.0f32; v.len()];
-    for ci in 0..c {
-        for ni in 0..n {
-            out[ni * c + ci] = v[ci * n + ni];
-        }
-    }
-    Tensor::from_vec(out, Shape::new(&[n, c]))
+    debug_assert_eq!(t.shape.numel(), c * n);
+    let storage = B::transpose_2d(&t.data, c, n);
+    Tensor::new(storage, Shape::new(&[n, c]))
 }
 
-/// Reshape `[H*W, C]` back to `[C, H, W]`.
+/// Reshape `[H*W, C]` back to `[C, H, W]`. Same `B::transpose_2d`
+/// dispatch as [`transpose_chw_to_hwc`]; the result-shape `[c, h, w]`
+/// is the contiguous reinterpretation of `[c, h*w]`.
 pub(crate) fn transpose_hwc_to_chw<B: MathBackend>(
     t: &Tensor<B>,
     n: usize,
@@ -133,15 +135,9 @@ pub(crate) fn transpose_hwc_to_chw<B: MathBackend>(
     w: usize,
 ) -> Tensor<B> {
     debug_assert_eq!(n, h * w);
-    let v = B::to_vec(&t.data);
-    debug_assert_eq!(v.len(), c * n);
-    let mut out = vec![0.0f32; v.len()];
-    for ni in 0..n {
-        for ci in 0..c {
-            out[ci * n + ni] = v[ni * c + ci];
-        }
-    }
-    Tensor::from_vec(out, Shape::new(&[c, h, w]))
+    debug_assert_eq!(t.shape.numel(), c * n);
+    let storage = B::transpose_2d(&t.data, n, c);
+    Tensor::new(storage, Shape::new(&[c, h, w]))
 }
 
 /// Exact GELU (erf-based) on a tensor. Used by the UNet's GeGLU

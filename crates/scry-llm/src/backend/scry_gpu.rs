@@ -695,6 +695,34 @@ fn as_gpu_buffer_bf16(storage: &ScryGpuStorage) -> Option<Arc<Buffer<half::bf16>
     }
 }
 
+/// Top-level wrapper for `MathBackend::transpose_2d`: dispatch the
+/// CUDA transpose kernel on a `ScryGpuStorage` and return GPU-resident
+/// output. Returns `None` when the GPU path is unavailable, the kernel
+/// slot is missing, or the workload is below `GPU_ELEMENTWISE_MIN`
+/// (matmul callers route through `gpu_transpose` which assumes the
+/// GPU path is wanted; this wrapper is for callers that want graceful
+/// fallback to CPU). Used by SD UNet's `SpatialTransformer` to permute
+/// `[C, H*W] ↔ [H*W, C]` around the transformer-block stack.
+fn gpu_transpose_2d_persistent(
+    input: &ScryGpuStorage,
+    rows: usize,
+    cols: usize,
+) -> Option<ScryGpuStorage> {
+    let total = rows.checked_mul(cols)?;
+    if total < GPU_ELEMENTWISE_MIN {
+        return None;
+    }
+    if input.len() != total {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = gpu_transpose(&buf_in, rows, cols)?;
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
 /// Run the on-device transpose kernel. Returns a fresh buffer of shape `[cols, rows]`.
 fn gpu_transpose(input: &Buffer<f32>, rows: usize, cols: usize) -> Option<Buffer<f32>> {
     let ctx = get_ctx()?;
@@ -2298,6 +2326,21 @@ impl MathBackend for ScryGpuBackend {
         Self::from_vec(out, &Shape::new(&[batch * seq, d_model]))
     }
 
+    fn transpose_2d(input: &ScryGpuStorage, rows: usize, cols: usize) -> ScryGpuStorage {
+        if let Some(out) = gpu_transpose_2d_persistent(input, rows, cols) {
+            return out;
+        }
+        // Fall through to the trait default's scalar permute on host.
+        let v = Self::to_vec(input);
+        let mut out = vec![0.0f32; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                out[c * rows + r] = v[r * cols + c];
+            }
+        }
+        cpu(out)
+    }
+
     fn reshape_for_heads(
         storage: &ScryGpuStorage,
         batch: usize,
@@ -3589,6 +3632,49 @@ mod tests {
         for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
             assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
         }
+    }
+
+    #[test]
+    fn gpu_transpose_2d_matches_cpu() {
+        // SD spatial-transformer reshape size at stage 0: [320, 4096].
+        // Use a smaller shape to keep the test quick but still well above
+        // GPU_ELEMENTWISE_MIN so the kernel path engages.
+        let rows = 320;
+        let cols = 1024;
+        let total = rows * cols;
+        let input: Vec<f32> = (0..total).map(|i| ((i % 211) as f32 - 100.0) * 0.011).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_transpose_2d_matches_cpu: {e}");
+                return;
+            }
+        };
+        let out = ScryGpuBackend::transpose_2d(&gpu_in, rows, cols);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(out.is_gpu(), "transpose_2d should stay Gpu on CUDA");
+
+        let g = ScryGpuBackend::to_vec(&out);
+        // Pure permutation — values must match exactly.
+        for r in 0..rows {
+            for c in 0..cols {
+                let src = input[r * cols + c];
+                let dst = g[c * rows + r];
+                assert!(
+                    (src - dst).abs() < 1e-6,
+                    "transpose mismatch at (r={r}, c={c}): src={src} dst={dst}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_transpose_2d_falls_back_to_cpu() {
+        let input: Vec<f32> = (0..16 * 16).map(|i| i as f32 * 0.01).collect();
+        let storage = ScryGpuStorage::Cpu(input);
+        let out = ScryGpuBackend::transpose_2d(&storage, 16, 16);
+        assert!(!out.is_gpu(), "small transpose_2d should fall back to Cpu");
     }
 
     #[test]

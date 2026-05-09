@@ -610,6 +610,25 @@ pub trait MathBackend: DeviceBackend {
     /// Scale all elements: `a * scalar`.
     fn scale(a: &Self::Storage, scalar: f32) -> Self::Storage;
 
+    /// 2D transpose: input `[rows, cols]` (row-major) → output `[cols, rows]`
+    /// (row-major). CPU default uses a scalar permute through host memory;
+    /// GPU backends should override with a kernel to avoid the round-trip.
+    ///
+    /// Used inside the SD UNet's `SpatialTransformer` to permute
+    /// `[C, H*W] ↔ [H*W, C]` around the transformer-block stack — at SD
+    /// shapes that's tens of MB per call × 32 calls per UNet forward.
+    fn transpose_2d(input: &Self::Storage, rows: usize, cols: usize) -> Self::Storage {
+        let v = Self::to_vec(input);
+        debug_assert_eq!(v.len(), rows * cols);
+        let mut out = vec![0.0f32; rows * cols];
+        for r in 0..rows {
+            for c in 0..cols {
+                out[c * rows + r] = v[r * cols + c];
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[cols, rows]))
+    }
+
     /// Concatenate two row-major matrices along rows (axis 0).
     fn concat_rows(
         a: &Self::Storage,
