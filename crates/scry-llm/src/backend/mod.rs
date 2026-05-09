@@ -8,6 +8,24 @@ pub mod scry_gpu;
 
 use crate::tensor::shape::Shape;
 
+/// Abramowitz–Stegun 7.1.26 approximation to `erf`, accurate to ~1.5e-7
+/// in f64. Shared by the CPU default for `MathBackend::gelu_exact`.
+#[inline]
+fn erf64_for_gelu(x: f64) -> f64 {
+    const P: f64 = 0.327_591_1;
+    const A1: f64 = 0.254_829_592;
+    const A2: f64 = -0.284_496_736;
+    const A3: f64 = 1.421_413_741;
+    const A4: f64 = -1.453_152_027;
+    const A5: f64 = 1.061_405_429;
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let ax = x.abs();
+    let t = 1.0 / (1.0 + P * ax);
+    let poly = ((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t;
+    let y = 1.0 - poly * (-ax * ax).exp();
+    sign * y
+}
+
 /// Memory management trait — allocate, copy, transfer between host/device.
 pub trait DeviceBackend: Sized {
     type Storage: Clone;
@@ -282,6 +300,35 @@ pub trait MathBackend: DeviceBackend {
 
     /// GELU activation (tanh approximation).
     fn gelu(input: &Self::Storage) -> Self::Storage;
+
+    /// Exact (erf-based) GELU: `0.5 * x * (1 + erf(x / sqrt(2)))`.
+    ///
+    /// Distinct from [`Self::gelu`] which is the tanh approximation HF
+    /// uses for `approximate="tanh"`. PyTorch's `F.gelu(approximate="none")`
+    /// is this erf form, and the SD UNet's GeGLU MLP uses exactly that —
+    /// the tanh approximation drifts ~3e-4 per block and accumulates over
+    /// SD 1.5's 16 transformer blocks to break the M6 1e-3 parity gate.
+    ///
+    /// CPU default uses Abramowitz–Stegun 7.1.26 in f64 (max error
+    /// ≈ 1.5e-7). GPU backends should override with a CUDA / WGSL shader
+    /// to avoid the host round-trip — at SD 1.5's deepest stage the gate
+    /// tensor is `[4096, 5120]` = 80 MB, and the GeGLU MLP is the
+    /// single largest cost in the UNet forward (47% at 512×512 / bf16).
+    fn gelu_exact(input: &Self::Storage) -> Self::Storage {
+        let v = Self::to_vec(input);
+        let n = v.len();
+        const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+        let out: Vec<f32> = v
+            .into_iter()
+            .map(|x| {
+                let xd = f64::from(x);
+                #[allow(clippy::cast_possible_truncation)]
+                let y = (0.5 * xd * (1.0 + erf64_for_gelu(xd * INV_SQRT_2))) as f32;
+                y
+            })
+            .collect();
+        Self::from_vec(out, &Shape::new(&[n]))
+    }
 
     /// `ReLU` activation: `out[i] = max(0, in[i])`. Default impl runs on
     /// host via `to_vec`/`from_vec`; GPU backends override to keep tensors

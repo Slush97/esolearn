@@ -416,6 +416,35 @@ extern \"C\" __global__ void silu(
     out[i] = x / (1.0f + expf(-x));
 }";
 
+    /// Exact (erf-based) GELU: `0.5 * x * (1 + erf(x / sqrt(2)))`.
+    ///
+    /// Distinct from [`GELU_CUDA`] (the tanh approximation). Used by
+    /// PyTorch's `F.gelu(approximate=\"none\")` and HF's GeGLU MLP — the
+    /// SD UNet's GeGLU layer uses exactly this form, and the tanh
+    /// approximation drifts ~3e-4 per block, accumulating across SD
+    /// 1.5's 16 transformer blocks to break the 1e-3 parity gate.
+    ///
+    /// CUDA's `erff` intrinsic is the right primitive — it's the same
+    /// erf PyTorch uses on device, so post-kernel results match
+    /// PyTorch's bit-for-bit on identical inputs (within fp32
+    /// rounding).
+    ///
+    /// **Kernel signature:** `gelu_exact(const float* input, float* out, unsigned int N)`
+    /// **Block size:** `(256, 1, 1)` — dispatch `[N.div_ceil(256), 1, 1]` blocks.
+    /// **Shared memory:** none.
+    #[cfg(feature = "cuda")]
+    pub const GELU_EXACT_CUDA: &str = "\
+extern \"C\" __global__ void gelu_exact(
+    const float* input, float* out,
+    unsigned int N
+) {
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= N) return;
+    float x = input[i];
+    // 1 / sqrt(2) = 0.70710678118654752440f
+    out[i] = 0.5f * x * (1.0f + erff(x * 0.70710678118654752440f));
+}";
+
     /// Tanh activation: `out[i] = tanh(in[i])`.
     ///
     /// **Push constants:** `struct Dims { N: u32 }` (4 bytes)

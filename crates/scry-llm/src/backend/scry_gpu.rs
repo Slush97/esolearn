@@ -176,6 +176,12 @@ struct ScryCtx {
     /// `None` and callers fall back to CPU. Used by SD UNet ResBlocks; same
     /// elementwise shape as [`Self::gelu`].
     silu: Option<::scry_gpu::Kernel>,
+    /// On-device exact (erf-based) GELU. CUDA-only — Vulkan path is `None`
+    /// and callers fall back to CPU. Used by SD UNet's GeGLU MLP, which is
+    /// the single largest cost in the UNet forward (47% at 512×512 / bf16);
+    /// the tanh approximation in [`Self::gelu`] drifts enough across 16
+    /// transformer blocks to break the M6 1e-3 parity gate.
+    gelu_exact: Option<::scry_gpu::Kernel>,
     /// On-device row-wise softmax. CUDA-only; Vulkan path is `None` and
     /// callers fall back to CPU.
     softmax: Option<::scry_gpu::Kernel>,
@@ -297,6 +303,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: silu_cuda compile: {e}"))?;
+        let gelu_exact = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::GELU_EXACT_CUDA,
+                "gelu_exact",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: gelu_exact_cuda compile: {e}"))?;
         let softmax = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::SOFTMAX_ROWWISE_CUDA,
@@ -422,6 +436,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             gelu: Some(gelu),
             relu: Some(relu),
             silu: Some(silu),
+            gelu_exact: Some(gelu_exact),
             softmax: Some(softmax),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
@@ -460,6 +475,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         gelu: Some(gelu),
         relu: None,
         silu: None,
+        gelu_exact: None,
         softmax: None,
         layernorm: None,
         batchnorm: None,
@@ -759,6 +775,31 @@ fn gpu_relu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
 fn gpu_silu_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
     let kernel = ctx.silu.as_ref()?;
+    let n = input.len();
+    if n < GPU_ELEMENTWISE_MIN {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = run_unary_elementwise(kernel, &buf_in, n)?;
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: n,
+    })
+}
+
+/// GPU-resident exact (erf-based) GELU. Returns `None` when the GPU path
+/// is unavailable or the workload is below `GPU_ELEMENTWISE_MIN`, so the
+/// caller falls back to CPU. Same dispatch shape as
+/// [`gpu_gelu_persistent`]; the only kernel difference is `erff(x/sqrt(2))`
+/// instead of the tanh-approximation polynomial.
+///
+/// This is the hot-path replacement for `unet/common.rs::exact_gelu`,
+/// which used to round-trip every gate tensor through host. The SD UNet's
+/// GeGLU MLP calls this 16× per forward — at 512×512 the deepest stage's
+/// gate tensor is `[4096, 5120]` = 80 MB per call.
+fn gpu_gelu_exact_persistent(input: &ScryGpuStorage) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.gelu_exact.as_ref()?;
     let n = input.len();
     if n < GPU_ELEMENTWISE_MIN {
         return None;
@@ -2506,6 +2547,14 @@ impl MathBackend for ScryGpuBackend {
         cpu(out)
     }
 
+    fn gelu_exact(input: &ScryGpuStorage) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_gelu_exact_persistent(input) {
+            return gpu_out;
+        }
+        // Fall through to MathBackend's CPU default (erf-based, runs on host).
+        cpu(CpuBackend::gelu_exact(&input.as_vec()))
+    }
+
     fn max_pool_2d(
         input: &ScryGpuStorage,
         channels: usize,
@@ -3132,6 +3181,50 @@ mod tests {
         let storage = ScryGpuStorage::Cpu(input);
         let out = ScryGpuBackend::silu(&storage);
         assert!(!out.is_gpu(), "small silu should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_gelu_exact_matches_cpu_within_tolerance() {
+        // Spans negative saturation, the linear regime through zero,
+        // and positive saturation — same coverage as the silu/gelu tests.
+        // The GPU path uses CUDA's `erff`; the CPU reference uses the
+        // Abramowitz–Stegun 7.1.26 polynomial in f64. Both are within ~1.5e-7
+        // of true erf, so fp32 round-off dominates the diff.
+        let n = 32_768;
+        let input: Vec<f32> = (0..n).map(|i| (i as f32) * 0.001 - 16.0).collect();
+        let storage = ScryGpuStorage::Cpu(input.clone());
+        let gpu = match ScryGpuBackend::to_gpu(&storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_gelu_exact_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_out = ScryGpuBackend::gelu_exact(&gpu);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "gelu_exact over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let reference = CpuBackend::gelu_exact(&input);
+        assert_eq!(g.len(), reference.len());
+        for (i, (gv, rv)) in g.iter().zip(reference.iter()).enumerate() {
+            // erff vs Abramowitz–Stegun: both ~1.5e-7 vs true erf, plus
+            // fp32 round-off in the multiply. Generous 1e-5 envelope.
+            assert!(
+                (gv - rv).abs() < 1e-5,
+                "mismatch at {i}: gpu={gv} ref={rv}"
+            );
+        }
+    }
+
+    #[test]
+    fn small_gelu_exact_falls_back_to_cpu() {
+        let input: Vec<f32> = (0..256).map(|i| (i as f32) * 0.01).collect();
+        let storage = ScryGpuStorage::Cpu(input);
+        let out = ScryGpuBackend::gelu_exact(&storage);
+        assert!(!out.is_gpu(), "small gelu_exact should fall back to Cpu");
     }
 
     #[test]

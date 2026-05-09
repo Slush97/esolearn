@@ -144,49 +144,21 @@ pub(crate) fn transpose_hwc_to_chw<B: MathBackend>(
     Tensor::from_vec(out, Shape::new(&[c, h, w]))
 }
 
-/// Exact GELU (erf-based) on a flat host-side slice. Used by the UNet's
-/// GeGLU feed-forward, which HF computes with `F.gelu(approximate="none")`
-/// — the tanh approximation in `MathBackend::gelu` drifts ~3e-4 at the
-/// peak of the curve and cumulatively pushes the M6 parity gate just over
-/// 1e-3 across SD 1.5's 16 transformer blocks.
+/// Exact GELU (erf-based) on a tensor. Used by the UNet's GeGLU
+/// feed-forward, which HF computes with `F.gelu(approximate="none")` —
+/// the tanh approximation in `MathBackend::gelu` drifts ~3e-4 at the
+/// peak of the curve and cumulatively pushes the M6 parity gate just
+/// over 1e-3 across SD 1.5's 16 transformer blocks.
 ///
-/// `erf` itself is computed via Abramowitz–Stegun 7.1.26 in f64 (max error
-/// ≈ 1.5e-7), which is comfortably tighter than the gate. The cost is a
-/// host round-trip; CPU and CUDA both pay one `to_vec` + `from_vec` here,
-/// but GeGLU's matmul flanks dominate the wall-clock either way.
+/// Delegates to [`MathBackend::gelu_exact`], so on `ScryGpuBackend` the
+/// computation stays on the device. Profiling at 512×512 / bf16 found
+/// this op was the single largest cost in the UNet forward (~18.5%) when
+/// it round-tripped through host; routing through the trait keeps the
+/// gate tensor (up to `[4096, 5120]` = 80 MB at the deepest stage) on
+/// the GPU through the dispatch.
 pub(crate) fn exact_gelu<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
-    let v = B::to_vec(&t.data);
-    let mut out = vec![0.0f32; v.len()];
-    for (i, &x) in v.iter().enumerate() {
-        out[i] = exact_gelu_scalar(x);
-    }
-    Tensor::from_vec(out, t.shape.clone())
-}
-
-#[inline]
-fn exact_gelu_scalar(x: f32) -> f32 {
-    // gelu(x) = 0.5 * x * (1 + erf(x / sqrt(2)))
-    const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
-    let xd = f64::from(x);
-    (0.5 * xd * (1.0 + erf64(xd * INV_SQRT_2))) as f32
-}
-
-/// Abramowitz–Stegun 7.1.26 approximation to `erf`, accurate to ~1.5e-7
-/// in f64. Used by [`exact_gelu`].
-#[inline]
-fn erf64(x: f64) -> f64 {
-    const P: f64 = 0.327_591_1;
-    const A1: f64 = 0.254_829_592;
-    const A2: f64 = -0.284_496_736;
-    const A3: f64 = 1.421_413_741;
-    const A4: f64 = -1.453_152_027;
-    const A5: f64 = 1.061_405_429;
-    let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let ax = x.abs();
-    let t = 1.0 / (1.0 + P * ax);
-    let poly = ((((A5 * t + A4) * t + A3) * t + A2) * t + A1) * t;
-    let y = 1.0 - poly * (-ax * ax).exp();
-    sign * y
+    let out = B::gelu_exact(&t.data);
+    Tensor::new(out, t.shape.clone())
 }
 
 /// Add a per-channel bias `[C]` into a `[C, H, W]` tensor (broadcast over
