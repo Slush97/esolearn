@@ -175,14 +175,15 @@ matched between Python and Rust):
 | Backend | Size | Steps | Total | Per-step |
 |---|---|---|---|---|
 | CPU | 64×64 | 2 | 8.78 s | 3815 ms |
-| GPU bf16 (start of session) | 512×512 | 2 | 5.21 s | 2066 ms |
-| GPU bf16 (end of session) | 512×512 | 30 | **27.2 s** | **~851 ms** |
+| GPU bf16 (start of perf pass) | 512×512 | 2 | 5.21 s | 2066 ms |
+| GPU bf16 (post-matmul_bias) | 512×512 | 30 | 23.0 s | ~700 ms |
+| GPU bf16 (post-mul_elementwise) | 512×512 | 30 | **17.0 s** | **537 ms** |
 | **PyTorch fp16** | **512×512** | **30** | **1.04 s** | **32.9 ms** |
 
-After 7 profile-driven commits, our GPU bf16 path runs the same
-generation in **27.2 s vs 63.3 s** at session start — a **2.4×
-speedup** with M6 HF parity bit-identical at 1.549e-4 throughout.
-Gap to PyTorch fp16: 60× → **25×**.
+After 9 profile-driven commits, our GPU bf16 path runs the same
+generation in **17.0 s vs 63.3 s** at the perf pass start — a **3.7×
+total speedup** with M6 HF parity bit-identical at 1.549e-4 throughout.
+Gap to PyTorch fp16: 60× → **16×**.
 
 **The big lesson** that ran through the entire perf pass: the original
 "residency-bound" framing was wrong. The actual issue was that *many*
@@ -203,7 +204,8 @@ Wins (each one a separate commit, gates green):
 | `26a42fa` | `MathBackend::transpose_2d` on GPU | 877 |
 | `d52527e` | `clone_tensor` via `B::scale(1.0)` | 859 |
 | `50ca256` | `concat_rows` CUDA shader (skip-concat on device) | 851 |
-| `b8170e3` | **`matmul_bias` on GPU + cascade fix** | **717** |
+| `b8170e3` | `matmul_bias` on GPU + cascade fix | 717 |
+| _next_ | **`mul_elementwise` on GPU + VAE helpers + cascade fix** | **537** |
 
 **The audit that found the matmul_bias landmine.** After landing the
 seven wins above we were ~hand-waving about "easy wins exhausted" — the
@@ -243,6 +245,76 @@ awk '/^    fn / { sub(/.*fn /,""); sub(/[\(\<].*$/,""); print }' \
 # diff the two — anything in (1) but not (2) is a latent host roundtrip.
 ```
 
+**Round 2 audit lesson (2026-05-08, second session).** The "missing
+override" check (above) is necessary but not sufficient — it misses the
+**fake-override pattern**, where the GPU method exists but its body is
+just `cpu(CpuBackend::foo(&a.as_vec()...))`. Both the matmul_bias and
+mul_elementwise landmines were this pattern. The check that catches
+them:
+
+```
+awk '
+  /^    fn / { fn = $0; body = ""; in_fn = 1; next }
+  in_fn && /^    \}/ {
+    if (body ~ /cpu\(CpuBackend::/ && body !~ /gpu_/ && body !~ /persistent/) {
+      print fn
+    }
+    in_fn = 0; body = ""; next
+  }
+  in_fn { body = body " | " $0 }
+' crates/scry-llm/src/backend/scry_gpu.rs
+```
+
+Run this after every perf pass. Six methods on `ScryGpuBackend` still
+match the pattern — `embedding`, `rmsnorm`, `rope`, `rope_with_freqs_preloaded`,
+`swiglu`, `repeat_kv`. None are on SD's hot path (the first is CLIP-only,
+called ~2× per generation; the other five are Llama-only). They become
+landmines for SDXL or future model work, not SD 1.5.
+
+## The mul_elementwise win (2026-05-08, second session)
+
+Round 2 of the systematic audit found `ScryGpuBackend::mul_elementwise`
+with the same fake-override pattern as matmul_bias. The single SD call
+site was GeGLU's `values * gelu(gate)` step in `ff.gate` — 256 calls per
+30-step image, with the deepest stage multiplying `[1024, 5120]` =
+20 MB tensors. Every call was downloading both operands, multiplying on
+host, and uploading the product, *then* forcing the next op
+(`ff.proj_out` matmul_bias) to re-upload because the result variant was
+`Cpu`.
+
+Wiring a `MUL_ELEMENTWISE_CUDA` shader (mirror of the existing
+`ADD_ELEMENTWISE_CUDA` — one character change) and a
+`gpu_mul_elementwise_persistent` helper reproduced the matmul_bias
+cascade pattern:
+
+  Per-step:    700 ms  →  537 ms   (-23%)
+  Per-call:    ff.gate           4.746 ms  →  0.060 ms  (**79× faster**)
+               xfblock.ff        7.949 ms  →  2.467 ms  (-69%)
+               ff.proj_out       1.250 ms  →  0.757 ms  (-39%)
+               ff.proj_values    flat        flat       (already GPU)
+               ff.proj_gate      flat        flat       (already GPU)
+
+`ff.gate` went from 9.3% of UNet to 0.17%. The `ff.proj_out` -39% is
+the same cascade matmul_bias produced — its previous re-upload of the
+host-resident `ff.gate` output is gone.
+
+Same session also lifted the **VAE decoder's local helpers** onto the
+GPU. `vae/decoder.rs` had its own `clone_tensor`,
+`transpose_chw_to_hwc`, `transpose_hwc_to_chw` that did `B::to_vec` +
+scalar loop — the UNet equivalents in `unet/common.rs` were already
+lifted during M9c (via `B::scale(_, 1.0)` and `B::transpose_2d`); the
+VAE copies got missed. VAE runs once per image but moves an `[512,
+4096]` = 8 MB tensor through `transpose_chw_to_hwc` → mid-attention →
+`transpose_hwc_to_chw`. M4 parity unchanged at 2.176e-6.
+
+**Generalized lesson.** Round 1 (matmul_bias) found *one* fake-override
+on the SD hot path. Round 2 found *another*, plus a parallel set of
+host-roundtrip helpers in the VAE that were copy-pasted from a pre-M9c
+UNet. Both rounds came after the profile said "near floor". **Run the
+fake-override check whenever per-step looks stuck**, and grep
+`B::to_vec` across the diffusion crate to catch duplicated helpers
+that didn't get the same lifting treatment as their primary copy.
+
 **Remaining audit items** (8, all currently dormant on SD's hot path
 post-batched-attention but landmines for future code):
 
@@ -256,14 +328,15 @@ post-batched-attention but landmines for future code):
 
 **The remaining levers (F / G / H)** are all multi-week and are the
 right next chunks of work after the easy wins. Per-UNet-forward profile
-at the post-session steady state:
+at the post-session steady state (post-mul_elementwise):
 
 ```
-xfblock.ff           39%  matmul-bound
-resblock.forward     32%  cuDNN-bound, near floor
-xfblock.self_attn    16%  needs FlashAttention
-outer overhead        9%  GroupNorm + 1×1 convs (already on device)
-xfblock.cross_attn    4%
+resblock.forward     31%  cuDNN-bound, near floor
+xfblock.self_attn    13%  needs FlashAttention
+xfblock.ff            8%  matmul-bound, near floor (was 39% pre-mul_elementwise)
+xfblock.cross_attn    3%
+unet.mid_block        5%
+outer overhead       40%  up_blocks/down_blocks aggregate residual
 ```
 
 - **F: CFG batching** (UNet at batch=2) — single biggest theoretical
