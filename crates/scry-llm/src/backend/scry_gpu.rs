@@ -197,6 +197,15 @@ struct ScryCtx {
     /// On-device column-broadcast bias add (`out[r,c] = a[r,c] + bias[r]`).
     /// Used to keep Conv2d's bias add GPU-resident after the matmul. CUDA-only.
     add_row_bias: Option<::scry_gpu::Kernel>,
+    /// On-device row-broadcast bias add (`out[r,c] = a[r,c] + bias[c]`).
+    /// Used by `MathBackend::matmul_bias` after the on-device matmul, so
+    /// the result stays on the device instead of round-tripping through
+    /// host for the bias loop. CUDA-only. The `BIAS_ADD_CUDA` shader has
+    /// existed in scry-gpu since the original wiring; this slot connects
+    /// it to the trait method, which had no GPU override and was firing
+    /// ~104 host roundtrips per SD UNet forward (FF × 48, attn out_proj
+    /// × 32, resblock time_emb_proj × 22, time_embed × 2).
+    bias_add: Option<::scry_gpu::Kernel>,
     /// On-device same-shape elementwise add (`out[i] = a[i] + b[i]`). Used
     /// for ResNet residual adds and other identical-shape sums where the
     /// row-bias broadcast doesn't apply. CUDA-only.
@@ -363,6 +372,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: add_row_bias_cuda compile: {e}"))?;
+        let bias_add = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::BIAS_ADD_CUDA,
+                "bias_add",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: bias_add_cuda compile: {e}"))?;
         let add_elementwise = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::ADD_ELEMENTWISE_CUDA,
@@ -470,6 +487,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             batchnorm: Some(batchnorm),
             im2col: Some(im2col),
             add_row_bias: Some(add_row_bias),
+            bias_add: Some(bias_add),
             add_elementwise: Some(add_elementwise),
             max_pool: Some(max_pool),
             adaptive_avg_pool: Some(adaptive_avg_pool),
@@ -511,6 +529,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         batchnorm: None,
         im2col: None,
         add_row_bias: None,
+        bias_add: None,
         add_elementwise: None,
         max_pool: None,
         adaptive_avg_pool: None,
@@ -1486,6 +1505,55 @@ fn gpu_add_row_bias_persistent(
     })
 }
 
+/// GPU-resident column-broadcast bias add: `out[r, c] = a[r, c] + bias[c]`.
+/// `a` is `[rows, cols]` row-major, `bias` is `[cols]`. Returns `None`
+/// when the GPU path is unavailable, the kernel slot is missing
+/// (Vulkan), or the workload is below `GPU_ADD_ROW_BIAS_MIN`.
+///
+/// Powers `MathBackend::matmul_bias` on `ScryGpuBackend` — every dense
+/// linear layer in SD calls this via the `matmul_bias` override.
+fn gpu_bias_add_persistent(
+    a: &ScryGpuStorage,
+    bias: &ScryGpuStorage,
+    rows: usize,
+    cols: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.bias_add.as_ref()?;
+    if rows == 0 || cols == 0 {
+        return None;
+    }
+    let total = rows.checked_mul(cols)?;
+    if total < GPU_ADD_ROW_BIAS_MIN {
+        return None;
+    }
+    if a.len() != total || bias.len() != cols {
+        return None;
+    }
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(bias)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+
+    // BIAS_ADD_CUDA push consts: (N = total, cols).
+    let dims_pc: [u32; 2] = [total as u32, cols as u32];
+    let groups = (total as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_a, &*buf_b, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
 /// GPU-resident same-shape elementwise add (`out[i] = a[i] + b[i]`). Both
 /// inputs must have length `n`. Returns `None` when the GPU path is
 /// unavailable, the workload is below threshold, or either operand isn't
@@ -2307,6 +2375,39 @@ impl MathBackend for ScryGpuBackend {
         let av = a.as_vec();
         let bv = b.as_vec();
         cpu(matmul_gpu_or_cpu(&av, &bv, m, k, n, trans_a, trans_b))
+    }
+
+    fn matmul_bias(
+        a: &ScryGpuStorage,
+        b: &ScryGpuStorage,
+        bias: &ScryGpuStorage,
+        m: usize,
+        k: usize,
+        n: usize,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> ScryGpuStorage {
+        // Try the on-device path: matmul → column-broadcast bias add.
+        // The trait default downloads the matmul output to host, runs a
+        // scalar bias loop, and returns Cpu storage — the next op then
+        // re-uploads. Per SD UNet forward that's ~104 round trips. The
+        // GPU path keeps everything on-device.
+        let c = Self::matmul(a, b, m, k, n, trans_a, trans_b);
+        if let Some(out) = gpu_bias_add_persistent(&c, bias, m, n) {
+            return out;
+        }
+        // Fall through to the trait default's host bias loop. Reached
+        // when the workload is below `GPU_ADD_ROW_BIAS_MIN` or the GPU
+        // path is unavailable.
+        let c_vec = Self::to_vec(&c);
+        let bias_vec = Self::to_vec(bias);
+        let mut out = c_vec;
+        for row in 0..m {
+            for col in 0..n {
+                out[row * n + col] += bias_vec[col];
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[m, n]))
     }
 
     fn split_qkv_reshape_heads(
@@ -3728,6 +3829,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn gpu_matmul_bias_matches_cpu_within_tolerance() {
+        // Dense linear layer shape — matches an SD FF inner matmul:
+        // [N=2048, K=320] · [K=320, M=320] + [M=320]. Above
+        // GPU_ADD_ROW_BIAS_MIN so the kernel path engages.
+        let m = 2048;
+        let k = 320;
+        let n = 320;
+        let a: Vec<f32> = (0..m * k).map(|i| ((i % 211) as f32 - 100.0) * 0.011).collect();
+        let b: Vec<f32> = (0..k * n).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let bias: Vec<f32> = (0..n).map(|i| ((i % 41) as f32 - 20.0) * 0.07).collect();
+        let a_storage = ScryGpuStorage::Cpu(a.clone());
+        let b_storage = ScryGpuStorage::Cpu(b.clone());
+        let bias_storage = ScryGpuStorage::Cpu(bias.clone());
+        let a_gpu = match ScryGpuBackend::to_gpu(&a_storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_matmul_bias test: {e}");
+                return;
+            }
+        };
+        let b_gpu = ScryGpuBackend::to_gpu(&b_storage).unwrap();
+        let bias_gpu = ScryGpuBackend::to_gpu(&bias_storage).unwrap();
+
+        let out = ScryGpuBackend::matmul_bias(&a_gpu, &b_gpu, &bias_gpu, m, k, n, false, false);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            out.is_gpu(),
+            "matmul_bias should stay Gpu on CUDA, got {out:?}"
+        );
+
+        let cpu_out = CpuBackend::matmul_bias(&a, &b, &bias, m, k, n, false, false);
+        let g = ScryGpuBackend::to_vec(&out);
+        assert_eq!(g.len(), cpu_out.len());
+        // f32 matmul + bias add — fp32 round-off envelope.
+        let max_diff = g
+            .iter()
+            .zip(cpu_out.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_diff < 5e-4,
+            "matmul_bias max abs diff {max_diff:.3e} exceeds 5e-4"
+        );
     }
 
     #[test]
