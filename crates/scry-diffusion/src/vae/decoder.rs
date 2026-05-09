@@ -655,9 +655,12 @@ fn silu_inplace<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
     Tensor::new(B::silu(&t.data), t.shape.clone())
 }
 
+/// Materialize a fresh tensor without round-tripping through host. Mirrors
+/// `unet/common.rs::clone_tensor` — `B::scale(_, 1.0)` is a no-op multiply
+/// that produces a new device-resident storage on `ScryGpuBackend`.
 fn clone_tensor<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
-    let v = B::to_vec(&t.data);
-    Tensor::from_vec(v, t.shape.clone())
+    let storage = B::scale(&t.data, 1.0);
+    Tensor::new(storage, t.shape.clone())
 }
 
 fn add_same_shape<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> Tensor<B> {
@@ -678,19 +681,18 @@ fn matmul_bias_2d<B: MathBackend>(
     Tensor::new(out, Shape::new(&[m, n]))
 }
 
-/// `[C, H, W]` (NCHW flat) → `[H*W, C]`.
+/// `[C, H, W]` (NCHW flat) → `[H*W, C]`. Mirrors
+/// `unet/common.rs::transpose_chw_to_hwc` — viewing the input as `[C, H*W]`
+/// and routing through `B::transpose_2d` keeps the work on-device.
 fn transpose_chw_to_hwc<B: MathBackend>(t: &Tensor<B>, c: usize, n: usize) -> Tensor<B> {
-    let v = B::to_vec(&t.data);
-    let mut out = vec![0.0f32; v.len()];
-    for ci in 0..c {
-        for ni in 0..n {
-            out[ni * c + ci] = v[ci * n + ni];
-        }
-    }
-    Tensor::from_vec(out, Shape::new(&[n, c]))
+    debug_assert_eq!(t.shape.numel(), c * n);
+    let storage = B::transpose_2d(&t.data, c, n);
+    Tensor::new(storage, Shape::new(&[n, c]))
 }
 
-/// `[H*W, C]` → `[C, H, W]`.
+/// `[H*W, C]` → `[C, H, W]`. Same `B::transpose_2d` dispatch as
+/// [`transpose_chw_to_hwc`]; the result-shape `[c, h, w]` is the
+/// contiguous reinterpretation of `[c, h*w]`.
 fn transpose_hwc_to_chw<B: MathBackend>(
     t: &Tensor<B>,
     n: usize,
@@ -699,12 +701,7 @@ fn transpose_hwc_to_chw<B: MathBackend>(
     w: usize,
 ) -> Tensor<B> {
     debug_assert_eq!(n, h * w);
-    let v = B::to_vec(&t.data);
-    let mut out = vec![0.0f32; v.len()];
-    for ni in 0..n {
-        for ci in 0..c {
-            out[ci * n + ni] = v[ni * c + ci];
-        }
-    }
-    Tensor::from_vec(out, Shape::new(&[c, h, w]))
+    debug_assert_eq!(t.shape.numel(), c * n);
+    let storage = B::transpose_2d(&t.data, n, c);
+    Tensor::new(storage, Shape::new(&[c, h, w]))
 }

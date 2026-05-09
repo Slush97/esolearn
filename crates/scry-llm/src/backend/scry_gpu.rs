@@ -210,6 +210,11 @@ struct ScryCtx {
     /// for ResNet residual adds and other identical-shape sums where the
     /// row-bias broadcast doesn't apply. CUDA-only.
     add_elementwise: Option<::scry_gpu::Kernel>,
+    /// On-device same-shape elementwise multiply (`out[i] = a[i] * b[i]`).
+    /// Used by SD UNet's GeGLU `values * gelu(gate)` step — the previous
+    /// trait default downloaded both operands, multiplied on host, and
+    /// uploaded back. CUDA-only.
+    mul_elementwise: Option<::scry_gpu::Kernel>,
     /// On-device 2D max-pool with fixed kernel/stride/padding. CUDA-only;
     /// Vulkan path is `None` and callers fall back to CPU.
     max_pool: Option<::scry_gpu::Kernel>,
@@ -388,6 +393,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: add_elementwise_cuda compile: {e}"))?;
+        let mul_elementwise = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::MUL_ELEMENTWISE_CUDA,
+                "mul_elementwise",
+                3,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: mul_elementwise_cuda compile: {e}"))?;
         let max_pool = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::MAXPOOL_2D_CUDA,
@@ -489,6 +502,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             add_row_bias: Some(add_row_bias),
             bias_add: Some(bias_add),
             add_elementwise: Some(add_elementwise),
+            mul_elementwise: Some(mul_elementwise),
             max_pool: Some(max_pool),
             adaptive_avg_pool: Some(adaptive_avg_pool),
             upsample_nearest: Some(upsample_nearest),
@@ -531,6 +545,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         add_row_bias: None,
         bias_add: None,
         add_elementwise: None,
+        mul_elementwise: None,
         max_pool: None,
         adaptive_avg_pool: None,
         upsample_nearest: None,
@@ -1565,6 +1580,48 @@ fn gpu_add_elementwise_persistent(
 ) -> Option<ScryGpuStorage> {
     let ctx = get_ctx()?;
     let kernel = ctx.add_elementwise.as_ref()?;
+    if n == 0 || n < GPU_ADD_ELEMENTWISE_MIN {
+        return None;
+    }
+    if a.len() != n || b.len() != n {
+        return None;
+    }
+
+    let buf_a = as_gpu_buffer(a)?;
+    let buf_b = as_gpu_buffer(b)?;
+    let out = ctx.dev.alloc_uninit::<f32>(n).ok()?;
+
+    let dims_pc: [u32; 1] = [n as u32];
+    let groups = (n as u32).div_ceil(256);
+
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_a, &*buf_b, &out],
+        [groups, 1, 1],
+        Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: n,
+    })
+}
+
+/// GPU-resident same-shape elementwise multiply (`out[i] = a[i] * b[i]`).
+/// Mirror of [`gpu_add_elementwise_persistent`]. Used by GeGLU's
+/// `values * gelu(gate)` step in SD UNet's feed-forward — the trait
+/// default downloaded both operands to host before the matmul_bias fix
+/// of 2026-05-08, then re-uploaded the product. Single GPU kernel
+/// dispatch instead.
+fn gpu_mul_elementwise_persistent(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    n: usize,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.mul_elementwise.as_ref()?;
     if n == 0 || n < GPU_ADD_ELEMENTWISE_MIN {
         return None;
     }
@@ -2942,6 +2999,12 @@ impl MathBackend for ScryGpuBackend {
     }
 
     fn mul_elementwise(a: &ScryGpuStorage, b: &ScryGpuStorage) -> ScryGpuStorage {
+        let n = a.len();
+        if n == b.len() {
+            if let Some(out) = gpu_mul_elementwise_persistent(a, b, n) {
+                return out;
+            }
+        }
         cpu(CpuBackend::mul_elementwise(&a.as_vec(), &b.as_vec()))
     }
 
@@ -4045,6 +4108,61 @@ mod tests {
             .expect("upload b after upload a succeeded");
         let out = ScryGpuBackend::add(&gpu_a, &gpu_b, &shape, &shape, &shape);
         assert!(!out.is_gpu(), "small same-shape add should fall back to Cpu");
+    }
+
+    #[test]
+    fn gpu_mul_elementwise_matches_cpu_within_tolerance() {
+        // SD UNet's GeGLU gate shape — `[H*W, d_ff]` at a mid-network stage.
+        // Sized above GPU_ADD_ELEMENTWISE_MIN so the kernel engages.
+        let n = 1024 * 16;
+        let a: Vec<f32> = (0..n).map(|i| ((i % 113) as f32) * 0.03 - 1.5).collect();
+        let b: Vec<f32> = (0..n).map(|i| ((i % 71) as f32) * 0.07 + 0.5).collect();
+
+        let gpu_a = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_mul_elementwise_matches_cpu_within_tolerance: {e}");
+                return;
+            }
+        };
+        let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
+            .expect("upload b after upload a succeeded");
+
+        let gpu_out = ScryGpuBackend::mul_elementwise(&gpu_a, &gpu_b);
+        #[cfg(feature = "scry-gpu-cuda")]
+        assert!(
+            gpu_out.is_gpu(),
+            "mul_elementwise over Gpu inputs should stay Gpu on CUDA, got {gpu_out:?}"
+        );
+
+        let g = ScryGpuBackend::to_vec(&gpu_out);
+        let c = CpuBackend::mul_elementwise(&a, &b);
+        assert_eq!(g.len(), c.len());
+        for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+            assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
+        }
+    }
+
+    #[test]
+    fn gpu_mul_elementwise_below_threshold_falls_back_to_cpu() {
+        // Below GPU_ADD_ELEMENTWISE_MIN — same threshold as add_elementwise,
+        // since the kernel cost profile is identical.
+        let n = 256;
+        assert!(n < GPU_ADD_ELEMENTWISE_MIN);
+        let a: Vec<f32> = (0..n).map(|i| i as f32 * 0.1).collect();
+        let b: Vec<f32> = (0..n).map(|i| i as f32 * 0.2).collect();
+
+        let gpu_a = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_mul_elementwise_below_threshold_falls_back_to_cpu: {e}");
+                return;
+            }
+        };
+        let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
+            .expect("upload b after upload a succeeded");
+        let out = ScryGpuBackend::mul_elementwise(&gpu_a, &gpu_b);
+        assert!(!out.is_gpu(), "small mul_elementwise should fall back to Cpu");
     }
 
     #[test]
