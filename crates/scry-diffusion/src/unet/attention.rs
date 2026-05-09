@@ -187,37 +187,45 @@ impl<B: MathBackend> Attention<B> {
 impl<B: MathBackend> GeGluFf<B> {
     /// GeGLU feed-forward on `[n, d_model]`. Returns `[n, d_model]`.
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
+        use crate::profile::time_section;
+
         let n = input.shape.dims()[0];
-        let proj = matmul_bias_2d::<B>(
-            input,
-            &self.proj_in_weight,
-            &self.proj_in_bias,
-            n,
-            self.d_model,
-            2 * self.d_ff,
-        );
+        let proj = time_section("ff.proj_in", || {
+            matmul_bias_2d::<B>(
+                input,
+                &self.proj_in_weight,
+                &self.proj_in_bias,
+                n,
+                self.d_model,
+                2 * self.d_ff,
+            )
+        });
 
         // Chunk along the last axis: HF `chunk(2, dim=-1)` returns
         // `(first_half, second_half)`, with the *first half* being the
         // values and the *second half* being the gate.
-        let x = B::gather_columns(&proj.data, n, 2 * self.d_ff, 0, self.d_ff);
-        let gate = B::gather_columns(&proj.data, n, 2 * self.d_ff, self.d_ff, self.d_ff);
-        // HF GeGLU uses `F.gelu(approximate="none")` (erf-based exact GELU).
-        // `B::gelu` is the tanh approximation, which drifts enough across
-        // SD 1.5's 16 transformer blocks to push the M6 1e-3 parity gate.
-        let gate_t: Tensor<B> = Tensor::new(gate, Shape::new(&[n, self.d_ff]));
-        let gelu_gate = exact_gelu(&gate_t);
-        let gated = B::mul_elementwise(&x, &gelu_gate.data);
-        let gated_t = Tensor::new(gated, Shape::new(&[n, self.d_ff]));
+        let gated_t = time_section("ff.gate", || {
+            let x = B::gather_columns(&proj.data, n, 2 * self.d_ff, 0, self.d_ff);
+            let gate = B::gather_columns(&proj.data, n, 2 * self.d_ff, self.d_ff, self.d_ff);
+            // HF GeGLU uses `F.gelu(approximate="none")` (erf-based exact GELU).
+            // `B::gelu` is the tanh approximation, which drifts enough across
+            // SD 1.5's 16 transformer blocks to push the M6 1e-3 parity gate.
+            let gate_t: Tensor<B> = Tensor::new(gate, Shape::new(&[n, self.d_ff]));
+            let gelu_gate = time_section("ff.gate.exact_gelu", || exact_gelu(&gate_t));
+            let gated = B::mul_elementwise(&x, &gelu_gate.data);
+            Tensor::new(gated, Shape::new(&[n, self.d_ff]))
+        });
 
-        matmul_bias_2d::<B>(
-            &gated_t,
-            &self.proj_out_weight,
-            &self.proj_out_bias,
-            n,
-            self.d_ff,
-            self.d_model,
-        )
+        time_section("ff.proj_out", || {
+            matmul_bias_2d::<B>(
+                &gated_t,
+                &self.proj_out_weight,
+                &self.proj_out_bias,
+                n,
+                self.d_ff,
+                self.d_model,
+            )
+        })
     }
 }
 
