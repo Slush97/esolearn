@@ -808,6 +808,56 @@ impl Device {
         )
     }
 
+    /// Run cuBLAS strided batched `GemmEx` with bf16 inputs and an `f32`
+    /// output, no sync.
+    ///
+    /// Same shape contract as
+    /// [`Self::cublas_strided_batched_matmul_async`] but routes the
+    /// per-batch matmul through `cublasGemmStridedBatchedEx` with bf16 data
+    /// and an fp32 accumulator written straight to `c`. Mirrors
+    /// [`Self::cublas_matmul_bf16_in_f32_out_async`] for transformer
+    /// attention's strided batched matmuls (Q@Kᵀ and attn@V) — without this
+    /// they stay on `sgemm_strided_batched` even when bf16 matmul is on,
+    /// which is the dominant gap on `ViT`-B/16 bf16.
+    #[cfg(feature = "bf16")]
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::type_complexity,
+        clippy::many_single_char_names
+    )]
+    pub fn cublas_strided_batched_matmul_bf16_in_f32_out_async(
+        &self,
+        a: &Buffer<half::bf16>,
+        b: &Buffer<half::bf16>,
+        c: &mut Buffer<f32>,
+        batch: u32,
+        m: u32,
+        n: u32,
+        k: u32,
+        trans_a: bool,
+        trans_b: bool,
+    ) -> Result<()> {
+        let backend = self.cuda_backend()?;
+        let BackendBuffer::Cuda(a_buf) = &a.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(b_buf) = &b.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        let BackendBuffer::Cuda(c_buf) = &mut c.inner else {
+            return Err(GpuError::BackendUnavailable(
+                "buffer not from CUDA backend".into(),
+            ));
+        };
+        backend.cublas_strided_batched_matmul_bf16_in_f32_out_async(
+            a_buf, b_buf, c_buf, batch, m, n, k, trans_a, trans_b,
+        )
+    }
+
     /// Run a cuDNN 2D convolution forward pass without synchronizing.
     ///
     /// Implicit-GEMM (or Winograd/FFT — cuDNN heuristic picks per shape) fused

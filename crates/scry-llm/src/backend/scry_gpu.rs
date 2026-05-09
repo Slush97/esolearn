@@ -1539,6 +1539,84 @@ fn gpu_matmul_strided_batched_persistent(
     })
 }
 
+/// GPU-resident strided batched matmul through cuBLAS GemmStridedBatchedEx
+/// (bf16 inputs, fp32 accumulate, fp32 output).
+///
+/// Mirrors [`gpu_matmul_strided_batched_persistent`] but routes through the
+/// bf16 path. Unlike [`gpu_matmul_persistent_bf16`] this passes trans flags
+/// directly to cuBLAS (the strided wrapper accepts them), so no
+/// transpose-then-cast pre-pass is needed — Q@Kᵀ takes `trans_b=true`
+/// straight through.
+///
+/// Inputs are typically attention activations (Q/K/V from
+/// `split_qkv_reshape_heads`) which are first-touch fp32 buffers per
+/// forward — the bf16 shadow cache rarely fires here, so each call casts
+/// fresh. The cast is cheap relative to the GEMM at attention shapes
+/// (12 × 197 × 64 ≈ 151K elements vs 12 × 197 × 197 × 64 = 30M FMAs).
+///
+/// CUDA-only — Vulkan and pre-cuBLAS paths return `None` and the caller
+/// falls back to the fp32 strided path.
+#[cfg(feature = "scry-gpu-bf16")]
+#[allow(clippy::too_many_arguments)]
+fn gpu_matmul_strided_batched_persistent_bf16(
+    a: &ScryGpuStorage,
+    b: &ScryGpuStorage,
+    batch: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    if !matches!(ctx.matmul, MatmulStrategy::CuBlas) {
+        return None;
+    }
+    let total_a = batch * m * k;
+    let total_b = batch * k * n;
+    let total_c = batch * m * n;
+    if total_a == 0 || total_b == 0 || total_c == 0 {
+        return None;
+    }
+    if a.len() != total_a || b.len() != total_b {
+        return None;
+    }
+
+    let a_bf16: Arc<Buffer<half::bf16>> = if let Some(cached) = as_gpu_buffer_bf16(a) {
+        cached
+    } else {
+        let a_buf = as_gpu_buffer(a)?;
+        Arc::new(cast_f32_to_bf16(ctx, &a_buf, total_a)?)
+    };
+    let b_bf16: Arc<Buffer<half::bf16>> = if let Some(cached) = as_gpu_buffer_bf16(b) {
+        cached
+    } else {
+        let b_buf = as_gpu_buffer(b)?;
+        Arc::new(cast_f32_to_bf16(ctx, &b_buf, total_b)?)
+    };
+
+    let mut out = ctx.dev.alloc_uninit::<f32>(total_c).ok()?;
+
+    ctx.dev
+        .cublas_strided_batched_matmul_bf16_in_f32_out_async(
+            &a_bf16,
+            &b_bf16,
+            &mut out,
+            batch as u32,
+            m as u32,
+            n as u32,
+            k as u32,
+            trans_a,
+            trans_b,
+        )
+        .ok()?;
+
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total_c,
+    })
+}
+
 /// GPU-resident matmul through cuBLAS GemmEx (bf16 inputs, fp32 accumulate,
 /// fp32 output).
 ///
@@ -2020,6 +2098,21 @@ impl MathBackend for ScryGpuBackend {
         // Try cuBLAS strided batched first. Falls through to the trait
         // default (per-batch loop with to_vec/from_vec) on Vulkan, sub-
         // threshold workloads, or shape mismatches.
+        #[cfg(feature = "scry-gpu-bf16")]
+        if get_ctx().is_some_and(|c| c.bf16_matmul_enabled.load(Ordering::Relaxed)) {
+            if let Some(gpu_out) = gpu_matmul_strided_batched_persistent_bf16(
+                a,
+                b,
+                batch_count,
+                m,
+                k,
+                n,
+                trans_a,
+                trans_b,
+            ) {
+                return gpu_out;
+            }
+        }
         #[cfg(feature = "scry-gpu-cuda")]
         if let Some(gpu_out) = gpu_matmul_strided_batched_persistent(
             a,
@@ -3353,6 +3446,75 @@ mod tests {
                 "mismatch at {i}: cpu={c} gpu={gv} (tol={tol})"
             );
         }
+    }
+
+    #[cfg(feature = "scry-gpu-bf16")]
+    #[test]
+    fn gpu_matmul_strided_batched_bf16_matches_cpu_within_relaxed_tolerance() {
+        // ViT-B/16 attention shape: 12 heads × seq=197 × d_head=64. Q@Kᵀ
+        // is the worst-case for bf16 drift in attention (output magnitudes
+        // grow with k=64, so absolute error scales with sqrt(k)). 5%
+        // relative is the conservative envelope per the bf16 GemmEx test.
+        let batch = 12;
+        let m = 197;
+        let k = 64;
+        let n = 197;
+
+        // Bound inputs to ~[-1, 1] so output magnitudes ≈ sqrt(k) ≈ 8;
+        // outsized magnitudes would dilute the relative-error check.
+        let mut state = 0xb_f16_5_71_d_d_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            ((state >> 32) as i32 as f32) / (i32::MAX as f32)
+        };
+        let a: Vec<f32> = (0..batch * m * k).map(|_| next()).collect();
+        let b: Vec<f32> = (0..batch * k * n).map(|_| next()).collect();
+        let a_storage = ScryGpuStorage::Cpu(a.clone());
+        let b_storage = ScryGpuStorage::Cpu(b.clone());
+        let a_gpu = match ScryGpuBackend::to_gpu(&a_storage) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!(
+                    "skipping gpu_matmul_strided_batched_bf16_matches_cpu_within_relaxed_tolerance: {e}"
+                );
+                return;
+            }
+        };
+        let b_gpu = ScryGpuBackend::to_gpu(&b_storage).expect("upload b");
+
+        let bf16_out = match gpu_matmul_strided_batched_persistent_bf16(
+            &a_gpu, &b_gpu, batch, m, k, n, false, false,
+        ) {
+            Some(o) => o,
+            None => {
+                eprintln!(
+                    "skipping gpu_matmul_strided_batched_bf16_matches_cpu_within_relaxed_tolerance: bf16 path unavailable"
+                );
+                return;
+            }
+        };
+        assert!(
+            bf16_out.is_gpu(),
+            "bf16 strided batched output should stay Gpu"
+        );
+
+        let cpu_out = CpuBackend::matmul_strided_batched(&a, &b, batch, m, k, n, false, false);
+        let bf16_vec = ScryGpuBackend::to_vec(&bf16_out);
+        assert_eq!(bf16_vec.len(), cpu_out.len());
+
+        let mut max_rel_err: f32 = 0.0;
+        for (i, (cpu_v, bf_v)) in cpu_out.iter().zip(bf16_vec.iter()).enumerate() {
+            let mag = cpu_v.abs().max(1.0);
+            let rel = (cpu_v - bf_v).abs() / mag;
+            max_rel_err = max_rel_err.max(rel);
+            assert!(
+                rel < 5e-2,
+                "bf16 strided batched drift at {i}: cpu={cpu_v} bf16={bf_v} rel={rel:.4}"
+            );
+        }
+        eprintln!(
+            "bf16 strided batched 12×197×64×197 max relative error: {max_rel_err:.5}"
+        );
     }
 
     #[cfg(feature = "scry-gpu-bf16")]
