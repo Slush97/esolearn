@@ -203,6 +203,56 @@ Wins (each one a separate commit, gates green):
 | `26a42fa` | `MathBackend::transpose_2d` on GPU | 877 |
 | `d52527e` | `clone_tensor` via `B::scale(1.0)` | 859 |
 | `50ca256` | `concat_rows` CUDA shader (skip-concat on device) | 851 |
+| `b8170e3` | **`matmul_bias` on GPU + cascade fix** | **717** |
+
+**The audit that found the matmul_bias landmine.** After landing the
+seven wins above we were ~hand-waving about "easy wins exhausted" — the
+profile said per-section work was at floor and only multi-week levers
+(CFG batching, FlashAttention, CUDA graphs) remained. A systematic
+audit changed that: `awk` over `mod.rs` found 9 `MathBackend` trait
+methods with `Self::to_vec` in their default body but no
+`ScryGpuBackend` override. Of those, **`matmul_bias` was on the
+hottest path possible** — every dense linear in the UNet (~104 calls
+per forward) was paying a host roundtrip + re-upload cost.
+
+The kicker: the `BIAS_ADD_CUDA` kernel had been sitting in
+`scry-gpu/src/shaders.rs` since the original conv-bias work, **fully
+implemented but never wired into scry-llm**. Wiring it took ~30 minutes
+and produced a bigger step-time delta than any of the previous wins:
+
+  Per-step:    851 ms  →  717 ms   (-16%)
+  Per-call:    ff.proj_values    3.07 ms  →  0.80 ms  (3.8× faster)
+               ff.proj_gate      2.84 ms  →  0.76 ms  (3.7× faster)
+               ff.gate.exact_gelu  0.50 ms  →  0.027 ms  (**18× faster**)
+               xfblock.cross_attn  1.13 ms  →  0.79 ms  (-30%)
+
+Why the cascade? `matmul_bias`'s default returned `Cpu` storage
+variant. Every consuming op then had to call `as_gpu_buffer(Cpu(v))`,
+which uploads from host. Fixing matmul_bias didn't just remove its own
+roundtrip — it removed a **re-upload from every downstream op**.
+
+**Lesson for future-you.** When the profile says "easy wins exhausted",
+audit the trait. The pattern of ad-hoc fixes (one host-roundtrip at a
+time) is necessary but not sufficient. The systematic check is:
+
+```
+awk '/^    fn / { fn = $0 } /Self::to_vec/ && fn { print fn; fn = "" }' \
+    crates/scry-llm/src/backend/mod.rs | sort -u  # 25 methods
+awk '/^    fn / { sub(/.*fn /,""); sub(/[\(\<].*$/,""); print }' \
+    crates/scry-llm/src/backend/scry_gpu.rs | sort -u  # GPU overrides
+# diff the two — anything in (1) but not (2) is a latent host roundtrip.
+```
+
+**Remaining audit items** (8, all currently dormant on SD's hot path
+post-batched-attention but landmines for future code):
+
+- `add_inplace` — same-shape elementwise add. Trivial kernel.
+- `gather_columns`, `scatter_columns` — worked around for SD by
+  batched-attention; new code paths could reintroduce.
+- `gather_rows`, `scatter_rows` — Llama-only currently.
+- `apply_causal_mask_and_scale`, `apply_batched_causal_mask_and_scale`
+  — Llama-only.
+- `matmul_i8_f32_bias` — quantized path, unused.
 
 **The remaining levers (F / G / H)** are all multi-week and are the
 right next chunks of work after the easy wins. Per-UNet-forward profile
