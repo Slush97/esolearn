@@ -167,7 +167,7 @@ Backend type is cfg-selected: `CpuBackend` by default, `ScryGpuBackend`
 under `--features scry-gpu-cuda`. Exposes `--bf16-matmul` and `--no-cudnn`
 toggles for the perf-pass sweep.
 
-**M9c — Perf pass** (open)
+**M9c — Perf pass** (phase 1 done; phase 3 next)
 
 Baseline numbers landed 2026-05-08 (RTX 5070 Ti, prompt + seed
 matched between Python and Rust):
@@ -195,15 +195,32 @@ batch=2 that's 120 transfers per image. The latent never stays on GPU.
 **Phased plan.** Land in order; gate each phase with a re-run of
 `bench_sd --steps 30 --size 512` so the wins are auditable.
 
-1. **Genericize the scheduler.** Change `Scheduler` to
-   `Scheduler<B: MathBackend>` with `scale_model_input(&self, &Tensor<B>, t) -> Tensor<B>`
-   and `step(&mut self, &Tensor<B>, t, &Tensor<B>) -> Result<Tensor<B>>`.
-   The math `ddim::step` actually uses (sqrt of two scalars,
-   element-wise mul/add, scalar scale of the eps term) is already in
-   `MathBackend` — no new kernels. CFG combine moves to a tiny
-   `MathBackend::axpby` (or just two `mul_elementwise` + `add`). Update
-   call sites: `pipeline.rs`, `txt2img.rs`, `bench_sd.rs`,
-   `check_ddim.rs`. Expected win: 4×→0× round-trips per step.
+1. **Genericize the scheduler — done 2026-05-08, commit `4408375`.**
+   `Scheduler` is now `Scheduler<B: MathBackend>`; `scale_model_input`
+   and `step` take/return `&Tensor<B>`. DDIM step rewritten as
+   `out = c_in · x + c_pred · model_output` with two host-precomputed
+   coefficients — two `B::scale` + one `B::add` on the device per
+   step. CFG combine in `pipeline.rs` likewise tensor-typed. The
+   default `scale_model_input` uses `B::scale(_, 1.0)` to materialize
+   a fresh storage without requiring `B: Clone` on `Tensor<B>`.
+
+   **Reality check on the win:** the audit's "residency-bound"
+   framing was directionally right but quantitatively overstated.
+   At 512×512, latents are 64 KB; per-step transfers total <1 MB at
+   >10 GB/s — under 0.1 ms / step. Post-phase-1 numbers are flat:
+
+   | Backend | Size | Steps | Per-step (pre) | Per-step (post) |
+   |---|---|---|---|---|
+   | GPU bf16 | 64×64 | 4 | 446 ms | 458 ms |
+   | GPU bf16 | 512×512 | 2 | 2066 ms | 2075 ms |
+
+   The 60× gap vs PyTorch fp16 is **dispatch-count bound**, not
+   memory-bandwidth bound. SD 1.5's UNet runs hundreds of kernel
+   launches per step, each with 10-20 µs of overhead.
+
+   **Phase 1's value is structural** — it's the prerequisite for
+   phase 4 (CUDA graphs), which can only record over a pipeline that
+   never syncs back to host between dispatches.
 
 2. **Flip bf16 by default for UNet matmuls.** The `scry-gpu-bf16` feature
    plus `set_bf16_matmul(true)` is already wired and benched (row 3 vs
