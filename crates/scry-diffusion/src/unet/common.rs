@@ -72,11 +72,19 @@ pub(crate) fn add_same<B: MathBackend>(a: &Tensor<B>, b: &Tensor<B>) -> Tensor<B
     Tensor::new(out, a.shape.clone())
 }
 
-/// Round-trip clone via `to_vec`/`from_vec`. Used where we need to keep
-/// an intermediate alive across an op that consumes the tensor.
+/// Materialize a fresh tensor with the same data and shape, staying on
+/// the device the input lives on. Uses `B::scale(_, 1.0)` instead of
+/// `to_vec` + `from_vec` so on `ScryGpuBackend` no host roundtrip
+/// happens — same trick as `Scheduler::scale_model_input`'s default.
+///
+/// Called from the UNet forward to (a) push the conv_in skip and (b)
+/// from any resblock whose `in_channels == out_channels` (no
+/// conv_shortcut, identity branch). At SD 1.5 that's ~13 calls per
+/// UNet forward — at 64×64 latents that's 13 × 320-1280 channels ×
+/// up to 4096 spatial = up to a few MB per call.
 pub(crate) fn clone_tensor<B: MathBackend>(t: &Tensor<B>) -> Tensor<B> {
-    let v = B::to_vec(&t.data);
-    Tensor::from_vec(v, t.shape.clone())
+    let storage = B::scale(&t.data, 1.0);
+    Tensor::new(storage, t.shape.clone())
 }
 
 /// `C = A @ W + b`, with `A: [m, k]`, `W: [k, n]` (scry-llm `[in, out]`),
