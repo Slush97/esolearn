@@ -201,6 +201,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             i + 1
         );
     });
+    pipeline.to_device();
 
     let params = GenerationParams {
         prompt: args.prompt,

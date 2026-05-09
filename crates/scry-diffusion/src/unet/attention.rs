@@ -122,6 +122,15 @@ pub struct BasicTransformerBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> Attention<B> {
+    /// Pre-upload every Q/K/V/out parameter to the backend's device-resident form.
+    pub(crate) fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.q_weight.data);
+        B::to_device_in_place(&mut self.k_weight.data);
+        B::to_device_in_place(&mut self.v_weight.data);
+        B::to_device_in_place(&mut self.out_weight.data);
+        B::to_device_in_place(&mut self.out_bias.data);
+    }
+
     /// Multi-head attention. `q_input` is `[n_q, d_model]`; `kv_input` is
     /// `[n_kv, cross_dim]`. For self-attention, pass the same tensor and
     /// `cross_dim == d_model`. Returns `[n_q, d_model]`.
@@ -227,6 +236,16 @@ impl<B: MathBackend> Attention<B> {
 }
 
 impl<B: MathBackend> GeGluFf<B> {
+    /// Pre-upload every projection weight/bias to the backend's device-resident form.
+    pub(crate) fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.proj_values_weight.data);
+        B::to_device_in_place(&mut self.proj_values_bias.data);
+        B::to_device_in_place(&mut self.proj_gate_weight.data);
+        B::to_device_in_place(&mut self.proj_gate_bias.data);
+        B::to_device_in_place(&mut self.proj_out_weight.data);
+        B::to_device_in_place(&mut self.proj_out_bias.data);
+    }
+
     /// GeGLU feed-forward on `[n, d_model]`. Returns `[n, d_model]`.
     ///
     /// Two independent `[d_model, d_ff]` matmuls produce values and gate
@@ -282,6 +301,16 @@ impl<B: MathBackend> GeGluFf<B> {
 }
 
 impl<B: MathBackend> BasicTransformerBlock<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        self.norm1.to_device();
+        self.attn1.to_device();
+        self.norm2.to_device();
+        self.attn2.to_device();
+        self.norm3.to_device();
+        self.ff.to_device();
+    }
+
     /// Forward pass: latent ⊕ self-attn → ⊕ cross-attn(text) → ⊕ MLP.
     ///
     /// Input/output `[n, d_model]` (image tokens flattened from `[H*W, C]`).
@@ -330,6 +359,16 @@ pub struct SpatialTransformer<B: MathBackend> {
 }
 
 impl<B: MathBackend> SpatialTransformer<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        self.norm.to_device();
+        self.proj_in.to_device();
+        self.proj_out.to_device();
+        for b in &mut self.transformer_blocks {
+            b.to_device();
+        }
+    }
+
     /// Forward: GroupNorm → 1×1 conv in → reshape `[C, H, W]` to `[H*W, C]`
     /// → N × `BasicTransformerBlock` → reshape back → 1×1 conv out →
     /// residual add. Input/output `[C, H, W]`.

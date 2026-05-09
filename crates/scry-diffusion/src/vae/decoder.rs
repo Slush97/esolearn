@@ -104,6 +104,11 @@ struct GroupNormParams<B: MathBackend> {
 }
 
 impl<B: MathBackend> GroupNormParams<B> {
+    fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+    }
+
     /// Apply group norm to `[C, H, W]` (batch=1 implicit). Returns same shape.
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
@@ -139,6 +144,16 @@ struct VaeResnetBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> VaeResnetBlock<B> {
+    fn to_device(&mut self) {
+        self.norm1.to_device();
+        self.conv1.to_device();
+        self.norm2.to_device();
+        self.conv2.to_device();
+        if let Some(c) = self.conv_shortcut.as_mut() {
+            c.to_device();
+        }
+    }
+
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let h = self.norm1.forward(input);
         let h = silu_inplace::<B>(&h);
@@ -171,6 +186,18 @@ struct VaeMidAttention<B: MathBackend> {
 }
 
 impl<B: MathBackend> VaeMidAttention<B> {
+    fn to_device(&mut self) {
+        self.group_norm.to_device();
+        B::to_device_in_place(&mut self.q_weight.data);
+        B::to_device_in_place(&mut self.q_bias.data);
+        B::to_device_in_place(&mut self.k_weight.data);
+        B::to_device_in_place(&mut self.k_bias.data);
+        B::to_device_in_place(&mut self.v_weight.data);
+        B::to_device_in_place(&mut self.v_bias.data);
+        B::to_device_in_place(&mut self.proj_weight.data);
+        B::to_device_in_place(&mut self.proj_bias.data);
+    }
+
     #[allow(clippy::cast_precision_loss)]
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();
@@ -215,6 +242,15 @@ struct VaeUpBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> VaeUpBlock<B> {
+    fn to_device(&mut self) {
+        for r in &mut self.resnets {
+            r.to_device();
+        }
+        if let Some(u) = self.upsampler.as_mut() {
+            u.to_device();
+        }
+    }
+
     fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let mut x = clone_tensor::<B>(input);
         for r in &self.resnets {
@@ -257,6 +293,21 @@ pub struct VaeDecoder<B: MathBackend> {
 }
 
 impl<B: MathBackend> VaeDecoder<B> {
+    /// Pre-upload every parameter tensor in the VAE decoder to the backend's
+    /// device-resident form. No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        self.post_quant_conv.to_device();
+        self.conv_in.to_device();
+        self.mid_resnet0.to_device();
+        self.mid_attn.to_device();
+        self.mid_resnet1.to_device();
+        for b in &mut self.up_blocks {
+            b.to_device();
+        }
+        self.conv_norm_out.to_device();
+        self.conv_out.to_device();
+    }
+
     /// Decode a latent into pixels in `(-1, 1)`. Caller is responsible for
     /// clamping and rescaling to `[0, 1]` for image output.
     ///

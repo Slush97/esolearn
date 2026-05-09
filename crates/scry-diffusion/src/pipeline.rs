@@ -188,6 +188,20 @@ where
         self.progress = Some(Box::new(callback));
         self
     }
+
+    /// Pre-upload every parameter tensor in the text encoder, UNet, and VAE
+    /// to the backend's device-resident form. No-op on `CpuBackend`;
+    /// idempotent on any backend.
+    ///
+    /// Without this, weights stay CPU-resident and `MathBackend::matmul` /
+    /// `conv2d` re-uploads on every kernel dispatch — for SD 1.5 that's
+    /// 3.4 GB × 60 forwards per image. Also unblocks the bf16 fast path,
+    /// which short-circuits to `None` on CPU-resident storage.
+    pub fn to_device(&mut self) {
+        self.text_encoder.to_device();
+        self.unet.to_device();
+        self.vae.to_device();
+    }
 }
 
 // ---------------------------------------------------------------------------

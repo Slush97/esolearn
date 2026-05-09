@@ -177,13 +177,14 @@ matched between Python and Rust):
 | CPU | 64×64 | 2 | 8.78 s | 3815 ms |
 | GPU bf16 (start of perf pass) | 512×512 | 2 | 5.21 s | 2066 ms |
 | GPU bf16 (post-matmul_bias) | 512×512 | 30 | 23.0 s | ~700 ms |
-| GPU bf16 (post-mul_elementwise) | 512×512 | 30 | **17.0 s** | **537 ms** |
+| GPU bf16 (post-mul_elementwise) | 512×512 | 30 | 17.0 s | 537 ms |
+| GPU bf16 (post-to_device cascade) | 512×512 | 30 | **5.68 s** | **159 ms** |
 | **PyTorch fp16** | **512×512** | **30** | **1.04 s** | **32.9 ms** |
 
-After 9 profile-driven commits, our GPU bf16 path runs the same
-generation in **17.0 s vs 63.3 s** at the perf pass start — a **3.7×
+After 10 profile-driven commits, our GPU bf16 path runs the same
+generation in **5.68 s vs 63.3 s** at the perf pass start — an **11.1×
 total speedup** with M6 HF parity bit-identical at 1.549e-4 throughout.
-Gap to PyTorch fp16: 60× → **16×**.
+Gap to PyTorch fp16: 60× → **4.8×**.
 
 **The big lesson** that ran through the entire perf pass: the original
 "residency-bound" framing was wrong. The actual issue was that *many*
@@ -205,7 +206,8 @@ Wins (each one a separate commit, gates green):
 | `d52527e` | `clone_tensor` via `B::scale(1.0)` | 859 |
 | `50ca256` | `concat_rows` CUDA shader (skip-concat on device) | 851 |
 | `b8170e3` | `matmul_bias` on GPU + cascade fix | 717 |
-| _next_ | **`mul_elementwise` on GPU + VAE helpers + cascade fix** | **537** |
+| `4054fc0` | `mul_elementwise` on GPU + VAE helpers + cascade fix | 537 |
+| _next_ | **`to_device` cascade — UNet/VAE/CLIP weights pre-uploaded once** | **159** |
 
 **The audit that found the matmul_bias landmine.** After landing the
 seven wins above we were ~hand-waving about "easy wins exhausted" — the
@@ -314,6 +316,69 @@ UNet. Both rounds came after the profile said "near floor". **Run the
 fake-override check whenever per-step looks stuck**, and grep
 `B::to_vec` across the diffusion crate to catch duplicated helpers
 that didn't get the same lifting treatment as their primary copy.
+
+## The to_device cascade win (2026-05-08, third session)
+
+The biggest landmine of the entire perf pass — and one that hid
+behind a perfectly normal call stack: **UNet/VAE/CLIP weights were
+stored as `Cpu` storage and re-uploaded on every kernel dispatch**.
+SD 1.5 UNet alone is 3.4 GB; the pipeline was paying that bandwidth
+tax 60× per image (2 CFG × 30 steps).
+
+Two related symptoms once the cause was identified:
+
+1. `as_gpu_buffer(Cpu(v))` in `scry-llm/src/backend/scry_gpu.rs:691-700`
+   uploads on every call without caching — `ctx.dev.upload(v)` then
+   fresh `Arc::new`, no shared handle across calls. Every weight
+   tensor paid the full upload cost on every forward.
+2. `as_gpu_buffer_bf16` short-circuits to `None` on `Cpu` storage
+   (line 717-719). The `--bf16-matmul` toggle was therefore a **no-op
+   for weights** — the bf16 fast path only fired for activation
+   tensors that had already been lifted by an earlier op. Three
+   sessions of bf16-matmul tuning had been measuring the wrong thing.
+
+`scry-vision`'s ResNet/ViT/BatchNorm have `to_device(&mut self)`
+methods that walk Tensor fields and call `B::to_device_in_place`.
+`scry-diffusion` had **zero** such cascade — confirmed by `grep`:
+`scry-vision` had 11 `to_device` methods, scry-diffusion had 0.
+
+Fix: 14 new `to_device(&mut self)` methods walking the
+UNet/VAE/CLIP trees bottom-up — `LayerNormModule` and
+`CausalSelfAttention` (in `scry-llm`); `GroupNormParams`, `ResBlock`,
+`Downsample`, `Upsample`, `DownBlock`, `MidBlock`, `UpBlock`,
+`Attention`, `GeGluFf`, `BasicTransformerBlock`, `SpatialTransformer`,
+`TimeEmbedding`, `Unet`, `VaeResnetBlock`, `VaeMidAttention`,
+`VaeUpBlock`, `VaeDecoder`, `ClipBlock`, `ClipTextEncoder` (in
+`scry-diffusion`). One pipeline-level `Txt2ImgPipeline::to_device`
+walks all three. `TextEncoder` trait gets a default-no-op
+`to_device` so the call site is generic over CLIP / SDXL.
+
+  Per-step:    537 ms  →  159 ms   (-70%)
+  Total/30 steps:  17.0 s  →  5.68 s
+  Gap to PyTorch fp16:  16×  →  4.8×
+
+Two effects compounded: (a) host→device upload of weights was
+amortized from per-dispatch to once at load time, and (b) the bf16
+fast path now actually fires for weight tensors, so Q/K/V/out
+projections, FF projections, conv1×1, time-embed Linear, and CLIP MLP
+all run as cuBLAS bf16 GemmEx instead of fp32.
+
+**Lesson for future-you.** When a sister crate already has the
+pattern (scry-vision's `to_device` cascade), a new crate with no
+analogous wiring is the first place to look. The previous M9c
+perf table called the gap "round-trip-bound", which was right —
+but the dominant round-trip wasn't the activations (M9c rounds 1-2
+fixed those). It was the **weights re-uploading**, hidden behind
+`as_gpu_buffer`'s implicit upload-on-`Cpu`-variant fallback. The
+fallback is a useful affordance (lets `CpuBackend` callers pass
+`Cpu` storage everywhere) but silently masks a 3.4 GB/forward leak
+when nobody walks the parameter tree at load time.
+
+**The audit pattern that catches this in future crates.** Compare
+`grep -rn "fn to_device" <new_crate>` against the same grep on
+sister crates. If the new crate has zero matches and the sister
+has many, the new crate has the latent leak. Run before declaring
+any GPU-resident milestone done.
 
 **Remaining audit items** (8, all currently dormant on SD's hot path
 post-batched-attention but landmines for future code):

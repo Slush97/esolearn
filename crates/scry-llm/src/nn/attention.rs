@@ -34,6 +34,15 @@ impl<B: MathBackend> CausalSelfAttention<B> {
         }
     }
 
+    /// Pre-upload the QKV / output projection weights to the backend's
+    /// device-resident form. No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.qkv_weight.data);
+        B::to_device_in_place(&mut self.qkv_bias.data);
+        B::to_device_in_place(&mut self.proj_weight.data);
+        B::to_device_in_place(&mut self.proj_bias.data);
+    }
+
     /// Full-sequence forward for prefill (no KV cache).
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let seq_len = input.shape.dims()[0];

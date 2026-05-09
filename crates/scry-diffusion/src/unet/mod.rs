@@ -75,7 +75,36 @@ pub struct Unet<B: MathBackend> {
     pub(crate) conv_out: Conv2d<B>,
 }
 
+impl<B: MathBackend> TimeEmbedding<B> {
+    pub(crate) fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.linear_1_weight.data);
+        B::to_device_in_place(&mut self.linear_1_bias.data);
+        B::to_device_in_place(&mut self.linear_2_weight.data);
+        B::to_device_in_place(&mut self.linear_2_bias.data);
+    }
+}
+
 impl<B: MathBackend> Unet<B> {
+    /// Pre-upload every parameter tensor in the UNet to the backend's
+    /// device-resident form. No-op on `CpuBackend`; idempotent on any backend.
+    ///
+    /// Call once after `from_safetensors`. Without this, weights stay
+    /// CPU-resident and `MathBackend::matmul` / `conv2d` re-uploads every
+    /// kernel dispatch — for SD 1.5 that's 3.4 GB × 60 forwards per image.
+    pub fn to_device(&mut self) {
+        self.conv_in.to_device();
+        self.time_embed.to_device();
+        for db in &mut self.down_blocks {
+            db.to_device();
+        }
+        self.mid_block.to_device();
+        for ub in &mut self.up_blocks {
+            ub.to_device();
+        }
+        self.conv_norm_out.to_device();
+        self.conv_out.to_device();
+    }
+
     /// Forward pass: `(noisy_latent, timestep, conditioning) → predicted_noise`.
     ///
     /// `noisy_latent` is `[in_channels, h, w]` (batch=1 squeezed) — for SD 1.5

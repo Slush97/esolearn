@@ -261,6 +261,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler,
         progress: None,
     };
+    pipeline.to_device();
 
     let params = GenerationParams {
         prompt: args.prompt.clone(),

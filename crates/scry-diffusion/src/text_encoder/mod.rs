@@ -26,4 +26,9 @@ pub trait TextEncoder<B: MathBackend> {
     /// Output embedding dimension. SD 1.5 = 768, SDXL = 2048
     /// (concatenation of CLIP-L and OpenCLIP-bigG).
     fn d_model(&self) -> usize;
+
+    /// Pre-upload every parameter tensor to the backend's device-resident
+    /// form. Default no-op for encoders that don't carry tensor parameters
+    /// (or whose backend has no device residency, e.g. `CpuBackend`).
+    fn to_device(&mut self) {}
 }

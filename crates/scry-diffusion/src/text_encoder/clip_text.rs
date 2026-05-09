@@ -128,7 +128,31 @@ pub struct ClipTextEncoder<B: MathBackend> {
     final_ln: LayerNormModule<B>,
 }
 
+impl<B: MathBackend> ClipBlock<B> {
+    fn to_device(&mut self) {
+        self.ln1.to_device();
+        self.attn.to_device();
+        self.ln2.to_device();
+        B::to_device_in_place(&mut self.fc1_weight.data);
+        B::to_device_in_place(&mut self.fc1_bias.data);
+        B::to_device_in_place(&mut self.fc2_weight.data);
+        B::to_device_in_place(&mut self.fc2_bias.data);
+    }
+}
+
 impl<B: MathBackend> ClipTextEncoder<B> {
+    /// Pre-upload every parameter tensor in the CLIP text encoder to the
+    /// backend's device-resident form. No-op on `CpuBackend`; idempotent on
+    /// any backend.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.token_embed.data);
+        B::to_device_in_place(&mut self.pos_embed.data);
+        for b in &mut self.blocks {
+            b.to_device();
+        }
+        self.final_ln.to_device();
+    }
+
     /// Output embedding dimension. Convenience accessor.
     pub fn d_model(&self) -> usize {
         self.config.d_model
@@ -231,6 +255,10 @@ impl<B: MathBackend> TextEncoder<B> for ClipTextEncoder<B> {
 
     fn d_model(&self) -> usize {
         self.config.d_model
+    }
+
+    fn to_device(&mut self) {
+        ClipTextEncoder::to_device(self);
     }
 }
 

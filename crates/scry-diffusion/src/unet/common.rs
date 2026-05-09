@@ -33,6 +33,13 @@ pub(crate) struct GroupNormParams<B: MathBackend> {
 }
 
 impl<B: MathBackend> GroupNormParams<B> {
+    /// Pre-upload the affine weights to the backend's device-resident form.
+    /// No-op on `CpuBackend`; idempotent on any backend.
+    pub(crate) fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.weight.data);
+        B::to_device_in_place(&mut self.bias.data);
+    }
+
     /// Apply GroupNorm to a `[C, H, W]` tensor (batch=1). Returns same shape.
     pub(crate) fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         let dims = input.shape.dims();

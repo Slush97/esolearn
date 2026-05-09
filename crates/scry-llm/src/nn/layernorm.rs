@@ -23,6 +23,13 @@ impl<B: MathBackend> LayerNormModule<B> {
     pub fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
         ops::layernorm_inference(input, &self.gamma, &self.beta, self.eps)
     }
+
+    /// Pre-upload gamma/beta to the backend's device-resident form.
+    /// No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        B::to_device_in_place(&mut self.gamma.data);
+        B::to_device_in_place(&mut self.beta.data);
+    }
 }
 
 impl<B: MathBackend> Module<B> for LayerNormModule<B> {

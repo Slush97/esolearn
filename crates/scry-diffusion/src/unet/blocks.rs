@@ -54,7 +54,36 @@ pub struct DownBlock<B: MathBackend> {
     pub downsampler: Option<Downsample<B>>,
 }
 
+impl<B: MathBackend> Downsample<B> {
+    /// Pre-upload the conv to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        self.conv.to_device();
+    }
+}
+
+impl<B: MathBackend> Upsample<B> {
+    /// Pre-upload the conv to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        self.conv.to_device();
+    }
+}
+
 impl<B: MathBackend> DownBlock<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        for r in &mut self.resnets {
+            r.to_device();
+        }
+        if let Some(atts) = self.attentions.as_mut() {
+            for a in atts {
+                a.to_device();
+            }
+        }
+        if let Some(d) = self.downsampler.as_mut() {
+            d.to_device();
+        }
+    }
+
     /// Forward, returning the output plus per-layer skip activations
     /// (in encounter order) that the symmetric `UpBlock` consumes.
     ///
@@ -96,6 +125,13 @@ pub struct MidBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> MidBlock<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        self.resnet_in.to_device();
+        self.attention.to_device();
+        self.resnet_out.to_device();
+    }
+
     /// Forward: ResBlock → SpatialTransformer → ResBlock at the deepest stage.
     pub fn forward(
         &mut self,
@@ -122,6 +158,21 @@ pub struct UpBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> UpBlock<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    pub fn to_device(&mut self) {
+        for r in &mut self.resnets {
+            r.to_device();
+        }
+        if let Some(atts) = self.attentions.as_mut() {
+            for a in atts {
+                a.to_device();
+            }
+        }
+        if let Some(u) = self.upsampler.as_mut() {
+            u.to_device();
+        }
+    }
+
     /// Forward consuming skips from the matching DownBlock in reverse order.
     ///
     /// Per HF `CrossAttnUpBlock2D.forward`: each ResBlock pops one skip,

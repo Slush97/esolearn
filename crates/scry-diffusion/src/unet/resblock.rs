@@ -49,6 +49,20 @@ pub struct ResBlock<B: MathBackend> {
 }
 
 impl<B: MathBackend> ResBlock<B> {
+    /// Pre-upload every parameter tensor to the backend's device-resident form.
+    /// No-op on `CpuBackend`; idempotent on any backend.
+    pub fn to_device(&mut self) {
+        self.norm1.to_device();
+        self.conv1.to_device();
+        B::to_device_in_place(&mut self.time_emb_proj_weight.data);
+        B::to_device_in_place(&mut self.time_emb_proj_bias.data);
+        self.norm2.to_device();
+        self.conv2.to_device();
+        if let Some(c) = self.conv_shortcut.as_mut() {
+            c.to_device();
+        }
+    }
+
     /// Forward pass with timestep injection.
     ///
     /// Input is `[in_channels, H, W]`; `time_embed` is `[time_embed_dim]`.
