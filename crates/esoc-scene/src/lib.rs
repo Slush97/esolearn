@@ -2,7 +2,7 @@
 //! Arena scene graph with typed visual marks.
 //!
 //! This crate defines the shared visual vocabulary consumed by rendering
-//! backends (esoc-gpu, esoc-gfx) and produced by chart logic (esoc-chart).
+//! backends (esoc-gfx) and produced by chart logic (esoc-chart).
 
 pub mod arena;
 pub mod bounds;
