@@ -779,6 +779,349 @@ extern \"C\" __global__ void scaled_softmax_rowwise(
     }
 }";
 
+    /// Fused multi-head scaled dot-product attention — single kernel for the
+    /// `scores → softmax → values` cascade.
+    ///
+    /// Mathematically equivalent to dispatching
+    /// [`super::matmul::TILED_16X16_CUDA`] (scores = Q · Kᵀ · scale),
+    /// [`SCALED_SOFTMAX_ROWWISE_CUDA`], and a second matmul (out = attn · V)
+    /// — but never materializes the `[num_heads · n_q, n_kv]` softmax
+    /// intermediate. At Stable Diffusion 1.5's deepest self-attn stage
+    /// (`num_heads=8, n_q=n_kv=4096`), that intermediate is ~537 MB of
+    /// device traffic per attention layer; this kernel turns those reads
+    /// + writes into per-block accumulator updates in shared memory.
+    ///
+    /// FlashAttention-1 style online softmax: each block maintains a
+    /// running max `m`, running denom `l`, and `head_dim`-wide accumulator
+    /// `o`. For each K/V row visited, the softmax statistics are
+    /// rescaled by `exp(m_old - m_new)` so they remain numerically
+    /// equivalent to a single-pass softmax over the full row of scores.
+    /// Reference: Dao et al., "FlashAttention" (2022) §3.1.
+    ///
+    /// **Block layout:** `(128, 1, 1)` threads. Each block computes one
+    /// `(head, q_row)` output vector — strided over the head_dim
+    /// elements when `head_dim > 128`. Block reductions use the lower
+    /// 64 threads for the dot-product sum tree (standard pattern; the
+    /// upper 64 hold partials in `red_smem` then drop out of the
+    /// per-step `if (tid < s)` halving).
+    ///
+    /// **Grid:** `(n_q, num_heads, 1)`. One block per output query row
+    /// per head — gives `num_heads × n_q` blocks total. Avoids
+    /// per-warp work imbalance: every block does the same amount of
+    /// `n_kv`-loop work.
+    ///
+    /// **Shared memory:** static, 3·256 + 4 floats (~3.1 KiB):
+    /// `q_smem[256]` (the Q row, loaded once and reused across the
+    /// K/V loop), `o_smem[256]` (the running fp32 accumulator),
+    /// `red_smem[128]` (the dot-product reduction scratch), and the
+    /// four scalars (`m`, `l`, `alpha`, `p`) broadcast from thread 0.
+    /// `head_dim` up to 256 is supported in-place — SD 1.5 uses 40 /
+    /// 80 / 160; SDXL adds 64 / 128.
+    ///
+    /// **Numerical correctness:** matches the unfused cascade within
+    /// `1e-4` abs at fp32 inputs (online-softmax rescale is
+    /// algebraically exact; the fp32 accumulator order differs from
+    /// the cuBLAS strided-batched gemm so individual elements may
+    /// differ by 1 ulp on the order of `1e-7`). The CPU-side cascade
+    /// reference and an equivalence test live in
+    /// `scry_llm::backend::scry_gpu::tests::gpu_fused_attention_*`.
+    ///
+    /// **Kernel signature:** `fused_attention(const float* q, const float* k, const float* v, float* out, unsigned int n_q, unsigned int n_kv, unsigned int d, float scale)`
+    /// where each tensor is `[num_heads, *, d]` row-major (stride
+    /// derived from `n_q` / `n_kv` and `d` inside the kernel).
+    /// **Block size:** `(128, 1, 1)`.
+    #[cfg(feature = "cuda")]
+    pub const FUSED_ATTENTION_CUDA: &str = "\
+extern \"C\" __global__ void fused_attention(
+    const float* q, const float* k, const float* v, float* out,
+    unsigned int n_q, unsigned int n_kv, unsigned int d, float scale
+) {
+    __shared__ float q_smem[256];
+    __shared__ float o_smem[256];
+    __shared__ float red_smem[128];
+    __shared__ float m_sh;
+    __shared__ float l_sh;
+    __shared__ float alpha_sh;
+    __shared__ float p_sh;
+
+    unsigned int head = blockIdx.y;
+    unsigned int q_row = blockIdx.x;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    unsigned int qstride_per_head = n_q * d;
+    unsigned int kvstride_per_head = n_kv * d;
+    const float* q_ptr = q + head * qstride_per_head + q_row * d;
+    const float* k_head = k + head * kvstride_per_head;
+    const float* v_head = v + head * kvstride_per_head;
+    float* o_ptr = out + head * qstride_per_head + q_row * d;
+
+    // Load Q row into shared; init the fp32 accumulator to zero.
+    for (unsigned int i = tid; i < d; i += bs) {
+        q_smem[i] = q_ptr[i];
+        o_smem[i] = 0.0f;
+    }
+    if (tid == 0) {
+        m_sh = -3.402823466e38f;
+        l_sh = 0.0f;
+    }
+    __syncthreads();
+
+    // Online-softmax sweep over K/V rows.
+    for (unsigned int ki = 0; ki < n_kv; ki++) {
+        const float* k_ptr = k_head + ki * d;
+        const float* v_ptr = v_head + ki * d;
+
+        // Block reduction: dot(q_smem, k_ptr) into red_smem[0].
+        float partial = 0.0f;
+        for (unsigned int i = tid; i < d; i += bs) {
+            partial += q_smem[i] * k_ptr[i];
+        }
+        red_smem[tid] = partial;
+        __syncthreads();
+        for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+            if (tid < s) red_smem[tid] += red_smem[tid + s];
+            __syncthreads();
+        }
+        float score = red_smem[0] * scale;
+
+        // Online-softmax update — done by tid 0, broadcast to the rest
+        // of the block via `alpha_sh` / `p_sh`.
+        if (tid == 0) {
+            float m_old = m_sh;
+            float m_new = fmaxf(m_old, score);
+            alpha_sh = expf(m_old - m_new);
+            p_sh = expf(score - m_new);
+            l_sh = l_sh * alpha_sh + p_sh;
+            m_sh = m_new;
+        }
+        __syncthreads();
+
+        // Rescale the running output and add the new V row weighted by p.
+        float alpha = alpha_sh;
+        float p = p_sh;
+        for (unsigned int i = tid; i < d; i += bs) {
+            o_smem[i] = o_smem[i] * alpha + p * v_ptr[i];
+        }
+        __syncthreads();
+    }
+
+    // Final normalize and write back.
+    float inv_l = 1.0f / l_sh;
+    for (unsigned int i = tid; i < d; i += bs) {
+        o_ptr[i] = o_smem[i] * inv_l;
+    }
+}";
+
+    /// Fused multi-head attention via tensor cores — `head_dim = 80`
+    /// specialization (M9g v2).
+    ///
+    /// FlashAttention-2-style forward: tiles Q in blocks of 16 rows,
+    /// streams K/V in blocks of 16 rows, keeps the running output and
+    /// online-softmax (m, l) state in shared memory across the K-loop,
+    /// and writes the final normalized output once at the end. Same
+    /// math as [`FUSED_ATTENTION_CUDA`] but the QK^T and PV matmuls
+    /// run on bf16 tensor cores via `<mma.h>` WMMA fragments; that's
+    /// the lever the v1 kernel was missing per
+    /// `crates/scry-diffusion/HANDOFF.md#M9g`.
+    ///
+    /// **Inputs:** Q, K, V are `__nv_bfloat16`, layout `[num_heads, *, 80]`
+    /// row-major; the cast from f32 happens in the caller (matches the
+    /// `gpu_matmul_strided_batched_persistent_bf16` pattern). Output is
+    /// f32, layout `[num_heads, n_q, 80]`. `n_q` and `n_kv` may be
+    /// non-multiples of the tile sizes — partial tiles are masked.
+    ///
+    /// **Numerical correctness:** matches the unfused bf16 cascade
+    /// (Q@K^T then scaled_softmax then P@V, all bf16-input) within
+    /// the same envelope as `gpu_matmul_strided_batched_persistent_bf16`
+    /// — fp32 accumulators on both matmuls, bf16 mma rounding only on
+    /// the products.
+    ///
+    /// **Kernel signature:** `fused_attention_tc_d80(const __nv_bfloat16* q, const __nv_bfloat16* k, const __nv_bfloat16* v, float* out, unsigned int n_q, unsigned int n_kv, float scale)`
+    ///
+    /// **Block size:** `(32, 1, 1)` — single warp per block (first cut;
+    /// 4-warp variants are a future expansion).
+    /// **Grid:** `((n_q + 15) / 16, num_heads, 1)`.
+    /// **Shared memory:** static, ~14.5 KiB.
+    /// **Required arch:** `compute_80` or higher (bf16 WMMA fragments).
+    #[cfg(feature = "cuda")]
+    pub const FUSED_ATTENTION_TC_D80_CUDA: &str = "\
+#include <mma.h>
+#include <cuda_bf16.h>
+
+using namespace nvcuda;
+
+#define D 80
+#define BR 16
+#define BC 16
+
+extern \"C\" __global__ void fused_attention_tc_d80(
+    const __nv_bfloat16* __restrict__ q,
+    const __nv_bfloat16* __restrict__ k,
+    const __nv_bfloat16* __restrict__ v,
+    float* __restrict__ out,
+    unsigned int n_q,
+    unsigned int n_kv,
+    float scale
+) {
+    __shared__ __nv_bfloat16 q_smem[BR * D];
+    __shared__ __nv_bfloat16 k_smem[BC * D];
+    __shared__ __nv_bfloat16 v_smem[BC * D];
+    __shared__ float s_smem[BR * BC];
+    __shared__ __nv_bfloat16 p_smem[BR * BC];
+    __shared__ float o_smem[BR * D];
+    __shared__ float m_smem[BR];
+    __shared__ float l_smem[BR];
+
+    unsigned int head = blockIdx.y;
+    unsigned int q_tile = blockIdx.x;
+    unsigned int q_start = q_tile * BR;
+    unsigned int tid = threadIdx.x;
+    if (q_start >= n_q) return;
+
+    const __nv_bfloat16* q_head = q + head * n_q * D;
+    const __nv_bfloat16* k_head = k + head * n_kv * D;
+    const __nv_bfloat16* v_head = v + head * n_kv * D;
+    float* out_head = out + head * n_q * D;
+
+    // Load Q tile [BR x D]; pad out-of-range rows to zero so they
+    // don't poison the WMMA fragment loads.
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        unsigned int row = i / D;
+        unsigned int col = i % D;
+        q_smem[i] = (q_start + row < n_q)
+            ? q_head[(q_start + row) * D + col]
+            : __float2bfloat16(0.0f);
+    }
+    if (tid < BR) {
+        m_smem[tid] = -3.402823466e38f;
+        l_smem[tid] = 0.0f;
+    }
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        o_smem[i] = 0.0f;
+    }
+    __syncwarp();
+
+    // Q stays in shared memory for the whole K-loop. We rebuild
+    // q_frag fragments per K-iter (cheap; the cost is the loads from
+    // smem, which are fast). Doing it this way avoids holding 5
+    // fragments in registers across the loop, which inflates register
+    // pressure and limits occupancy.
+
+    for (unsigned int kv_start = 0; kv_start < n_kv; kv_start += BC) {
+        unsigned int kv_rem = (n_kv - kv_start < BC) ? (n_kv - kv_start) : BC;
+
+        // Cooperatively load K and V tiles. Out-of-range rows are
+        // zeroed; we'll mask the score columns to -inf for those.
+        for (unsigned int i = tid; i < BC * D; i += 32) {
+            unsigned int row = i / D;
+            unsigned int col = i % D;
+            __nv_bfloat16 kk = (row < kv_rem)
+                ? k_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            __nv_bfloat16 vv = (row < kv_rem)
+                ? v_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            k_smem[i] = kk;
+            v_smem[i] = vv;
+        }
+        __syncwarp();
+
+        // S = Q @ K^T using WMMA. Q is row_major [BR x D], K is
+        // row_major [BC x D]; we want S = Q (BR x D) * K^T (D x BC).
+        // matrix_b col_major with leading dim D interprets the K rows
+        // as the columns of the B operand, which is exactly K^T.
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> s_frag;
+        wmma::fill_fragment(s_frag, 0.0f);
+        for (int kc = 0; kc < D / 16; kc++) {
+            wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> q_frag;
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::col_major> k_frag;
+            wmma::load_matrix_sync(q_frag, q_smem + kc * 16, D);
+            wmma::load_matrix_sync(k_frag, k_smem + kc * 16, D);
+            wmma::mma_sync(s_frag, q_frag, k_frag, s_frag);
+        }
+        // D = 80 = 5 * 16 exactly, so no tail remainder for D.
+
+        wmma::store_matrix_sync(s_smem, s_frag, BC, wmma::mem_row_major);
+        __syncwarp();
+
+        // Apply scale and mask out-of-range K cols to -inf.
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            unsigned int col = i % BC;
+            s_smem[i] = (col < kv_rem)
+                ? s_smem[i] * scale
+                : -3.402823466e38f;
+        }
+        __syncwarp();
+
+        // Online softmax — one Q row per lane (lanes 0..BR-1; lanes
+        // BR..31 idle here). Updates m, l, scales O in place, and
+        // overwrites s_smem with the post-softmax probabilities P.
+        if (tid < BR) {
+            float m_old = m_smem[tid];
+            float row_max = m_old;
+            for (int c = 0; c < BC; c++) {
+                row_max = fmaxf(row_max, s_smem[tid * BC + c]);
+            }
+            float m_new = row_max;
+            float alpha = expf(m_old - m_new);
+            float row_sum = 0.0f;
+            for (int c = 0; c < BC; c++) {
+                float p = expf(s_smem[tid * BC + c] - m_new);
+                s_smem[tid * BC + c] = p;
+                row_sum += p;
+            }
+            m_smem[tid] = m_new;
+            l_smem[tid] = alpha * l_smem[tid] + row_sum;
+            for (int d = 0; d < D; d++) {
+                o_smem[tid * D + d] *= alpha;
+            }
+        }
+        __syncwarp();
+
+        // Cast P (fp32) to bf16 for the second mma.
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            p_smem[i] = __float2bfloat16(s_smem[i]);
+        }
+        __syncwarp();
+
+        // O += P @ V. P is row_major [BR x BC], V is row_major [BC x D];
+        // matrix_a row_major with leading dim BC for P, matrix_b
+        // row_major with leading dim D for V. The accumulator is
+        // pre-loaded from o_smem so we accumulate into the running O.
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> p_frag;
+        wmma::load_matrix_sync(p_frag, p_smem, BC);
+        for (int nc = 0; nc < D / 16; nc++) {
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::row_major> v_frag;
+            wmma::fragment<wmma::accumulator, 16, 16, 16, float> o_frag;
+            wmma::load_matrix_sync(v_frag, v_smem + nc * 16, D);
+            wmma::load_matrix_sync(o_frag, o_smem + nc * 16, D, wmma::mem_row_major);
+            wmma::mma_sync(o_frag, p_frag, v_frag, o_frag);
+            wmma::store_matrix_sync(o_smem + nc * 16, o_frag, D, wmma::mem_row_major);
+        }
+        __syncwarp();
+    }
+
+    // Final normalize: O /= l. Lanes 0..BR-1 own one row each.
+    if (tid < BR) {
+        float inv_l = 1.0f / l_smem[tid];
+        for (int d = 0; d < D; d++) {
+            o_smem[tid * D + d] *= inv_l;
+        }
+    }
+    __syncwarp();
+
+    // Write O to global; gate on q_start + row < n_q to handle
+    // partial Q tiles.
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        unsigned int row = i / D;
+        unsigned int col = i % D;
+        if (q_start + row < n_q) {
+            out_head[(q_start + row) * D + col] = o_smem[i];
+        }
+    }
+}";
+
     /// Row-wise layer normalization with affine gamma/beta.
     ///
     /// For an input tensor reshaped as `[n_rows, d]`, computes

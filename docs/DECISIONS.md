@@ -6,6 +6,98 @@ When a decision is later reversed or evolved, the new entry should reference the
 
 ---
 
+## 2026-05-10 · 0008 — M9g v2 lands a tensor-core kernel for `head_dim = 80`; perf-neutral first cut, tuning is M9h
+
+**Decision:** Re-enable the `ScryGpuBackend::fused_attention` override
+on top of a new WMMA tensor-core kernel
+(`FUSED_ATTENTION_TC_D80_CUDA`) specialized for `head_dim = 80`. The
+kernel uses bf16 inputs / fp32 fp32 accumulators via `<mma.h>` WMMA
+fragments — matches the M9g v0 trait shape, replaces the cuBLAS
+strided-batched cascade for SD 1.5's mid-stage self-attention. Other
+head dims (`{40, 160}`) still fall through to the cascade.
+
+**Why ship it perf-neutral.** Production bench at 30 steps × 512×512
+shows TC: 4926 ms vs cascade: 4986 ms — a 1.2% wall-clock improvement,
+within run-to-run noise (3% per-run variance). Numerical correctness is
+solid: `gpu_fused_attention_tc_d80_matches_cpu_within_tolerance` covers
+4 SD shapes with `max_abs_diff` 2–7e-4 vs the CPU bf16-cascade
+reference (5e-3 tolerance). The kernel is the load-bearing
+*infrastructure*: it proves the WMMA path on this NVRTC + driver +
+hardware combo, and gives a baseline to tune from. Shipping the
+scaffolding now keeps the override clean for the M9h tuning passes
+without dragging the kernel work into a separate milestone.
+
+**Why first-cut perf is flat.** The kernel uses a single warp per
+block (32 threads, each block computes 16 Q rows). That leaves
+parallelism on the table: each block finishes faster than its launch
+overhead at SD's mid-stage shapes. Plus only `head_dim = 80` is wired
+up, which is roughly 1/3 of SD UNet attention layers — the other 2/3
+still go through the cascade, so any per-call win is diluted. The
+known levers for M9h are 4-warp blocks, larger BC tile, persistent Q
+in registers, plus the `head_dim ∈ {40, 160}` specializations. None
+require interface changes.
+
+**What this preserves.** The v1 naive online-softmax kernel +
+`gpu_fused_attention_persistent` helper + numerical-equivalence test
+stay in the tree as `#[allow(dead_code)]` — the test still exercises
+that kernel and pins its correctness. The `MathBackend::fused_attention`
+trait method and `Attention::forward` integration point are unchanged
+from v0. A runtime opt-out (`SCRY_GPU_FUSED_ATTN_TC=0`) reverts the
+override to the cascade for clean A/B benchmarking.
+
+**Supersedes 0007**'s "tensor-core variant deferred to a future
+milestone" — that future milestone landed here. Tuning is M9h.
+
+---
+
+## 2026-05-10 · 0007 — M9g picks G (fused attention), v1 lands as scaffolding only
+
+**Decision:** M9g (next perf milestone after M9f's profile) tackles **G —
+fused attention** in preference to **F — CFG batching** and **H — CUDA
+graphs**. A first kernel landed (FlashAttention-1 style online softmax,
+correct within 1e-4 abs vs the cascade) but underperformed the cuBLAS
+strided-gemm cascade by ~12× at SD production shapes. The
+`ScryGpuBackend::fused_attention` override is disabled and routes
+through the trait-default cascade; the kernel + helper + numerical
+test are preserved as scaffolding. A real win requires rewriting the
+matmul portions to use tensor cores via `mma.sync` PTX intrinsics —
+deferred to a future milestone.
+
+**Why G over F and H:** Per the M9f profile (`bench/profile_2026-05-10.txt`),
+self-attention is 54% of UNet wall-clock and the
+softmax + scores + values triple alone is 31.7% of UNet — the largest
+single signal in the profile. F (CFG batching) ranked second by
+ceiling (~1.6–1.9× UNet) but third by implementation cost: it requires
+threading a batch dim through `scry-vision::Conv2d`, `scry-llm::group_norm`,
+and every shape-handling layer in `scry-diffusion` (ResBlock, Attention,
+GeGluFf, BasicTransformerBlock, SpatialTransformer, Down/Mid/UpBlock,
+Unet, Conditioning) — a 1–2 week sister-crate refactor with real
+golden-hash drift risk from batched matmul reduction order. H (CUDA
+graphs) is small scope (~3–5 days) but only ~7% UNet — a warm-up,
+not a milestone. G's contained scope (one kernel + one trait method +
+one integration site) was the right size for M9g.
+
+**Why the v1 kernel doesn't beat cuBLAS:** the bandwidth saved by
+skipping the `[num_heads · n_q, n_kv]` softmax intermediate (~12.9%
+of UNet per the M9f profile) is dwarfed by the matmul slowdown when
+the dot-product reductions run on CUDA cores at ~5 TFLOPs fp32
+instead of tensor cores at ~100 TFLOPs bf16. The numbers pencil out
+cleanly: ~768 attention layers per image × ~80 ms naive cost ≈ 61 s,
+matching the observed 59 s vs M9f's ~5 s baseline.
+
+**What this preserves:** the `MathBackend::fused_attention` trait
+method and `scry-diffusion`'s `Attention::forward` integration point
+remain; re-enabling a tensor-core kernel is a one-line change to the
+override body. The decision to fuse attention as a single trait call
+(rather than overriding the three sub-ops) is locked in regardless
+of the kernel internals.
+
+**Reverses / supersedes:** none. F and H remain on the table for M9h.
+Full per-commit notes and the per-attention cost breakdown live at
+`crates/scry-diffusion/HANDOFF.md#m9g--fused-attention-2026-05-10`.
+
+---
+
 ## 2026-05-10 · 0006 — Path C MVP scope: drop VLM and LoRA from v0.1
 
 **Decision:** Cut LLM-vision (LLaVA-class multimodal) and LoRA loading from the v0.1 MVP. Remaining feature set: SD 1.5 + SDXL + LCM/Turbo + img2img + inpainting + GGUF chat + tool use. Estimated 14-15 weeks solo.

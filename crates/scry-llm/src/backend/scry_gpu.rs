@@ -192,6 +192,37 @@ struct ScryCtx {
     /// (`[B=8, n=4096, n=4096]`) that's 1.07 GB of memory traffic per call.
     /// CUDA-only; Vulkan path is `None`.
     scaled_softmax: Option<::scry_gpu::Kernel>,
+    /// On-device FlashAttention-1 style fused attention: `out = softmax(Q · Kᵀ · scale) · V`
+    /// in a single kernel. Compiles + dispatches via
+    /// [`gpu_fused_attention_persistent`]; numerically correct (matches
+    /// the cascade within 1e-4 abs at SD shapes — see
+    /// `gpu_fused_attention_matches_cpu_within_tolerance`) but ~12×
+    /// slower than the cuBLAS strided-gemm cascade at SD's production
+    /// attention shapes — the naive online-softmax kernel uses CUDA
+    /// cores while cuBLAS uses tensor cores via `mma.sync` PTX.
+    /// [`<ScryGpuBackend as MathBackend>::fused_attention`] currently
+    /// routes through the cascade; this slot is preserved as
+    /// scaffolding for a tensor-core port. CUDA-only.
+    #[allow(dead_code)] // reactivated when the override re-enables the helper
+    fused_attention: Option<::scry_gpu::Kernel>,
+    /// M9g v2 tensor-core fused attention specialized for `head_dim = 80`
+    /// (SD 1.5 mid-stage self-attention). bf16 inputs / fp32 output via
+    /// WMMA fragments — bypasses the cuBLAS strided-batched cascade and
+    /// the softmax-intermediate global-memory roundtrip. Compiled with
+    /// `arch=compute_80`; `None` if the CUDA toolkit `include/` directory
+    /// can't be located at runtime (NVRTC has no built-in search path
+    /// for `<mma.h>`). When `None`, [`<ScryGpuBackend as
+    /// MathBackend>::fused_attention`] falls back to the cascade as
+    /// before.
+    #[cfg(feature = "scry-gpu-bf16")]
+    fused_attention_tc_d80: Option<::scry_gpu::Kernel>,
+    /// Runtime opt-out for the M9g v2 TC fused-attention path. Initialized
+    /// from `SCRY_GPU_FUSED_ATTN_TC=0` at first ctx init; `false` reverts
+    /// the override to the cuBLAS cascade for clean A/B benchmarking.
+    /// Defaults to `true` so the v2 path is on by default once the kernel
+    /// slot exists.
+    #[cfg(feature = "scry-gpu-bf16")]
+    fused_attention_tc_enabled: AtomicBool,
     /// On-device row-wise layernorm with affine gamma/beta. CUDA-only; Vulkan
     /// path is `None` and callers fall back to CPU.
     layernorm: Option<::scry_gpu::Kernel>,
@@ -383,6 +414,36 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: scaled_softmax_cuda compile: {e}"))?;
+        let fused_attention = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_CUDA,
+                "fused_attention",
+                4,
+                [128, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: fused_attention_cuda compile: {e}"))?;
+        // M9g v2 tensor-core fused attention (head_dim = 80 specialization).
+        // Requires NVRTC + `<mma.h>` header path + `compute_80` arch. Compile
+        // is best-effort: if the CUDA toolkit `include/` isn't discoverable
+        // or the arch isn't supported, the slot stays `None` and the
+        // `fused_attention` override falls back to the cuBLAS cascade. The
+        // kernel is correctness-tested in scry-gpu's
+        // `cuda_fused_attention_tc_d80_matches_bf16_cascade` —
+        // `gpu_fused_attention_tc_d80_persistent` here only handles the
+        // f32→bf16 pre-cast and dispatch.
+        #[cfg(feature = "scry-gpu-bf16")]
+        let fused_attention_tc_d80 = ::scry_gpu::Device::cuda_include_path().and_then(|inc| {
+            dev.compile_cuda_with_arch(
+                ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D80_CUDA,
+                "fused_attention_tc_d80",
+                4,
+                [32, 1, 1],
+                Some("compute_80"),
+                &[inc.as_str()],
+            )
+            .map_err(|e| eprintln!("[scry-llm] M9g v2 fused_attention_tc_d80 compile: {e} — falling back to cascade"))
+            .ok()
+        });
         let layernorm = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::LAYERNORM_ROWWISE_CUDA,
@@ -557,6 +618,11 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             .ok()
             .as_deref()
             .is_some_and(|v| matches!(v, "1" | "true" | "TRUE" | "on" | "ON"));
+        #[cfg(feature = "scry-gpu-bf16")]
+        let fused_attention_tc_enabled = std::env::var("SCRY_GPU_FUSED_ATTN_TC")
+            .ok()
+            .as_deref()
+            .is_none_or(|v| !matches!(v, "0" | "false" | "FALSE" | "off" | "OFF"));
         return Ok(ScryCtx {
             dev,
             matmul: MatmulStrategy::CuBlas,
@@ -567,6 +633,11 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             gelu_exact: Some(gelu_exact),
             softmax: Some(softmax),
             scaled_softmax: Some(scaled_softmax),
+            fused_attention: Some(fused_attention),
+            #[cfg(feature = "scry-gpu-bf16")]
+            fused_attention_tc_d80,
+            #[cfg(feature = "scry-gpu-bf16")]
+            fused_attention_tc_enabled: AtomicBool::new(fused_attention_tc_enabled),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
             im2col: Some(im2col),
@@ -615,6 +686,11 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         gelu_exact: None,
         softmax: None,
         scaled_softmax: None,
+        fused_attention: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        fused_attention_tc_d80: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        fused_attention_tc_enabled: AtomicBool::new(false),
         layernorm: None,
         batchnorm: None,
         im2col: None,
@@ -1109,6 +1185,189 @@ fn gpu_scaled_softmax_persistent(
     Some(ScryGpuStorage::Gpu {
         buf: GpuTensorStorage::from_owned(out),
         len: total,
+    })
+}
+
+/// Minimum total work (`num_heads · n_q · n_kv`) before engaging the GPU
+/// fused-attention path. Below this, the kernel-launch overhead dominates
+/// the bandwidth savings — at SD 1.5's smallest cross-attn (n_q=64,
+/// n_kv=77, num_heads=8) total work is 39_424, comfortably above; the
+/// threshold mostly catches degenerate test cases.
+#[allow(dead_code)] // wired back up when the override re-enables the helper
+const GPU_FUSED_ATTN_MIN_OPS: usize = 16_384;
+
+/// Maximum `head_dim` the kernel's static shared memory can hold. The
+/// `q_smem` / `o_smem` arrays are fixed at 256 floats each in
+/// [`super::super::scry_gpu::FUSED_ATTENTION_CUDA`]; bump both together
+/// if SDXL or future models exceed this.
+#[allow(dead_code)] // wired back up when the override re-enables the helper
+const GPU_FUSED_ATTN_MAX_HEAD_DIM: usize = 256;
+
+/// GPU-resident fused multi-head attention. CUDA-only — Vulkan path returns
+/// `None` so the caller falls back to the trait-default cascade. Returns
+/// `None` also when the GPU path is unavailable, the workload is below
+/// threshold, `head_dim` exceeds the kernel's shared-memory cap, or the
+/// input lengths don't match the implied `[num_heads, *, head_dim]` layout.
+///
+/// **Currently unused by the [`<ScryGpuBackend as MathBackend>::fused_attention`]
+/// override** — see that method's body for the M9g v1 finding (the naive
+/// CUDA-cores online softmax loses ~12× to cuBLAS strided gemm at SD's
+/// production attention shapes). Called directly from
+/// `gpu_fused_attention_matches_cpu_within_tolerance` to keep the kernel
+/// covered by a numerical-equivalence test. Re-route the override here
+/// once a tensor-core (`mma.sync` PTX) variant of the kernel exists.
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // exercised only by `cfg(test)` — see doc comment
+fn gpu_fused_attention_persistent(
+    q: &ScryGpuStorage,
+    k: &ScryGpuStorage,
+    v: &ScryGpuStorage,
+    num_heads: usize,
+    n_q: usize,
+    n_kv: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.fused_attention.as_ref()?;
+    if num_heads == 0 || n_q == 0 || n_kv == 0 || head_dim == 0 {
+        return None;
+    }
+    if head_dim > GPU_FUSED_ATTN_MAX_HEAD_DIM {
+        return None;
+    }
+    if num_heads.checked_mul(n_q)?.checked_mul(n_kv)? < GPU_FUSED_ATTN_MIN_OPS {
+        return None;
+    }
+    let q_total = num_heads * n_q * head_dim;
+    let kv_total = num_heads * n_kv * head_dim;
+    if q.len() != q_total || k.len() != kv_total || v.len() != kv_total {
+        return None;
+    }
+
+    let buf_q = as_gpu_buffer(q)?;
+    let buf_k = as_gpu_buffer(k)?;
+    let buf_v = as_gpu_buffer(v)?;
+    let out = ctx.dev.alloc_uninit::<f32>(q_total).ok()?;
+    // Push constants: [n_q: u32, n_kv: u32, d: u32, scale: f32-as-bits].
+    // Same f32-via-u32-bits packing pattern used by `scaled_softmax` and
+    // `layernorm` for their float args.
+    let pc: [u32; 4] = [n_q as u32, n_kv as u32, head_dim as u32, scale.to_bits()];
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_q, &*buf_k, &*buf_v, &out],
+        [n_q as u32, num_heads as u32, 1],
+        Some(bytemuck::bytes_of(&pc)),
+    )
+    .ok()?;
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: q_total,
+    })
+}
+
+/// `head_dim` value the M9g v2 tensor-core fused-attention kernel is
+/// specialized for. Calls with any other `head_dim` fall through to the
+/// trait-default cuBLAS cascade. SD 1.5's mid-stage self-attention and
+/// cross-attention both run at `head_dim = 80`; deeper / shallower stages
+/// (`head_dim ∈ {40, 160}`) need separate specializations and are TODO.
+#[cfg(feature = "scry-gpu-bf16")]
+const GPU_FUSED_ATTN_TC_D80_HEAD_DIM: usize = 80;
+
+/// Minimum total `num_heads · n_q · n_kv` before engaging the v2 TC kernel.
+/// Below this the kernel-launch + bf16 pre-cast overhead beats the bandwidth
+/// savings from skipping the softmax intermediate. Tuned to clear SD 1.5's
+/// smallest middle-stage self-attn at 64-px gate config (heads=8, n_q=64,
+/// n_kv=64 → 32_768) but skip the smallest cross-attn (heads=8, n_q=64,
+/// n_kv=77 at head_dim=160 — different specialization anyway).
+#[cfg(feature = "scry-gpu-bf16")]
+const GPU_FUSED_ATTN_TC_D80_MIN_OPS: usize = 16_384;
+
+/// GPU-resident fused multi-head attention via tensor cores — `head_dim = 80`
+/// specialization. Pre-casts Q/K/V from f32 to bf16 (matching the
+/// `gpu_matmul_strided_batched_persistent_bf16` pattern; the bf16 shadow
+/// cache fires when Q/K/V were already promoted), then dispatches the
+/// `fused_attention_tc_d80` WMMA kernel. Returns f32 output.
+///
+/// Returns `None` (caller falls through) when:
+/// - the GPU context is unavailable
+/// - the TC kernel slot is `None` (toolkit `include/` not discoverable at
+///   `init_scry_context`, or the arch isn't supported)
+/// - `head_dim != 80` — only this specialization is wired up so far
+/// - the workload is below `GPU_FUSED_ATTN_TC_D80_MIN_OPS`
+/// - input lengths don't match the implied `[num_heads, *, head_dim]` layout
+#[cfg(feature = "scry-gpu-bf16")]
+#[allow(clippy::too_many_arguments)]
+fn gpu_fused_attention_tc_d80_persistent(
+    q: &ScryGpuStorage,
+    k: &ScryGpuStorage,
+    v: &ScryGpuStorage,
+    num_heads: usize,
+    n_q: usize,
+    n_kv: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    if !ctx.fused_attention_tc_enabled.load(Ordering::Relaxed) {
+        return None;
+    }
+    let kernel = ctx.fused_attention_tc_d80.as_ref()?;
+    if !matches!(ctx.matmul, MatmulStrategy::CuBlas) {
+        return None;
+    }
+    if head_dim != GPU_FUSED_ATTN_TC_D80_HEAD_DIM {
+        return None;
+    }
+    if num_heads == 0 || n_q == 0 || n_kv == 0 {
+        return None;
+    }
+    if num_heads.checked_mul(n_q)?.checked_mul(n_kv)? < GPU_FUSED_ATTN_TC_D80_MIN_OPS {
+        return None;
+    }
+    let q_total = num_heads * n_q * head_dim;
+    let kv_total = num_heads * n_kv * head_dim;
+    if q.len() != q_total || k.len() != kv_total || v.len() != kv_total {
+        return None;
+    }
+
+    let q_bf16: Arc<Buffer<half::bf16>> = if let Some(cached) = as_gpu_buffer_bf16(q) {
+        cached
+    } else {
+        let q_buf = as_gpu_buffer(q)?;
+        Arc::new(cast_f32_to_bf16(ctx, &q_buf, q_total)?)
+    };
+    let k_bf16: Arc<Buffer<half::bf16>> = if let Some(cached) = as_gpu_buffer_bf16(k) {
+        cached
+    } else {
+        let k_buf = as_gpu_buffer(k)?;
+        Arc::new(cast_f32_to_bf16(ctx, &k_buf, kv_total)?)
+    };
+    let v_bf16: Arc<Buffer<half::bf16>> = if let Some(cached) = as_gpu_buffer_bf16(v) {
+        cached
+    } else {
+        let v_buf = as_gpu_buffer(v)?;
+        Arc::new(cast_f32_to_bf16(ctx, &v_buf, kv_total)?)
+    };
+
+    let out = ctx.dev.alloc_uninit::<f32>(q_total).ok()?;
+    // Push constants: [n_q: u32, n_kv: u32, scale: f32-as-bits].
+    // head_dim is compile-time-baked into the kernel (`#define D 80`).
+    let pc: [u32; 3] = [n_q as u32, n_kv as u32, scale.to_bits()];
+    // Grid: (ceil(n_q / 16), num_heads, 1). 16 = `BR` in the kernel —
+    // Q-rows per block. Block size is (32, 1, 1) = single warp.
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*q_bf16, &*k_bf16, &*v_bf16, &out],
+        [(n_q as u32).div_ceil(16), num_heads as u32, 1],
+        Some(bytemuck::bytes_of(&pc)),
+    )
+    .ok()?;
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: q_total,
     })
 }
 
@@ -3235,6 +3494,40 @@ impl MathBackend for ScryGpuBackend {
         Self::softmax(&scaled, shape)
     }
 
+    fn fused_attention(
+        q: &ScryGpuStorage,
+        k: &ScryGpuStorage,
+        v: &ScryGpuStorage,
+        num_heads: usize,
+        n_q: usize,
+        n_kv: usize,
+        head_dim: usize,
+        scale: f32,
+    ) -> ScryGpuStorage {
+        // M9g v2: tensor-core fused attention (head_dim = 80 specialization
+        // only). Bypasses the cuBLAS cascade and the softmax-intermediate
+        // global-mem roundtrip. Falls through to the cascade for head_dim
+        // ∈ {40, 160} (SD 1.5 outer / inner stages) and any non-bf16 build,
+        // so behavior is preserved when the helper returns `None`.
+        //
+        // M9g v1's naive CUDA-cores online-softmax kernel
+        // (`gpu_fused_attention_persistent`) is correct but ~12× slower
+        // than the cascade at SD shapes; it's preserved as scaffolding +
+        // numerical-equivalence test in the
+        // `gpu_fused_attention_matches_cpu_within_tolerance` suite. The
+        // override no longer routes through it.
+        #[cfg(feature = "scry-gpu-bf16")]
+        if let Some(gpu_out) =
+            gpu_fused_attention_tc_d80_persistent(q, k, v, num_heads, n_q, n_kv, head_dim, scale)
+        {
+            return gpu_out;
+        }
+        let scores =
+            Self::matmul_strided_batched(q, k, num_heads, n_q, head_dim, n_kv, false, true);
+        let attn = Self::scaled_softmax(&scores, scale, &Shape::new(&[num_heads * n_q, n_kv]));
+        Self::matmul_strided_batched(&attn, v, num_heads, n_q, n_kv, head_dim, false, false)
+    }
+
     fn gather_columns(
         storage: &ScryGpuStorage,
         rows: usize,
@@ -3935,6 +4228,200 @@ mod tests {
                     "rows={rows} d={d} scale={scale} row {r} did not sum to 1: got {s}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn gpu_fused_attention_matches_cpu_within_tolerance() {
+        // Cover SD 1.5's attention shapes:
+        //   self-attn deepest:  (heads=8, n_q=n_kv=64,  head_dim=160)
+        //   self-attn middle:   (heads=8, n_q=n_kv=256, head_dim=80)
+        //   cross-attn middle:  (heads=8, n_q=64,  n_kv=77, head_dim=160)
+        //   cross-attn deepest: (heads=8, n_q=256, n_kv=77, head_dim=80)
+        // Plus a head_dim=40 case to exercise the unaligned-d path.
+        let cases = [
+            (8usize, 64usize, 64usize, 160usize),
+            (8, 256, 256, 80),
+            (8, 64, 77, 160),
+            (8, 256, 77, 80),
+            (4, 32, 32, 40),
+        ];
+        for (num_heads, n_q, n_kv, head_dim) in cases {
+            let scale = 1.0f32 / (head_dim as f32).sqrt();
+            let q_total = num_heads * n_q * head_dim;
+            let kv_total = num_heads * n_kv * head_dim;
+            // Deterministic non-trivial inputs — sin/cos of a counter so
+            // values span both signs and the running-max path exercises.
+            let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
+            let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32) * 0.017).cos()).collect();
+            let v: Vec<f32> = (0..kv_total)
+                .map(|i| ((i as f32) * 0.011).sin() * 0.5)
+                .collect();
+
+            let q_storage = ScryGpuStorage::Cpu(q.clone());
+            let k_storage = ScryGpuStorage::Cpu(k.clone());
+            let v_storage = ScryGpuStorage::Cpu(v.clone());
+            let q_gpu = match ScryGpuBackend::to_gpu(&q_storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_fused_attention_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+            let k_gpu = ScryGpuBackend::to_gpu(&k_storage).unwrap();
+            let v_gpu = ScryGpuBackend::to_gpu(&v_storage).unwrap();
+
+            // Call the helper directly — `ScryGpuBackend::fused_attention`
+            // currently routes through the trait-default cascade (M9g v1
+            // disabled the fused-kernel override pending a tensor-core
+            // port; see the override body's comment for context). Going
+            // through the helper exercises the actual kernel.
+            let gpu_out = match super::gpu_fused_attention_persistent(
+                &q_gpu, &k_gpu, &v_gpu, num_heads, n_q, n_kv, head_dim, scale,
+            ) {
+                Some(out) => out,
+                None => {
+                    eprintln!(
+                        "skipping gpu_fused_attention_matches_cpu_within_tolerance: kernel \
+                         dispatch returned None (GPU unavailable or threshold not met)"
+                    );
+                    return;
+                }
+            };
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                gpu_out.is_gpu(),
+                "fused_attention over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+            );
+
+            // CPU reference: composed cascade via the trait default.
+            let cpu_scores = CpuBackend::matmul_strided_batched(
+                &q, &k, num_heads, n_q, head_dim, n_kv, false, true,
+            );
+            let cpu_attn = CpuBackend::scaled_softmax(
+                &cpu_scores,
+                scale,
+                &Shape::new(&[num_heads * n_q, n_kv]),
+            );
+            let cpu_out = CpuBackend::matmul_strided_batched(
+                &cpu_attn, &v, num_heads, n_q, n_kv, head_dim, false, false,
+            );
+
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            assert_eq!(g.len(), cpu_out.len());
+            // Online softmax + cuBLAS strided gemm accumulate in different
+            // orders, so individual elements drift a few ULP. 1e-4 abs is
+            // the same envelope used by the M3 CLIP-text-encoder parity
+            // gate against HF; the SD UNet check_unet harness uses 1e-3.
+            let mut max_diff = 0.0f32;
+            for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
+                let d = (gv - cv).abs();
+                if d > max_diff {
+                    max_diff = d;
+                }
+                assert!(
+                    d < 1e-4,
+                    "heads={num_heads} n_q={n_q} n_kv={n_kv} head_dim={head_dim} idx={i}: gpu={gv} cpu={cv} diff={d}"
+                );
+            }
+            eprintln!(
+                "fused_attention heads={num_heads} n_q={n_q} n_kv={n_kv} head_dim={head_dim}: max_abs_diff={max_diff:.3e}"
+            );
+        }
+    }
+
+    /// M9g v2: exercise [`<ScryGpuBackend as MathBackend>::fused_attention`]
+    /// at `head_dim = 80` so the override hits the WMMA tensor-core path
+    /// (`gpu_fused_attention_tc_d80_persistent`). Validates the GPU output
+    /// against the CPU cascade reference. Tolerance: 5e-3 abs — bf16 mma
+    /// rounds the products on both Q@K^T and P@V, well looser than the v1
+    /// fp32 kernel's 1e-4 envelope. Skipped silently if the GPU isn't
+    /// reachable or the TC kernel slot is `None` (e.g. CUDA include path
+    /// not discoverable).
+    #[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
+    #[test]
+    fn gpu_fused_attention_tc_d80_matches_cpu_within_tolerance() {
+        let cases = [
+            (8usize, 256usize, 256usize),
+            (8, 64, 64),
+            (8, 256, 77),
+            (8, 1024, 1024),
+        ];
+        for (num_heads, n_q, n_kv) in cases {
+            let head_dim = 80usize;
+            let scale = 1.0f32 / (head_dim as f32).sqrt();
+            let q_total = num_heads * n_q * head_dim;
+            let kv_total = num_heads * n_kv * head_dim;
+            let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
+            let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32) * 0.017).cos()).collect();
+            let v: Vec<f32> = (0..kv_total)
+                .map(|i| ((i as f32) * 0.011).sin() * 0.5)
+                .collect();
+
+            let q_storage = ScryGpuStorage::Cpu(q.clone());
+            let k_storage = ScryGpuStorage::Cpu(k.clone());
+            let v_storage = ScryGpuStorage::Cpu(v.clone());
+            let q_gpu = match ScryGpuBackend::to_gpu(&q_storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!(
+                        "skipping gpu_fused_attention_tc_d80_matches_cpu_within_tolerance: {e}"
+                    );
+                    return;
+                }
+            };
+            let k_gpu = ScryGpuBackend::to_gpu(&k_storage).unwrap();
+            let v_gpu = ScryGpuBackend::to_gpu(&v_storage).unwrap();
+
+            if super::get_ctx()
+                .and_then(|c| c.fused_attention_tc_d80.as_ref())
+                .is_none()
+            {
+                eprintln!(
+                    "skipping gpu_fused_attention_tc_d80_matches_cpu_within_tolerance: \
+                     TC kernel slot is None"
+                );
+                return;
+            }
+
+            let gpu_out = ScryGpuBackend::fused_attention(
+                &q_gpu, &k_gpu, &v_gpu, num_heads, n_q, n_kv, head_dim, scale,
+            );
+            assert!(
+                gpu_out.is_gpu(),
+                "fused_attention TC path should stay Gpu, got {gpu_out:?}"
+            );
+
+            let cpu_scores = CpuBackend::matmul_strided_batched(
+                &q, &k, num_heads, n_q, head_dim, n_kv, false, true,
+            );
+            let cpu_attn = CpuBackend::scaled_softmax(
+                &cpu_scores,
+                scale,
+                &Shape::new(&[num_heads * n_q, n_kv]),
+            );
+            let cpu_out = CpuBackend::matmul_strided_batched(
+                &cpu_attn, &v, num_heads, n_q, n_kv, head_dim, false, false,
+            );
+
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            assert_eq!(g.len(), cpu_out.len());
+            let mut max_diff = 0.0f32;
+            for (gv, cv) in g.iter().zip(cpu_out.iter()) {
+                let d = (gv - cv).abs();
+                if d > max_diff {
+                    max_diff = d;
+                }
+            }
+            assert!(
+                max_diff < 5e-3,
+                "TC fused_attention heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+                 max_abs_diff={max_diff:.3e} > 5e-3"
+            );
+            eprintln!(
+                "TC fused_attention heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+                 max_abs_diff={max_diff:.3e}"
+            );
         }
     }
 

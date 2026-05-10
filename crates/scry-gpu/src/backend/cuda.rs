@@ -7,7 +7,7 @@
 //! - NVRTC kernel compilation from CUDA C strings
 //! - cuBLAS SGEMM for matmul
 //!
-//! SPIR-V dispatch is not supported — use [`CudaBackend::compile_cuda`] for
+//! SPIR-V dispatch is not supported — use [`CudaBackend::compile_cuda_with_arch`] for
 //! native CUDA kernels, or [`CudaBackend::cublas_matmul`] for matrix multiply.
 
 #[cfg(feature = "cudnn")]
@@ -70,16 +70,26 @@ pub struct CudaBatch {
 impl CudaBackend {
     /// Compile a CUDA C source string into a reusable kernel.
     ///
-    /// Uses NVRTC to compile to PTX, then loads and extracts the named
-    /// entry point function.
-    pub fn compile_cuda(
+    /// `arch` is forwarded to NVRTC as `--gpu-architecture=<arch>`; pass e.g.
+    /// `"compute_80"` to enable Ampere-or-newer features (`<mma.h>` WMMA
+    /// fragments with bf16 inputs require sm_80+). When `None`, NVRTC picks
+    /// its built-in default.
+    ///
+    /// `include_paths` are forwarded as `--include-path=<dir>`; required for
+    /// kernels that pull in CUDA headers like `<mma.h>` (NVRTC has no default
+    /// search list for those).
+    pub fn compile_cuda_with_arch(
         &self,
         source: &str,
         entry_point: &str,
         block_dim: (u32, u32, u32),
+        arch: Option<&'static str>,
+        include_paths: &[&str],
     ) -> Result<CudaKernel> {
         let opts = CompileOptions {
             use_fast_math: Some(true),
+            arch,
+            include_paths: include_paths.iter().map(|s| (*s).to_string()).collect(),
             ..Default::default()
         };
         let ptx = compile_ptx_with_opts(source, opts)

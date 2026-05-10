@@ -631,10 +631,45 @@ impl Device {
         binding_count: usize,
         workgroup_size: [u32; 3],
     ) -> Result<Kernel> {
+        self.compile_cuda_with_arch(
+            source,
+            entry_point,
+            binding_count,
+            workgroup_size,
+            None,
+            &[],
+        )
+    }
+
+    /// Compile a CUDA C kernel source into a reusable [`Kernel`] with an
+    /// explicit virtual architecture and include paths.
+    ///
+    /// Forwards `arch` to NVRTC as `--gpu-architecture=<arch>` and each
+    /// `include_paths` entry as `--include-path=<dir>`. Required for kernels
+    /// that pull in CUDA headers (`<mma.h>`, `<cuda_bf16.h>`) or use Ampere+
+    /// instructions (bf16 WMMA needs `compute_80+`). [`cuda_include_path`]
+    /// discovers the toolkit install dir at runtime.
+    ///
+    /// When `arch` is `None` and `include_paths` is empty, this is equivalent
+    /// to [`Self::compile_cuda`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::compile_cuda`].
+    pub fn compile_cuda_with_arch(
+        &self,
+        source: &str,
+        entry_point: &str,
+        binding_count: usize,
+        workgroup_size: [u32; 3],
+        arch: Option<&'static str>,
+        include_paths: &[&str],
+    ) -> Result<Kernel> {
         match &self.inner {
             DeviceInner::Cuda(b) => {
                 let block_dim = (workgroup_size[0], workgroup_size[1], workgroup_size[2]);
-                let cuda_kernel = b.compile_cuda(source, entry_point, block_dim)?;
+                let cuda_kernel =
+                    b.compile_cuda_with_arch(source, entry_point, block_dim, arch, include_paths)?;
                 Ok(Kernel {
                     inner: BackendKernel::Cuda(cuda_kernel),
                     binding_count,
@@ -647,6 +682,37 @@ impl Device {
                 "compile_cuda requires CUDA backend".into(),
             )),
         }
+    }
+
+    /// Discover the CUDA toolkit's `include/` directory at runtime.
+    ///
+    /// NVRTC has no built-in search list for headers like `<mma.h>` or
+    /// `<cuda_bf16.h>`, so kernels that pull them in must pass the toolkit
+    /// include dir via [`Self::compile_cuda_with_arch`]. Tries the standard
+    /// env vars (`CUDA_PATH`, `CUDA_HOME`) first, then the two well-known
+    /// install prefixes — `/opt/cuda` (Arch convention) and
+    /// `/usr/local/cuda` (NVIDIA installer convention).
+    ///
+    /// Returns `None` if no candidate has an `include/` subdirectory; the
+    /// caller can fall back to a kernel that doesn't need CUDA headers, or
+    /// surface a clearer error than NVRTC's "no directories in search list".
+    #[must_use]
+    pub fn cuda_include_path() -> Option<String> {
+        for var in ["CUDA_PATH", "CUDA_HOME"] {
+            if let Ok(p) = std::env::var(var) {
+                let inc = std::path::Path::new(&p).join("include");
+                if inc.is_dir() {
+                    return Some(inc.to_string_lossy().into_owned());
+                }
+            }
+        }
+        for prefix in ["/opt/cuda", "/usr/local/cuda"] {
+            let inc = std::path::Path::new(prefix).join("include");
+            if inc.is_dir() {
+                return Some(inc.to_string_lossy().into_owned());
+            }
+        }
+        None
     }
 
     /// Run cuBLAS SGEMM: `C = A × B` (row-major `f32` matrices).
