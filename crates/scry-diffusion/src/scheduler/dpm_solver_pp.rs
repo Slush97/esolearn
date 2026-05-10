@@ -419,8 +419,7 @@ mod tests {
         // Diffusers DPM++ leading: step_ratio = num_train // (num_inf + 1) = 32.
         // Trajectory: [961, 929, …, 33] for 30 steps + steps_offset=1.
         // This intentionally differs from DDIM's [958, 925, …, 1].
-        let mut dpm =
-            DpmSolverPpScheduler::<CpuBackend>::new(DpmSolverPpConfig::sd_1_5()).unwrap();
+        let mut dpm = DpmSolverPpScheduler::<CpuBackend>::new(DpmSolverPpConfig::sd_1_5()).unwrap();
         <DpmSolverPpScheduler<CpuBackend> as Scheduler<CpuBackend>>::set_timesteps(&mut dpm, 30)
             .unwrap();
         let expected: [f32; 30] = [

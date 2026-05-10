@@ -53,7 +53,9 @@ const WARMUP: u32 = 3;
 fn cheap_rng(seed: u64) -> impl FnMut() -> f32 {
     let mut state = seed.max(1);
     move || {
-        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         let bits = (state >> 33) as u32;
         #[allow(clippy::cast_precision_loss)]
         {
@@ -185,10 +187,9 @@ fn main() {
     );
     println!();
     println!("== Scheduler::step ==");
-    let (ddim_step, ddim_run) =
-        bench_scheduler::<DdimScheduler, _>("DDIM", || {
-            DdimScheduler::new(DdimConfig::sd_1_5()).unwrap()
-        });
+    let (ddim_step, ddim_run) = bench_scheduler::<DdimScheduler, _>("DDIM", || {
+        DdimScheduler::new(DdimConfig::sd_1_5()).unwrap()
+    });
     let (dpm_step, dpm_run) =
         bench_scheduler::<DpmSolverPpScheduler<Backend>, _>("DPM-Solver++(2M)", || {
             DpmSolverPpScheduler::<Backend>::new(DpmSolverPpConfig::sd_1_5()).unwrap()
@@ -232,6 +233,9 @@ fn main() {
         );
     }
     println!();
-    println!("Verdict: scheduler constant-factor grew (DPM++ ≈ {:.1}× DDIM per step) but is", dpm_p50 / ddim_p50);
+    println!(
+        "Verdict: scheduler constant-factor grew (DPM++ ≈ {:.1}× DDIM per step) but is",
+        dpm_p50 / ddim_p50
+    );
     println!("dwarfed by UNet cost; DPM++'s 1/3 fewer UNet calls wins end-to-end at any realistic UNet ms.");
 }
