@@ -63,8 +63,8 @@ mod e2e {
         }
 
         let tokenizer_path = model_dir().join("tokenizer.json");
-        let tokenizer = WhisperTokenizer::from_file(&tokenizer_path)
-            .expect("Failed to load tokenizer");
+        let tokenizer =
+            WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
 
         // Basic vocab sanity: should have at least 50k tokens
         assert!(
@@ -96,8 +96,8 @@ mod e2e {
             .expect("Failed to load checkpoint");
 
         eprintln!("Loading tokenizer...");
-        let tokenizer = WhisperTokenizer::from_file(&tokenizer_path)
-            .expect("Failed to load tokenizer");
+        let tokenizer =
+            WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
 
         // Generate 1 second of silence, padded to 30s (matching Python Whisper pipeline)
         let samples = vec![0.0f32; WHISPER_SAMPLE_RATE as usize];
@@ -108,10 +108,8 @@ mod e2e {
         let mel = log_mel_spectrogram(&audio_chunk);
 
         // Create input tensor [n_mels, n_frames]
-        let mel_tensor = Tensor::<CpuBackend>::from_vec(
-            mel.data,
-            Shape::new(&[mel.n_mels, mel.n_frames]),
-        );
+        let mel_tensor =
+            Tensor::<CpuBackend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
 
         // Encode
         eprintln!("Encoding...");
@@ -138,7 +136,10 @@ mod e2e {
 
         // For silence, the model should produce something (possibly empty or noise-related)
         // The key validation here is that the pipeline doesn't panic and produces tokens
-        eprintln!("Pipeline completed successfully. {} tokens generated.", tokens.len());
+        eprintln!(
+            "Pipeline completed successfully. {} tokens generated.",
+            tokens.len()
+        );
     }
 
     #[test]
@@ -155,8 +156,8 @@ mod e2e {
 
         let model = load_whisper_checkpoint::<CpuBackend>(&model_path, &config)
             .expect("Failed to load checkpoint");
-        let tokenizer = WhisperTokenizer::from_file(&tokenizer_path)
-            .expect("Failed to load tokenizer");
+        let tokenizer =
+            WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
 
         // Generate 2 seconds of 440Hz sine wave (A4 note), padded to 30s
         let duration_samples = 2 * WHISPER_SAMPLE_RATE as usize;
@@ -169,10 +170,8 @@ mod e2e {
 
         let audio_chunk = pad_or_trim_audio(&samples);
         let mel = log_mel_spectrogram(&audio_chunk);
-        let mel_tensor = Tensor::<CpuBackend>::from_vec(
-            mel.data,
-            Shape::new(&[mel.n_mels, mel.n_frames]),
-        );
+        let mel_tensor =
+            Tensor::<CpuBackend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
 
         let encoder_output = model.encode(&mel_tensor);
 
@@ -181,9 +180,13 @@ mod e2e {
         let enc_min = enc_data.iter().copied().fold(f32::INFINITY, f32::min);
         let enc_max = enc_data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let enc_mean = enc_data.iter().sum::<f32>() / enc_data.len() as f32;
-        let enc_var = enc_data.iter().map(|x| (x - enc_mean).powi(2)).sum::<f32>() / enc_data.len() as f32;
+        let enc_var =
+            enc_data.iter().map(|x| (x - enc_mean).powi(2)).sum::<f32>() / enc_data.len() as f32;
         eprintln!("Encoder output: shape={:?}", encoder_output.shape.dims());
-        eprintln!("  min={enc_min:.4}, max={enc_max:.4}, mean={enc_mean:.6}, std={:.4}", enc_var.sqrt());
+        eprintln!(
+            "  min={enc_min:.4}, max={enc_max:.4}, mean={enc_mean:.6}, std={:.4}",
+            enc_var.sqrt()
+        );
         eprintln!("  first 5 values: {:?}", &enc_data[..5]);
         let has_nan = enc_data.iter().any(|x| x.is_nan());
         let has_inf = enc_data.iter().any(|x| x.is_infinite());
@@ -198,14 +201,18 @@ mod e2e {
             let logits = model.decode_step(tok, pos, &mut self_kv, &cross_kv);
             if pos == prompt.len() - 1 {
                 let logits_vec = logits.to_vec();
-                let argmax = logits_vec.iter().enumerate()
+                let argmax = logits_vec
+                    .iter()
+                    .enumerate()
                     .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                    .map(|(i, _)| i).unwrap();
+                    .map(|(i, _)| i)
+                    .unwrap();
                 let logits_min = logits_vec.iter().copied().fold(f32::INFINITY, f32::min);
                 let logits_max = logits_vec.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                 eprintln!("First decode logits: min={logits_min:.4}, max={logits_max:.4}, argmax={argmax}");
                 // Show top 5 tokens
-                let mut indexed: Vec<(usize, f32)> = logits_vec.iter().copied().enumerate().collect();
+                let mut indexed: Vec<(usize, f32)> =
+                    logits_vec.iter().copied().enumerate().collect();
                 indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
                 eprintln!("Top 10 tokens:");
                 for (id, score) in &indexed[..10] {

@@ -240,10 +240,7 @@ fn mel_filterbank(n_mels: usize, n_fft: usize, sample_rate: u32) -> Vec<Vec<f64>
     let hz_points: Vec<f64> = mel_points.iter().map(|&m| mel_to_hz(m)).collect();
 
     // Convert Hz points to FFT bin indices (fractional)
-    let fft_bins: Vec<f64> = hz_points
-        .iter()
-        .map(|&f| f * n_fft as f64 / sr)
-        .collect();
+    let fft_bins: Vec<f64> = hz_points.iter().map(|&f| f * n_fft as f64 / sr).collect();
 
     // Build triangular filters
     let mut filters = vec![vec![0.0f64; n_freq]; n_mels];
@@ -337,10 +334,14 @@ mod tests {
         // Python: -0.5618 (silence floor)
 
         // Allow some tolerance for float differences
-        assert!((min - (-0.5618)).abs() < 0.05,
-            "mel min {min} too far from Python reference -0.5618");
-        assert!((max - 1.4382).abs() < 0.05,
-            "mel max {max} too far from Python reference 1.4382");
+        assert!(
+            (min - (-0.5618)).abs() < 0.05,
+            "mel min {min} too far from Python reference -0.5618"
+        );
+        assert!(
+            (max - 1.4382).abs() < 0.05,
+            "mel max {max} too far from Python reference 1.4382"
+        );
     }
 
     #[test]

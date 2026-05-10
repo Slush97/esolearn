@@ -222,11 +222,7 @@ impl<B: MathBackend> EncoderSelfAttention<B> {
 
         // Fused scale + softmax
         let scale = 1.0 / (d_head as f32).sqrt();
-        let attn = B::scaled_softmax(
-            &scores,
-            scale,
-            &Shape::new(&[n_heads * seq_len, seq_len]),
-        );
+        let attn = B::scaled_softmax(&scores, scale, &Shape::new(&[n_heads * seq_len, seq_len]));
 
         // Batched out = attn @ V_heads → [n_heads * seq_len, d_head]
         let out_heads = B::matmul_strided_batched(
@@ -253,7 +249,12 @@ impl<B: MathBackend> EncoderSelfAttention<B> {
 
 impl<B: MathBackend> Module<B> for EncoderSelfAttention<B> {
     fn parameters(&self) -> Vec<&Tensor<B>> {
-        vec![&self.qkv_weight, &self.qkv_bias, &self.out_weight, &self.out_bias]
+        vec![
+            &self.qkv_weight,
+            &self.qkv_bias,
+            &self.out_weight,
+            &self.out_bias,
+        ]
     }
 }
 
@@ -286,8 +287,7 @@ fn sinusoidal_embedding(max_len: usize, d_model: usize) -> Vec<f32> {
     let mut data = vec![0.0f32; max_len * d_model];
     for pos in 0..max_len {
         for i in 0..d_model {
-            let angle =
-                pos as f64 / 10_000.0_f64.powf(2.0 * (i / 2) as f64 / d_model as f64);
+            let angle = pos as f64 / 10_000.0_f64.powf(2.0 * (i / 2) as f64 / d_model as f64);
             data[pos * d_model + i] = if i % 2 == 0 {
                 angle.sin() as f32
             } else {

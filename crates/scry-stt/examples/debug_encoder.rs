@@ -35,7 +35,8 @@ fn main() {
     // ========================================================================
     // Load test mel from Python (numpy seed 42, randn(80,16) * 0.1)
     let mel_bytes = std::fs::read("/tmp/scry_test_mel.bin").expect("Run Python script first");
-    let mel_data: Vec<f32> = mel_bytes.chunks_exact(4)
+    let mel_data: Vec<f32> = mel_bytes
+        .chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
     assert_eq!(mel_data.len(), 80 * 16);
@@ -65,7 +66,8 @@ fn main() {
 
     // Load test input from Python (numpy seed 123, randn(4,384) * 0.1)
     let sa_bytes = std::fs::read("/tmp/scry_test_sa_input.bin").expect("Need sa input");
-    let sa_data: Vec<f32> = sa_bytes.chunks_exact(4)
+    let sa_data: Vec<f32> = sa_bytes
+        .chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
     assert_eq!(sa_data.len(), 4 * 384);
@@ -86,30 +88,46 @@ fn main() {
     // Fused QKV
     let attn = &model.encoder.blocks[0].attn;
     let qkv = scry_llm::ops::matmul_bias(
-        &normed, &attn.qkv_weight, &attn.qkv_bias,
-        4, d, 3 * d, false, false,
+        &normed,
+        &attn.qkv_weight,
+        &attn.qkv_bias,
+        4,
+        d,
+        3 * d,
+        false,
+        false,
     );
     let qkv_data = qkv.to_vec();
 
     // Extract Q, K, V from fused QKV [4, 3*384] = [4, 1152]
     // Layout: each row is [Q_d0..Q_d383, K_d0..K_d383, V_d0..V_d383]
     eprintln!("Q[0,:5] (from fused): {:?}", &qkv_data[..5]);
-    eprintln!("Q[1,:5] (from fused): {:?}", &qkv_data[3*d..3*d+5]);
+    eprintln!("Q[1,:5] (from fused): {:?}", &qkv_data[3 * d..3 * d + 5]);
     // Python Q[:2,:5]: [[-4.857, 1.944, 0.022, -0.973, -3.110], [-4.871, -3.188, -0.135, 2.119, -1.606]]
 
-    eprintln!("K[0,:5] (from fused): {:?}", &qkv_data[d..d+5]);
-    eprintln!("K[1,:5] (from fused): {:?}", &qkv_data[3*d+d..3*d+d+5]);
+    eprintln!("K[0,:5] (from fused): {:?}", &qkv_data[d..d + 5]);
+    eprintln!(
+        "K[1,:5] (from fused): {:?}",
+        &qkv_data[3 * d + d..3 * d + d + 5]
+    );
     // Python K[:2,:5]: [[-1.272, 2.494, -0.824, 0.169, -1.969], [-1.397, -1.134, -2.779, 3.529, 0.350]]
 
     // Now test split_qkv_reshape_heads
-    let (q_heads, k_heads, v_heads) = Backend::split_qkv_reshape_heads(&qkv.data, 4, n_heads, d_head);
+    let (q_heads, k_heads, v_heads) =
+        Backend::split_qkv_reshape_heads(&qkv.data, 4, n_heads, d_head);
 
     // Python Q_h[0,0,:5] (head0, pos0): [-4.857, 1.944, 0.022, -0.973, -3.110]
     // Python Q_h[1,0,:5] (head1, pos0): [1.118, 0.939, -3.743, -0.018, -2.685]
     eprintln!("\nQ_h[head0,pos0,:5]: {:?}", &q_heads[..5]);
-    eprintln!("Q_h[head1,pos0,:5]: {:?}", &q_heads[4*d_head..4*d_head+5]);
+    eprintln!(
+        "Q_h[head1,pos0,:5]: {:?}",
+        &q_heads[4 * d_head..4 * d_head + 5]
+    );
     // head1 starts at offset: head1 * seq * d_head = 1 * 4 * 64 = 256
-    eprintln!("Q_h layout check - head0,pos1,:5: {:?}", &q_heads[d_head..d_head+5]);
+    eprintln!(
+        "Q_h layout check - head0,pos1,:5: {:?}",
+        &q_heads[d_head..d_head + 5]
+    );
 
     // Compute attention scores manually for head 0
     // scores[0] = Q_h[0] @ K_h[0].T  (both [4, 64])
@@ -123,7 +141,7 @@ fn main() {
     let scores_scaled: Vec<f32> = scores_h0.iter().map(|x| x * scale).collect();
     eprintln!("\nScores[head0] (scaled):");
     for row in 0..4 {
-        eprintln!("  {:?}", &scores_scaled[row*4..(row+1)*4]);
+        eprintln!("  {:?}", &scores_scaled[row * 4..(row + 1) * 4]);
     }
     // Python scores[0]:
     // [[21.537,  6.253,  4.517, 12.824]
@@ -133,27 +151,35 @@ fn main() {
 
     // Now run the full encoder block forward (block.forward is also private, so use the whole encoder)
     // Instead, test via matmul_strided_batched which is what the encoder attention uses
-    let scores_batched = Backend::matmul_strided_batched(
-        &q_heads, &k_heads, n_heads, 4, d_head, 4, false, true,
-    );
+    let scores_batched =
+        Backend::matmul_strided_batched(&q_heads, &k_heads, n_heads, 4, d_head, 4, false, true);
     eprintln!("\nBatched scores[head0] (unscaled):");
     for row in 0..4 {
-        let s: Vec<f32> = scores_batched[row*4..(row+1)*4].iter().map(|x| x * scale).collect();
+        let s: Vec<f32> = scores_batched[row * 4..(row + 1) * 4]
+            .iter()
+            .map(|x| x * scale)
+            .collect();
         eprintln!("  {:?}", &s);
     }
 
     // Full softmax
-    let attn_weights = Backend::scaled_softmax(
-        &scores_batched, scale, &Shape::new(&[n_heads * 4, 4]),
-    );
+    let attn_weights =
+        Backend::scaled_softmax(&scores_batched, scale, &Shape::new(&[n_heads * 4, 4]));
     eprintln!("\nAttn weights[head0]:");
     for row in 0..4 {
-        eprintln!("  {:?}", &attn_weights[row*4..(row+1)*4]);
+        eprintln!("  {:?}", &attn_weights[row * 4..(row + 1) * 4]);
     }
 
     // attn @ V
     let out_heads = Backend::matmul_strided_batched(
-        &attn_weights, &v_heads, n_heads, 4, 4, d_head, false, false,
+        &attn_weights,
+        &v_heads,
+        n_heads,
+        4,
+        4,
+        d_head,
+        false,
+        false,
     );
 
     // Reshape from heads

@@ -34,10 +34,8 @@ pub fn load_whisper_checkpoint<B: MathBackend>(
     config: &WhisperConfig,
 ) -> crate::error::Result<WhisperModel<B>> {
     // Memory-map the file for zero-copy access
-    let file = std::fs::File::open(safetensors_path)
-        .map_err(SttError::Io)?;
-    let mmap = unsafe { memmap2::Mmap::map(&file) }
-        .map_err(SttError::Io)?;
+    let file = std::fs::File::open(safetensors_path).map_err(SttError::Io)?;
+    let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(SttError::Io)?;
 
     let tensors = safetensors::SafeTensors::deserialize(&mmap)
         .map_err(|e| ModelError::Checkpoint(format!("deserialize: {e}")))?;
@@ -51,9 +49,10 @@ pub fn load_whisper_checkpoint<B: MathBackend>(
             safetensors::Dtype::F16 => Ok(f16_bytes_to_f32(t.data())),
             safetensors::Dtype::F32 => Ok(f32_bytes_to_f32(t.data())),
             safetensors::Dtype::BF16 => Ok(bf16_bytes_to_f32(t.data())),
-            other => Err(ModelError::Checkpoint(
-                format!("unsupported dtype {other:?} for tensor '{name}'"),
-            ).into()),
+            other => Err(ModelError::Checkpoint(format!(
+                "unsupported dtype {other:?} for tensor '{name}'"
+            ))
+            .into()),
         }
     };
 
@@ -73,11 +72,12 @@ pub fn load_whisper_checkpoint<B: MathBackend>(
     };
 
     // Helper: load a linear weight (transpose from HF [out, in] → our [in, out])
-    let load_linear_weight = |name: &str, in_f: usize, out_f: usize| -> Result<Tensor<B>, SttError> {
-        let data = load(name)?;
-        let transposed = transpose_2d(&data, out_f, in_f);
-        Ok(Tensor::from_vec(transposed, Shape::new(&[in_f, out_f])))
-    };
+    let load_linear_weight =
+        |name: &str, in_f: usize, out_f: usize| -> Result<Tensor<B>, SttError> {
+            let data = load(name)?;
+            let transposed = transpose_2d(&data, out_f, in_f);
+            Ok(Tensor::from_vec(transposed, Shape::new(&[in_f, out_f])))
+        };
 
     let d = config.d_model;
     let d4 = d * 4;
@@ -100,7 +100,15 @@ pub fn load_whisper_checkpoint<B: MathBackend>(
     let mut enc_blocks = Vec::with_capacity(config.n_encoder_layers);
     for i in 0..config.n_encoder_layers {
         let prefix = format!("model.encoder.layers.{i}");
-        let block = load_encoder_block(&load, &load_linear_weight, &load_tensor, &prefix, d, d4, config.n_encoder_heads)?;
+        let block = load_encoder_block(
+            &load,
+            &load_linear_weight,
+            &load_tensor,
+            &prefix,
+            d,
+            d4,
+            config.n_encoder_heads,
+        )?;
         enc_blocks.push(block);
     }
 
@@ -138,7 +146,15 @@ pub fn load_whisper_checkpoint<B: MathBackend>(
     let mut dec_blocks = Vec::with_capacity(config.n_decoder_layers);
     for i in 0..config.n_decoder_layers {
         let prefix = format!("model.decoder.layers.{i}");
-        let block = load_decoder_block(&load, &load_linear_weight, &load_tensor, &prefix, d, d4, config.n_decoder_heads)?;
+        let block = load_decoder_block(
+            &load,
+            &load_linear_weight,
+            &load_tensor,
+            &prefix,
+            d,
+            d4,
+            config.n_decoder_heads,
+        )?;
         dec_blocks.push(block);
     }
 
@@ -369,8 +385,20 @@ fn load_encoder_block<B: MathBackend>(
     };
 
     let mlp_ln = load_layer_norm(load_tensor, &format!("{prefix}.final_layer_norm"), d)?;
-    let mlp_fc1 = load_linear(load_linear_weight, load_tensor, &format!("{prefix}.fc1"), d, d4)?;
-    let mlp_fc2 = load_linear(load_linear_weight, load_tensor, &format!("{prefix}.fc2"), d4, d)?;
+    let mlp_fc1 = load_linear(
+        load_linear_weight,
+        load_tensor,
+        &format!("{prefix}.fc1"),
+        d,
+        d4,
+    )?;
+    let mlp_fc2 = load_linear(
+        load_linear_weight,
+        load_tensor,
+        &format!("{prefix}.fc2"),
+        d4,
+        d,
+    )?;
 
     Ok(EncoderBlock {
         attn_ln,
@@ -439,17 +467,32 @@ fn load_decoder_block<B: MathBackend>(
     };
 
     // Cross-attention
-    let cross_attn_ln = load_layer_norm(load_tensor, &format!("{prefix}.encoder_attn_layer_norm"), d)?;
+    let cross_attn_ln =
+        load_layer_norm(load_tensor, &format!("{prefix}.encoder_attn_layer_norm"), d)?;
     let cross_attn = load_cross_attention(
-        load_linear_weight, load_tensor,
+        load_linear_weight,
+        load_tensor,
         &format!("{prefix}.encoder_attn"),
-        d, n_heads,
+        d,
+        n_heads,
     )?;
 
     // MLP
     let mlp_ln = load_layer_norm(load_tensor, &format!("{prefix}.final_layer_norm"), d)?;
-    let mlp_fc1 = load_linear(load_linear_weight, load_tensor, &format!("{prefix}.fc1"), d, d4)?;
-    let mlp_fc2 = load_linear(load_linear_weight, load_tensor, &format!("{prefix}.fc2"), d4, d)?;
+    let mlp_fc1 = load_linear(
+        load_linear_weight,
+        load_tensor,
+        &format!("{prefix}.fc1"),
+        d,
+        d4,
+    )?;
+    let mlp_fc2 = load_linear(
+        load_linear_weight,
+        load_tensor,
+        &format!("{prefix}.fc2"),
+        d4,
+        d,
+    )?;
 
     Ok(DecoderBlock {
         attn_ln,

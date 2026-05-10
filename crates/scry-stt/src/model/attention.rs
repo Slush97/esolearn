@@ -132,7 +132,13 @@ impl<B: MathBackend> CrossAttention<B> {
         let k_heads_t = B::from_vec(k_heads_t, &Shape::new(&[n_heads * d_head, audio_len]));
         // k_heads is dropped — only k_heads_t is stored (avoids 2.3MB cache pressure)
 
-        CrossKvCache { k, v, audio_len, k_heads_t, v_heads }
+        CrossKvCache {
+            k,
+            v,
+            audio_len,
+            k_heads_t,
+            v_heads,
+        }
     }
 
     /// Forward pass: cross-attention with cached encoder KV.
@@ -143,11 +149,7 @@ impl<B: MathBackend> CrossAttention<B> {
     /// Returns: `[seq_len, d_model]`.
     ///
     /// Uses batched matmul across all heads simultaneously.
-    pub fn forward(
-        &self,
-        decoder_state: &Tensor<B>,
-        cache: &CrossKvCache<B>,
-    ) -> Tensor<B> {
+    pub fn forward(&self, decoder_state: &Tensor<B>, cache: &CrossKvCache<B>) -> Tensor<B> {
         let seq_len = decoder_state.shape.dims()[0];
         let audio_len = cache.audio_len;
         let d_model = self.d_model;
@@ -186,11 +188,7 @@ impl<B: MathBackend> CrossAttention<B> {
 
         // Fused scale + softmax — [n_heads * seq_len, audio_len]
         let scale = 1.0 / (d_head as f32).sqrt();
-        let attn = B::scaled_softmax(
-            &scores,
-            scale,
-            &Shape::new(&[n_heads * seq_len, audio_len]),
-        );
+        let attn = B::scaled_softmax(&scores, scale, &Shape::new(&[n_heads * seq_len, audio_len]));
 
         // Batched out = attn @ V_heads → [n_heads * seq_len, d_head]
         let out_heads = B::matmul_strided_batched(
@@ -264,16 +262,12 @@ mod tests {
         let mut rng = fastrand::Rng::with_seed(42);
         let attn = CrossAttention::<CpuBackend>::new(512, 8, &mut rng);
 
-        let encoder_out = Tensor::<CpuBackend>::from_vec(
-            vec![0.1f32; 1500 * 512],
-            Shape::new(&[1500, 512]),
-        );
+        let encoder_out =
+            Tensor::<CpuBackend>::from_vec(vec![0.1f32; 1500 * 512], Shape::new(&[1500, 512]));
         let cache = attn.compute_kv_cache(&encoder_out);
 
-        let decoder_state = Tensor::<CpuBackend>::from_vec(
-            vec![0.1f32; 512],
-            Shape::new(&[1, 512]),
-        );
+        let decoder_state =
+            Tensor::<CpuBackend>::from_vec(vec![0.1f32; 512], Shape::new(&[1, 512]));
         let output = attn.forward(&decoder_state, &cache);
         assert_eq!(output.shape.dims(), &[1, 512]);
     }

@@ -50,7 +50,10 @@ fn main() {
 
     if !model_path.exists() {
         eprintln!("ERROR: Model not found at {}", model_path.display());
-        eprintln!("Download whisper-tiny from HuggingFace into {}", model_dir().display());
+        eprintln!(
+            "Download whisper-tiny from HuggingFace into {}",
+            model_dir().display()
+        );
         std::process::exit(1);
     }
 
@@ -80,8 +83,7 @@ fn main() {
 
     // ── Stage 2: Tokenizer loading ──────────────────────────────────────
     let t1 = Instant::now();
-    let tokenizer = WhisperTokenizer::from_file(&tokenizer_path)
-        .expect("Failed to load tokenizer");
+    let tokenizer = WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
     let tokenizer_load_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
     // ── Stage 3: Audio generation (2s 440Hz sine wave) ──────────────────
@@ -99,10 +101,8 @@ fn main() {
     let t3 = Instant::now();
     let audio_chunk = pad_or_trim_audio(&samples);
     let mel = log_mel_spectrogram(&audio_chunk);
-    let mel_tensor = Tensor::<Backend>::from_vec(
-        mel.data.clone(),
-        Shape::new(&[mel.n_mels, mel.n_frames]),
-    );
+    let mel_tensor =
+        Tensor::<Backend>::from_vec(mel.data.clone(), Shape::new(&[mel.n_mels, mel.n_frames]));
     let mel_ms = t3.elapsed().as_secs_f64() * 1000.0;
 
     // ── Stage 5: Encoder forward pass ───────────────────────────────────
@@ -145,7 +145,10 @@ fn main() {
     println!("├─────────────────────────┼──────────────┤");
     println!("│ Total load              │ {:>12.2} │", total_load_ms);
     println!("│ Total inference         │ {:>12.2} │", total_inference_ms);
-    println!("│ Total cold-start        │ {:>12.2} │", total_cold_start_ms);
+    println!(
+        "│ Total cold-start        │ {:>12.2} │",
+        total_cold_start_ms
+    );
     println!("└─────────────────────────┴──────────────┘");
     println!();
 
@@ -154,9 +157,18 @@ fn main() {
     println!("├─────────────────────────┼──────────────┤");
     println!("│ Baseline                │ {:>12.1} │", rss_baseline);
     println!("│ After model load        │ {:>12.1} │", rss_after_model);
-    println!("│ After inference         │ {:>12.1} │", rss_after_inference);
-    println!("│ Delta (model)           │ {:>12.1} │", rss_after_model - rss_baseline);
-    println!("│ Delta (total)           │ {:>12.1} │", rss_after_inference - rss_baseline);
+    println!(
+        "│ After inference         │ {:>12.1} │",
+        rss_after_inference
+    );
+    println!(
+        "│ Delta (model)           │ {:>12.1} │",
+        rss_after_model - rss_baseline
+    );
+    println!(
+        "│ Delta (total)           │ {:>12.1} │",
+        rss_after_inference - rss_baseline
+    );
     println!("└─────────────────────────┴──────────────┘");
     println!();
 
@@ -172,10 +184,8 @@ fn main() {
     for run in 0..3 {
         let t_warm = Instant::now();
         let mel_w = log_mel_spectrogram(&audio_chunk);
-        let mel_w_tensor = Tensor::<Backend>::from_vec(
-            mel_w.data,
-            Shape::new(&[mel_w.n_mels, mel_w.n_frames]),
-        );
+        let mel_w_tensor =
+            Tensor::<Backend>::from_vec(mel_w.data, Shape::new(&[mel_w.n_mels, mel_w.n_frames]));
         let enc_w = model.encode(&mel_w_tensor);
         let tok_w = greedy_decode(&model, &enc_w, &decode_config);
         let _ = tokenizer.decode(&tok_w);

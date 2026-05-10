@@ -54,7 +54,12 @@ fn main() {
 
     eprintln!("Loading WAV: {}", wav_path.display());
     let samples = load_wav_pcm_16k(&wav_path);
-    eprintln!("Audio: {} samples ({:.2}s at {}Hz)", samples.len(), samples.len() as f64 / WHISPER_SAMPLE_RATE as f64, WHISPER_SAMPLE_RATE);
+    eprintln!(
+        "Audio: {} samples ({:.2}s at {}Hz)",
+        samples.len(),
+        samples.len() as f64 / WHISPER_SAMPLE_RATE as f64,
+        WHISPER_SAMPLE_RATE
+    );
 
     let model_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models/whisper-tiny");
     let config = WhisperConfig::tiny();
@@ -64,9 +69,19 @@ fn main() {
         .expect("Failed to load tokenizer");
 
     let audio_chunk = pad_or_trim_audio(&samples);
-    eprintln!("Audio chunk: {} samples, first 10: {:?}", audio_chunk.len(), &audio_chunk[..10]);
-    eprintln!("Audio non-zero samples: {}", audio_chunk.iter().filter(|x| x.abs() > 1e-8).count());
-    eprintln!("Audio max abs: {}", audio_chunk.iter().map(|x| x.abs()).fold(0.0f32, f32::max));
+    eprintln!(
+        "Audio chunk: {} samples, first 10: {:?}",
+        audio_chunk.len(),
+        &audio_chunk[..10]
+    );
+    eprintln!(
+        "Audio non-zero samples: {}",
+        audio_chunk.iter().filter(|x| x.abs() > 1e-8).count()
+    );
+    eprintln!(
+        "Audio max abs: {}",
+        audio_chunk.iter().map(|x| x.abs()).fold(0.0f32, f32::max)
+    );
 
     let mel = log_mel_spectrogram(&audio_chunk);
     eprintln!("Mel: {}x{}", mel.n_mels, mel.n_frames);
@@ -78,10 +93,7 @@ fn main() {
     let mel_mean = mel.data.iter().sum::<f32>() / mel.data.len() as f32;
     eprintln!("Mel stats: min={mel_min}, max={mel_max}, mean={mel_mean}");
 
-    let mel_tensor = Tensor::<Backend>::from_vec(
-        mel.data,
-        Shape::new(&[mel.n_mels, mel.n_frames]),
-    );
+    let mel_tensor = Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
 
     // === Debug: compare first decode step against Python reference ===
     let sot_token = 50258usize;
@@ -98,7 +110,11 @@ fn main() {
     let pos_vec = &pos_data[0..d];
     eprintln!("Rust pos emb [0] first 5: {:?}", &pos_vec[..5]);
 
-    let x: Vec<f32> = tok_vec.iter().zip(pos_vec.iter()).map(|(a, b)| a + b).collect();
+    let x: Vec<f32> = tok_vec
+        .iter()
+        .zip(pos_vec.iter())
+        .map(|(a, b)| a + b)
+        .collect();
     eprintln!("Rust x = tok + pos first 5: {:?}", &x[..5]);
 
     // Layer norm

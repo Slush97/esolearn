@@ -238,7 +238,8 @@ impl<B: MathBackend> WhisperDecoder<B> {
         cross_kv_caches: &[CrossKvCache<B>],
         profile: bool,
     ) -> Tensor<B> {
-        let (x, blocks_ms) = self.run_blocks_timed(token_id, position, self_kv_cache, cross_kv_caches, profile);
+        let (x, blocks_ms) =
+            self.run_blocks_timed(token_id, position, self_kv_cache, cross_kv_caches, profile);
 
         // Project to vocab logits: x @ logit_proj_weight → [1, vocab_size]
         // Uses pre-transposed weight [d_model, vocab_size] so we hit the fast
@@ -316,7 +317,12 @@ impl<B: MathBackend> WhisperDecoder<B> {
 
         let t_blocks = std::time::Instant::now();
         for (i, block) in self.blocks.iter().enumerate() {
-            x = block.forward_step(&x, &mut self_kv_cache.layers[i], &cross_kv_caches[i], profile);
+            x = block.forward_step(
+                &x,
+                &mut self_kv_cache.layers[i],
+                &cross_kv_caches[i],
+                profile,
+            );
         }
         let blocks_ms = if profile {
             t_blocks.elapsed().as_secs_f64() * 1000.0
@@ -411,11 +417,7 @@ impl<B: MathBackend> DecoderSelfAttention<B> {
     /// KV cache is stored pre-shaped in `[n_heads, max_seq, d_head]` layout.
     /// New K/V entries are written directly into head-major position — no
     /// per-token reshape transpose needed.
-    fn forward_with_cache(
-        &self,
-        input: &Tensor<B>,
-        cache: &mut DecoderLayerKv<B>,
-    ) -> Tensor<B> {
+    fn forward_with_cache(&self, input: &Tensor<B>, cache: &mut DecoderLayerKv<B>) -> Tensor<B> {
         let d_model = self.d_model;
         let n_heads = self.n_heads;
         let d_head = self.d_head;
@@ -474,16 +476,11 @@ impl<B: MathBackend> DecoderSelfAttention<B> {
 
         // Fused scale + softmax — [n_heads, cached_len]
         let scale = 1.0 / (d_head as f32).sqrt();
-        let attn = B::scaled_softmax(
-            &scores,
-            scale,
-            &Shape::new(&[n_heads, cached_len]),
-        );
+        let attn = B::scaled_softmax(&scores, scale, &Shape::new(&[n_heads, cached_len]));
 
         // Batched out = attn @ V_heads → [n_heads * 1, d_head]
-        let out_heads = B::matmul_strided_batched(
-            &attn, &v_stor, n_heads, 1, cached_len, d_head, false, false,
-        );
+        let out_heads =
+            B::matmul_strided_batched(&attn, &v_stor, n_heads, 1, cached_len, d_head, false, false);
 
         // [n_heads, d_head] = [d_model] — identity permutation for seq=1, skip reshape.
         // Output projection (fused matmul + bias)
@@ -527,7 +524,12 @@ fn extract_cached_heads(
 
 impl<B: MathBackend> Module<B> for DecoderSelfAttention<B> {
     fn parameters(&self) -> Vec<&Tensor<B>> {
-        vec![&self.qkv_weight, &self.qkv_bias, &self.out_weight, &self.out_bias]
+        vec![
+            &self.qkv_weight,
+            &self.qkv_bias,
+            &self.out_weight,
+            &self.out_bias,
+        ]
     }
 }
 
@@ -546,7 +548,11 @@ impl<B: MathBackend> Module<B> for DecoderBlock<B> {
 
 impl<B: MathBackend> Module<B> for WhisperDecoder<B> {
     fn parameters(&self) -> Vec<&Tensor<B>> {
-        let mut params = vec![&self.token_embedding, &self.logit_proj_weight, &self.positional_embedding];
+        let mut params = vec![
+            &self.token_embedding,
+            &self.logit_proj_weight,
+            &self.positional_embedding,
+        ];
         for block in &self.blocks {
             params.extend(block.parameters());
         }
