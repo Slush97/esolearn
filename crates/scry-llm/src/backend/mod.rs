@@ -1062,6 +1062,47 @@ pub trait MathBackend: DeviceBackend {
         Self::from_vec(c_vec, &Shape::new(&[batch_count * m, n]))
     }
 
+    /// Multi-head scaled dot-product attention in one trait call.
+    ///
+    /// Inputs are post-`reshape_for_heads`:
+    ///   - `q`: `[num_heads, n_q, head_dim]`
+    ///   - `k`: `[num_heads, n_kv, head_dim]`
+    ///   - `v`: `[num_heads, n_kv, head_dim]`
+    ///
+    /// Returns `[num_heads, n_q, head_dim]`. `scale` is the pre-softmax
+    /// scale (typically `1 / sqrt(head_dim)`).
+    ///
+    /// The default impl composes the existing
+    /// `matmul_strided_batched` (scores) → `scaled_softmax` →
+    /// `matmul_strided_batched` (values) cascade. GPU backends override
+    /// this with a fused kernel that avoids materializing the
+    /// `[num_heads · n_q, n_kv]` softmax intermediate — at SD 1.5's
+    /// deepest self-attn stage that intermediate is ~537 MB of
+    /// device traffic per dispatch.
+    ///
+    /// Why a single trait method instead of leaving the cascade to the
+    /// caller: the fused kernel reads K/V tiles from shared memory and
+    /// updates a running softmax max/denom + accumulator without ever
+    /// writing the full attention matrix to global memory. That fusion
+    /// has to happen across the three sub-operations, so it cannot be
+    /// expressed as an override of any one of them.
+    #[allow(clippy::too_many_arguments)]
+    fn fused_attention(
+        q: &Self::Storage,
+        k: &Self::Storage,
+        v: &Self::Storage,
+        num_heads: usize,
+        n_q: usize,
+        n_kv: usize,
+        head_dim: usize,
+        scale: f32,
+    ) -> Self::Storage {
+        let scores =
+            Self::matmul_strided_batched(q, k, num_heads, n_q, head_dim, n_kv, false, true);
+        let attn = Self::scaled_softmax(&scores, scale, &Shape::new(&[num_heads * n_q, n_kv]));
+        Self::matmul_strided_batched(&attn, v, num_heads, n_q, n_kv, head_dim, false, false)
+    }
+
     /// Apply causal mask and scale to batched matrices.
     fn apply_batched_causal_mask_and_scale(
         scores: &mut Self::Storage,

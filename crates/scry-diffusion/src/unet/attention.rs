@@ -189,31 +189,20 @@ impl<B: MathBackend> Attention<B> {
         });
 
         let scale = 1.0f32 / (self.head_dim as f32).sqrt();
-        let scores = time_section("attn.scores", || {
-            B::matmul_strided_batched(
+        // Fused scores → softmax → values. Default impl composes the
+        // three-kernel cascade for correctness; GPU backends override
+        // with a single FlashAttention-style kernel that avoids
+        // materializing the `[num_heads · n_q, n_kv]` softmax matrix.
+        let out_per_head = time_section("attn.fused", || {
+            B::fused_attention(
                 &q_h,
                 &k_h,
-                self.num_heads,
-                n_q,
-                self.head_dim,
-                n_kv,
-                false,
-                true,
-            )
-        });
-        let attn = time_section("attn.softmax", || {
-            B::scaled_softmax(&scores, scale, &Shape::new(&[self.num_heads * n_q, n_kv]))
-        });
-        let out_per_head = time_section("attn.values", || {
-            B::matmul_strided_batched(
-                &attn,
                 &v_h,
                 self.num_heads,
                 n_q,
                 n_kv,
                 self.head_dim,
-                false,
-                false,
+                scale,
             )
         });
         let head_concat = time_section("attn.reshape_out", || {
