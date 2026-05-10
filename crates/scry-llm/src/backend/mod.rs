@@ -315,9 +315,9 @@ pub trait MathBackend: DeviceBackend {
     /// tensor is `[4096, 5120]` = 80 MB, and the GeGLU MLP is the
     /// single largest cost in the UNet forward (47% at 512×512 / bf16).
     fn gelu_exact(input: &Self::Storage) -> Self::Storage {
+        const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
         let v = Self::to_vec(input);
         let n = v.len();
-        const INV_SQRT_2: f64 = std::f64::consts::FRAC_1_SQRT_2;
         let out: Vec<f32> = v
             .into_iter()
             .map(|x| {

@@ -130,16 +130,16 @@ mod disabled {
     /// No-op when the `profile` feature is off — the closure runs directly,
     /// nothing is recorded, no synchronization happens. Compiles down to
     /// the bare closure call after inlining.
-    #[inline(always)]
+    #[inline]
     pub fn time_section<R>(_name: &'static str, f: impl FnOnce() -> R) -> R {
         f()
     }
 
     /// No-op when the `profile` feature is off.
-    #[inline(always)]
+    #[inline]
     pub fn reset() {}
 
     /// No-op when the `profile` feature is off.
-    #[inline(always)]
+    #[inline]
     pub fn print_summary() {}
 }

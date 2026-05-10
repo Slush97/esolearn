@@ -185,6 +185,13 @@ struct ScryCtx {
     /// On-device row-wise softmax. CUDA-only; Vulkan path is `None` and
     /// callers fall back to CPU.
     softmax: Option<::scry_gpu::Kernel>,
+    /// On-device fused scaled-softmax: `softmax(scale · x)` along the last
+    /// axis in one kernel. Replaces the trait default's two-pass dispatch
+    /// (separate `scale` then `softmax`), saving the `(read + write)` of
+    /// the intermediate scaled tensor — at SD's deepest self-attn stage
+    /// (`[B=8, n=4096, n=4096]`) that's 1.07 GB of memory traffic per call.
+    /// CUDA-only; Vulkan path is `None`.
+    scaled_softmax: Option<::scry_gpu::Kernel>,
     /// On-device row-wise layernorm with affine gamma/beta. CUDA-only; Vulkan
     /// path is `None` and callers fall back to CPU.
     layernorm: Option<::scry_gpu::Kernel>,
@@ -368,6 +375,14 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [256, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: softmax_cuda compile: {e}"))?;
+        let scaled_softmax = dev
+            .compile_cuda(
+                ::scry_gpu::shaders::elementwise::SCALED_SOFTMAX_ROWWISE_CUDA,
+                "scaled_softmax_rowwise",
+                2,
+                [256, 1, 1],
+            )
+            .map_err(|e| format!("scry-gpu: scaled_softmax_cuda compile: {e}"))?;
         let layernorm = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::LAYERNORM_ROWWISE_CUDA,
@@ -551,6 +566,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             silu: Some(silu),
             gelu_exact: Some(gelu_exact),
             softmax: Some(softmax),
+            scaled_softmax: Some(scaled_softmax),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
             im2col: Some(im2col),
@@ -598,6 +614,7 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         silu: None,
         gelu_exact: None,
         softmax: None,
+        scaled_softmax: None,
         layernorm: None,
         batchnorm: None,
         im2col: None,
@@ -1043,6 +1060,48 @@ fn gpu_softmax_persistent(input: &ScryGpuStorage, shape: &Shape) -> Option<ScryG
         &[&*buf_in, &out],
         [n_rows as u32, 1, 1],
         Some(bytemuck::bytes_of(&dims_pc)),
+    )
+    .ok()?;
+    Some(ScryGpuStorage::Gpu {
+        buf: GpuTensorStorage::from_owned(out),
+        len: total,
+    })
+}
+
+/// GPU-resident fused scaled-softmax. CUDA-only — the Vulkan path returns
+/// `None` so the caller falls back to the trait default (separate scale +
+/// softmax). Shares [`GPU_SOFTMAX_MIN_ROWS`] threshold semantics.
+fn gpu_scaled_softmax_persistent(
+    input: &ScryGpuStorage,
+    scale: f32,
+    shape: &Shape,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = ctx.scaled_softmax.as_ref()?;
+    let dims = shape.dims();
+    let d = *dims.last()?;
+    if d == 0 {
+        return None;
+    }
+    let total = input.len();
+    if total == 0 || total % d != 0 {
+        return None;
+    }
+    let n_rows = total / d;
+    if n_rows < GPU_SOFTMAX_MIN_ROWS {
+        return None;
+    }
+    let buf_in = as_gpu_buffer(input)?;
+    let out = ctx.dev.alloc_uninit::<f32>(total).ok()?;
+    // Push constants: [n_rows: u32, d: u32, scale: f32-as-bits].
+    // Same packing pattern as `gpu_layernorm_persistent`'s `eps` arg.
+    let pc: [u32; 3] = [n_rows as u32, d as u32, scale.to_bits()];
+    dispatch_kernel(
+        ctx,
+        kernel,
+        &[&*buf_in, &out],
+        [n_rows as u32, 1, 1],
+        Some(bytemuck::bytes_of(&pc)),
     )
     .ok()?;
     Some(ScryGpuStorage::Gpu {
@@ -3188,6 +3247,17 @@ impl MathBackend for ScryGpuBackend {
         cpu(CpuBackend::softmax(&input.as_vec(), shape))
     }
 
+    fn scaled_softmax(input: &ScryGpuStorage, scale: f32, shape: &Shape) -> ScryGpuStorage {
+        if let Some(gpu_out) = gpu_scaled_softmax_persistent(input, scale, shape) {
+            return gpu_out;
+        }
+        // Fall through to the trait default — Self::scale already has a CUDA
+        // override, so even on the slow path we stay device-resident; the
+        // only cost vs the fused kernel is the standalone scale dispatch.
+        let scaled = Self::scale(input, scale);
+        Self::softmax(&scaled, shape)
+    }
+
     fn gather_columns(
         storage: &ScryGpuStorage,
         rows: usize,
@@ -3845,6 +3915,52 @@ mod tests {
                 assert!(
                     (s - 1.0).abs() < 1e-4,
                     "row {r} did not sum to 1: got {s}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_scaled_softmax_matches_cpu_within_tolerance() {
+        // Mirror of `gpu_softmax_matches_cpu_within_tolerance` but exercising
+        // the fused `scale + softmax` path. Tests both positive and negative
+        // scale to confirm the max-shift trick stays correct (max is taken
+        // over scaled values so any scale works).
+        for (rows, d, scale) in [
+            (64usize, 64usize, 0.1f32),
+            (32, 512, -0.25),
+            (32, 512, 1.0 / (40.0_f32).sqrt()), // SD self-attn deepest stage
+        ] {
+            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let shape = Shape::new(&[rows, d]);
+            let storage = ScryGpuStorage::Cpu(input.clone());
+            let gpu = match ScryGpuBackend::to_gpu(&storage) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("skipping gpu_scaled_softmax_matches_cpu_within_tolerance: {e}");
+                    return;
+                }
+            };
+            let gpu_out = ScryGpuBackend::scaled_softmax(&gpu, scale, &shape);
+            #[cfg(feature = "scry-gpu-cuda")]
+            assert!(
+                gpu_out.is_gpu(),
+                "scaled_softmax over Gpu input should stay Gpu on CUDA, got {gpu_out:?}"
+            );
+            let g = ScryGpuBackend::to_vec(&gpu_out);
+            let c = CpuBackend::scaled_softmax(&input, scale, &shape);
+            assert_eq!(g.len(), c.len());
+            for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
+                assert!(
+                    (gv - cv).abs() < 1e-5,
+                    "rows={rows} d={d} scale={scale} idx={i}: gpu={gv} cpu={cv}"
+                );
+            }
+            for r in 0..rows {
+                let s: f32 = g[r * d..(r + 1) * d].iter().sum();
+                assert!(
+                    (s - 1.0).abs() < 1e-4,
+                    "rows={rows} d={d} scale={scale} row {r} did not sum to 1: got {s}"
                 );
             }
         }

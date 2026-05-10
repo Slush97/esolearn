@@ -143,94 +143,99 @@ impl<B: MathBackend> Attention<B> {
     /// those have host-roundtrip defaults on `ScryGpuBackend`, which
     /// the profile identified as the dominant cost in attention.
     fn forward(&self, q_input: &Tensor<B>, kv_input: &Tensor<B>) -> Tensor<B> {
+        use crate::profile::time_section;
+
         let inner_dim = self.num_heads * self.head_dim;
         let n_q = q_input.shape.dims()[0];
         let n_kv = kv_input.shape.dims()[0];
 
-        // Q/K/V projections — bias is zero (HF SD attention uses bias=False).
-        let q = B::matmul(
-            &q_input.data,
-            &self.q_weight.data,
-            n_q,
-            self.d_model,
-            inner_dim,
-            false,
-            false,
-        );
-        let k = B::matmul(
-            &kv_input.data,
-            &self.k_weight.data,
-            n_kv,
-            self.cross_dim,
-            inner_dim,
-            false,
-            false,
-        );
-        let v = B::matmul(
-            &kv_input.data,
-            &self.v_weight.data,
-            n_kv,
-            self.cross_dim,
-            inner_dim,
-            false,
-            false,
-        );
+        let (q, k, v) = time_section("attn.qkv_proj", || {
+            let q = B::matmul(
+                &q_input.data,
+                &self.q_weight.data,
+                n_q,
+                self.d_model,
+                inner_dim,
+                false,
+                false,
+            );
+            let k = B::matmul(
+                &kv_input.data,
+                &self.k_weight.data,
+                n_kv,
+                self.cross_dim,
+                inner_dim,
+                false,
+                false,
+            );
+            let v = B::matmul(
+                &kv_input.data,
+                &self.v_weight.data,
+                n_kv,
+                self.cross_dim,
+                inner_dim,
+                false,
+                false,
+            );
+            (q, k, v)
+        });
 
-        // Permute Q/K/V to per-head layout `[h, n, d_h]` in one dispatch
-        // each. On `ScryGpuBackend` this is a single CUDA reshape kernel
-        // per tensor; on CPU it falls back to a scalar permute.
-        let q_h = B::reshape_for_heads(&q, 1, n_q, self.num_heads, self.head_dim);
-        let k_h = B::reshape_for_heads(&k, 1, n_kv, self.num_heads, self.head_dim);
-        let v_h = B::reshape_for_heads(&v, 1, n_kv, self.num_heads, self.head_dim);
+        let (q_h, k_h, v_h) = time_section("attn.reshape_in", || {
+            (
+                B::reshape_for_heads(&q, 1, n_q, self.num_heads, self.head_dim),
+                B::reshape_for_heads(&k, 1, n_kv, self.num_heads, self.head_dim),
+                B::reshape_for_heads(&v, 1, n_kv, self.num_heads, self.head_dim),
+            )
+        });
 
-        // Scores = Q · Kᵀ across all heads in one strided batched gemm:
-        // `[h, n_q, d_h] · [h, n_kv, d_h]ᵀ → [h, n_q, n_kv]`. cuBLAS
-        // dispatches one cublasGemmStridedBatchedEx call.
         let scale = 1.0f32 / (self.head_dim as f32).sqrt();
-        let scores = B::matmul_strided_batched(
-            &q_h,
-            &k_h,
-            self.num_heads,
-            n_q,
-            self.head_dim,
-            n_kv,
-            false,
-            true,
-        );
-        // Fused scale + softmax along the last axis. Storage is
-        // [h * n_q, n_kv]; softmax-along-last-axis treats each row
-        // independently which is exactly per-head per-query softmax.
-        let attn = B::scaled_softmax(
-            &scores,
-            scale,
-            &Shape::new(&[self.num_heads * n_q, n_kv]),
-        );
-        // Out per head = attn · V: `[h, n_q, n_kv] · [h, n_kv, d_h] → [h, n_q, d_h]`.
-        let out_per_head = B::matmul_strided_batched(
-            &attn,
-            &v_h,
-            self.num_heads,
-            n_q,
-            n_kv,
-            self.head_dim,
-            false,
-            false,
-        );
-        // Permute back to `[n_q, h*d_h]` — one dispatch (kernel on GPU).
-        let head_concat =
-            B::reshape_from_heads(&out_per_head, 1, n_q, self.num_heads, self.head_dim);
+        let scores = time_section("attn.scores", || {
+            B::matmul_strided_batched(
+                &q_h,
+                &k_h,
+                self.num_heads,
+                n_q,
+                self.head_dim,
+                n_kv,
+                false,
+                true,
+            )
+        });
+        let attn = time_section("attn.softmax", || {
+            B::scaled_softmax(
+                &scores,
+                scale,
+                &Shape::new(&[self.num_heads * n_q, n_kv]),
+            )
+        });
+        let out_per_head = time_section("attn.values", || {
+            B::matmul_strided_batched(
+                &attn,
+                &v_h,
+                self.num_heads,
+                n_q,
+                n_kv,
+                self.head_dim,
+                false,
+                false,
+            )
+        });
+        let head_concat = time_section("attn.reshape_out", || {
+            B::reshape_from_heads(&out_per_head, 1, n_q, self.num_heads, self.head_dim)
+        });
 
-        // Output projection (with bias).
-        let out = B::matmul_bias(
-            &head_concat,
-            &self.out_weight.data,
-            &self.out_bias.data,
-            n_q,
-            inner_dim,
-            self.d_model,
-            false,
-            false,
-        );
+        let out = time_section("attn.out_proj", || {
+            B::matmul_bias(
+                &head_concat,
+                &self.out_weight.data,
+                &self.out_bias.data,
+                n_q,
+                inner_dim,
+                self.d_model,
+                false,
+                false,
+            )
+        });
         Tensor::new(out, Shape::new(&[n_q, self.d_model]))
     }
 }

@@ -31,7 +31,6 @@ use scry_llm::backend::MathBackend;
 use scry_llm::nn::attention::CausalSelfAttention;
 use scry_llm::nn::layernorm::LayerNormModule;
 use scry_llm::ops;
-use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 
 use super::TextEncoder;
