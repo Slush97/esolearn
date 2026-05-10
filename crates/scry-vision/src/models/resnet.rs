@@ -408,7 +408,7 @@ impl<B: MathBackend> ResNet<B> {
         (stages, in_ch)
     }
 
-    /// Fold every BatchNorm into its preceding conv (stem + every block in
+    /// Fold every `BatchNorm` into its preceding conv (stem + every block in
     /// every stage) and flip the corresponding `bn_fused` flags so forward
     /// skips the BN ops. Inference-only optimization — the math is exact.
     ///

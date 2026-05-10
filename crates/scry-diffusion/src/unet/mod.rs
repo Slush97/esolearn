@@ -131,6 +131,8 @@ impl<B: MathBackend> Unet<B> {
         timestep: f32,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
+        use crate::profile::time_section;
+
         let dims = noisy_latent.shape.dims();
         if dims.len() != 3 || dims[0] != self.config.in_channels {
             return Err(Error::Llm(format!(
@@ -138,8 +140,6 @@ impl<B: MathBackend> Unet<B> {
                 self.config.in_channels, dims
             )));
         }
-
-        use crate::profile::time_section;
 
         // ---- 1. conv_in ---------------------------------------------
         let mut x = time_section("unet.conv_in", || self.conv_in.forward(noisy_latent));

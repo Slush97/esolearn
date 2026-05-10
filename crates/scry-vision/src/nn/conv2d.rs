@@ -718,11 +718,18 @@ mod tests {
 
     // ── Strategy tests ──
 
+    // Static invariant: CpuBackend doesn't prefer im2col over Winograd.
+    // If this constant ever changes, the Auto-strategy expectations in this
+    // module need to be re-derived. Compile-time check rather than a runtime
+    // assert so it can't be skipped.
+    #[allow(clippy::assertions_on_constants)]
+    const _CPU_DOES_NOT_PREFER_IM2COL: () =
+        assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
+
     #[test]
     fn cpu_default_strategy_is_auto() {
         let conv = Conv2d::<CpuBackend>::square(3, 16, 3, 1, 1);
         assert_eq!(conv.strategy, Conv2dStrategy::Auto);
-        assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
     }
 
     #[test]

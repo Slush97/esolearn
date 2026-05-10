@@ -71,8 +71,12 @@ where
     pub scheduler: S,
     /// Optional progress callback fired before each denoising step.
     /// Receives `(step_index, total_steps, timestep)`.
-    pub progress: Option<Box<dyn FnMut(u32, u32, f32) + Send>>,
+    pub progress: Option<ProgressCallback>,
 }
+
+/// Callback type for [`Txt2ImgPipeline::progress`]. Invoked once per
+/// denoising step with `(step_index, total_steps, timestep)`.
+pub type ProgressCallback = Box<dyn FnMut(u32, u32, f32) + Send>;
 
 impl<B, T, S> Txt2ImgPipeline<B, T, S>
 where
@@ -101,8 +105,7 @@ where
         let (width, height) = params.size;
         if width == 0 || height == 0 || width % VAE_SCALE != 0 || height % VAE_SCALE != 0 {
             return Err(Error::Llm(format!(
-                "size {}x{} must be non-zero multiples of {}",
-                width, height, VAE_SCALE
+                "size {width}x{height} must be non-zero multiples of {VAE_SCALE}"
             )));
         }
         if params.num_inference_steps == 0 {

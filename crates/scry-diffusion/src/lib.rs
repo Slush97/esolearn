@@ -17,6 +17,11 @@
 #![allow(clippy::doc_markdown)]
 // Constructors that store their config by-value trip this needlessly.
 #![allow(clippy::needless_pass_by_value)]
+// `to_device` is the workspace convention for "upload tensors to backend
+// device" — semantically a mutation, not a value-consuming conversion.
+// `&mut self` is correct here even though clippy expects `to_*` to take
+// self by value.
+#![allow(clippy::wrong_self_convention)]
 
 pub mod conditioning;
 pub mod error;

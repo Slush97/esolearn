@@ -133,8 +133,8 @@ impl DdimScheduler {
         let t_idx = timestep_to_index(timestep, self.alphas_cumprod.len())?;
         let prev_signed = i64::from(t_idx) - i64::from(self.step_size);
         let alpha_prod_t = self.alphas_cumprod[t_idx as usize];
-        let alpha_prod_t_prev = if prev_signed >= 0 {
-            self.alphas_cumprod[prev_signed as usize]
+        let alpha_prod_t_prev = if let Ok(prev_idx) = usize::try_from(prev_signed) {
+            self.alphas_cumprod[prev_idx]
         } else if self.config.set_alpha_to_one {
             1.0
         } else {
