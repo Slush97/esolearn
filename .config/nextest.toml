@@ -11,4 +11,9 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 retries = 2
 fail-fast = false
 failure-output = "immediate-final"
-slow-timeout = { period = "60s", terminate-after = 3 }
+# 60s × 15 = 15 min hard kill. scry-learn ML golden tests (5-fold CV
+# across 4 datasets, California Housing 80/20) routinely run 3–10 min
+# on a free GHA runner — the previous 3 min cap was killing them
+# mid-run and retrying 3× for nothing. CI runners have their own job
+# timeout (6h default) as the real backstop.
+slow-timeout = { period = "60s", terminate-after = 15 }
