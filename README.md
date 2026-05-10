@@ -22,7 +22,6 @@ The workspace is split into two families:
 |-------|-------------|
 | **esoc-chart** | High-level charting API (histogram, scatter, bar, box plot, pie, heatmap, etc.) with express and grammar interfaces. |
 | **esoc-gfx** | SVG-first 2D vector graphics engine. Optional PNG rasterization via resvg/tiny-skia. |
-| **esoc-gpu** | wgpu GPU rendering backend — instanced mark rendering, SDF anti-aliasing, MSDF text. |
 | **esoc-scene** | Arena-based scene graph with typed visual marks. Shared IR between chart logic and renderers. |
 | **esoc-color** | OKLab/OKLCH perceptual color math, CVD simulation, palettes, gamut clipping. Zero dependencies. |
 | **esoc-geo** | Map projections (Mercator, Equal Earth, Natural Earth, Albers USA), GeoJSON parsing, polygon simplification, bundled world/US geometries. |
@@ -68,7 +67,6 @@ crates/
   scry-vision/       Vision inference
   esoc-chart/        Charting API
   esoc-gfx/          2D graphics engine
-  esoc-gpu/          GPU chart rendering
   esoc-scene/        Scene graph IR
   esoc-color/        Color system
   esoc-geo/          Geographic utilities

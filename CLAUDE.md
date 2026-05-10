@@ -1,6 +1,6 @@
 # CLAUDE.md — esolearn workspace
 
-Rust workspace, edition 2021, MSRV 1.85.0. 11 active crates in two families: `scry-*` for AI/ML inference and computer vision, `esoc-*` for graphics/visualization. `scry-app` and `scry-stt` are excluded from the workspace; `esoc-gpu` lives under `archived/`.
+Rust workspace, edition 2021, MSRV 1.85.0. 11 active crates in two families: `scry-*` for AI/ML inference and computer vision, `esoc-*` for graphics/visualization. `scry-app` and `scry-stt` are excluded from the workspace.
 
 ## Global Commands
 
@@ -120,6 +120,3 @@ Map projections, GeoJSON, bundled geometries.
 
 ---
 
-## Archived
-
-- **`archived/esoc-gpu`** — wgpu rendering crate, beta; out of workspace pending Phase 6 (GPU rendering completion). Required `unsafe_code = "allow"` for bytemuck Pod/Zeroable impls; WGSL shaders per pass (rect/point/line/rule/text/tess); SDF AA in fragment shaders.
