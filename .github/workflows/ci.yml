@@ -115,3 +115,63 @@ jobs:
         with:
           key: miri
       - run: cargo +nightly miri test -p scry-llm --no-default-features --test miri_safe
+
+  m9e-artifacts:
+    # M9e gate artifacts. The actual perf-regression and golden-image
+    # checks need a GPU and SD weights and run from the local pre-push
+    # hook (see .githooks/pre-push). This job just validates that the
+    # checked-in artifacts those hooks produce are well-formed, so a PR
+    # that hand-edits them or commits garbage fails CI.
+    name: m9e gate artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: validate bench/history.jsonl
+        run: |
+          if [ ! -f bench/history.jsonl ]; then
+            echo "::error::bench/history.jsonl is missing — seed it with bench_sd --json-out"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, sys, pathlib
+          REQUIRED = [
+              "epoch_secs", "sha", "backend", "scheduler",
+              "size", "steps", "runs", "cfg", "seed",
+              "bf16_matmul", "no_cudnn",
+              "wall_ms_median", "step_ms_median",
+              "step_ms_min", "step_ms_max", "n_steps_sampled",
+          ]
+          path = pathlib.Path("bench/history.jsonl")
+          n = 0
+          for lineno, raw in enumerate(path.read_text().splitlines(), 1):
+              line = raw.strip()
+              if not line:
+                  continue
+              try:
+                  obj = json.loads(line)
+              except json.JSONDecodeError as e:
+                  print(f"::error file={path},line={lineno}::malformed JSON: {e}")
+                  sys.exit(1)
+              missing = [k for k in REQUIRED if k not in obj]
+              if missing:
+                  print(f"::error file={path},line={lineno}::missing fields {missing}")
+                  sys.exit(1)
+              n += 1
+          if n == 0:
+              print(f"::error file={path}::no entries")
+              sys.exit(1)
+          print(f"bench/history.jsonl: {n} entr{'y' if n==1 else 'ies'} valid")
+          PY
+      - name: validate golden-hash fixture
+        run: |
+          FX=crates/scry-diffusion/tests/fixtures/golden_hash.txt
+          if [ ! -f "$FX" ]; then
+            echo "::error::$FX is missing — seed with GOLDEN_HASH_UPDATE=1 cargo nextest run --test golden_hash"
+            exit 1
+          fi
+          h=$(tr -d '[:space:]' < "$FX")
+          if [[ ! "$h" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error file=$FX::not a 64-char lowercase sha256: '$h'"
+            exit 1
+          fi
+          echo "$FX: $h"

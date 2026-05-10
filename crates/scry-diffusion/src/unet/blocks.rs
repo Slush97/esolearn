@@ -96,18 +96,24 @@ impl<B: MathBackend> DownBlock<B> {
         time_embed: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<(Tensor<B>, Vec<Tensor<B>>)> {
-        let mut x = super::common::clone_tensor(feature_map);
+        use crate::profile::time_section;
+
+        let mut x = time_section("down.clone_in", || super::common::clone_tensor(feature_map));
         let mut skips = Vec::with_capacity(self.resnets.len() + 1);
         for (i, resnet) in self.resnets.iter_mut().enumerate() {
             x = resnet.forward(&x, time_embed)?;
             if let Some(atts) = self.attentions.as_mut() {
                 x = atts[i].forward(&x, conditioning)?;
             }
-            skips.push(super::common::clone_tensor(&x));
+            skips.push(time_section("down.skip_clone", || {
+                super::common::clone_tensor(&x)
+            }));
         }
         if let Some(d) = &self.downsampler {
-            x = d.conv.forward(&x);
-            skips.push(super::common::clone_tensor(&x));
+            x = time_section("down.downsample_conv", || d.conv.forward(&x));
+            skips.push(time_section("down.skip_clone_post", || {
+                super::common::clone_tensor(&x)
+            }));
         }
         Ok((x, skips))
     }
@@ -187,14 +193,16 @@ impl<B: MathBackend> UpBlock<B> {
         time_embed: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
-        let mut x = super::common::clone_tensor(feature_map);
+        use crate::profile::time_section;
+
+        let mut x = time_section("up.clone_in", || super::common::clone_tensor(feature_map));
         for (i, resnet) in self.resnets.iter_mut().enumerate() {
             let skip = skips.pop().ok_or_else(|| {
                 crate::error::Error::Llm(
                     "up block: ran out of skip activations from down stack".into(),
                 )
             })?;
-            x = concat_channels(&x, &skip);
+            x = time_section("up.concat_channels", || concat_channels(&x, &skip));
             x = resnet.forward(&x, time_embed)?;
             if let Some(atts) = self.attentions.as_mut() {
                 x = atts[i].forward(&x, conditioning)?;
@@ -204,9 +212,11 @@ impl<B: MathBackend> UpBlock<B> {
             // Diffusers `Upsample2D`: nearest-2× then 3×3 padding-1 conv.
             let dims = x.shape.dims();
             let (c, h, w) = (dims[0], dims[1], dims[2]);
-            let upsampled = B::upsample_2d_nearest(&x.data, c, h, w, 2);
-            let upsampled_t = Tensor::new(upsampled, Shape::new(&[c, h * 2, w * 2]));
-            x = u.conv.forward(&upsampled_t);
+            let upsampled_t = time_section("up.upsample_nearest", || {
+                let upsampled = B::upsample_2d_nearest(&x.data, c, h, w, 2);
+                Tensor::new(upsampled, Shape::new(&[c, h * 2, w * 2]))
+            });
+            x = time_section("up.upsample_conv", || u.conv.forward(&upsampled_t));
         }
         Ok(x)
     }

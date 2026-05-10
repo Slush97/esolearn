@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Pre-push gate for esolearn.
+#
+# Runs the same checks CI runs (fmt + clippy + nextest), then the M9e
+# perf-regression and golden-image-hash gates that CI cannot run because
+# they require a GPU and the SD 1.5 weight snapshot.
+#
+# Enable with:
+#   git config core.hooksPath .githooks
+#
+# Skip in an emergency with `git push --no-verify` — but expect to fix
+# whatever was failing before the next push.
+#
+# GPU gates auto-skip with a warning if `nvidia-smi` is missing, so this
+# hook stays usable from a laptop that doesn't have the dev box's CUDA
+# stack. The actual gate values still live with the GPU box's commits.
+
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[pre-push] cargo fmt --check"
+cargo fmt --all -- --check
+
+echo "[pre-push] cargo clippy --workspace --all-targets --locked -- -D warnings"
+cargo clippy --workspace --all-targets --locked -- -D warnings
+
+echo "[pre-push] cargo nextest run --workspace --locked --profile ci"
+cargo nextest run --workspace --locked --profile ci
+
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "[pre-push] WARN: nvidia-smi not found — skipping perf + golden-hash gates."
+    echo "[pre-push] all CPU-side gates green"
+    exit 0
+fi
+
+export CUDARC_CUDA_VERSION="${CUDARC_CUDA_VERSION:-13010}"
+export GIT_SHA="$(git rev-parse HEAD)"
+
+GPU_FEATURES="safetensors,decode,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn"
+
+# Run the bench against a TRANSIENT copy of history.jsonl so a push
+# doesn't side-effect the committed baseline. New entries enter the
+# baseline only via deliberate `cargo run --example bench_sd
+# --json-out bench/history.jsonl` + commit.
+TMP_HISTORY="$(mktemp -t scry-bench-history-XXXXXX.jsonl)"
+trap 'rm -f "$TMP_HISTORY"' EXIT
+if [ -f bench/history.jsonl ]; then
+    cp bench/history.jsonl "$TMP_HISTORY"
+fi
+
+echo "[pre-push] bench_sd (gate config: 4 steps, 64×64, bf16, DDIM, 1 run)"
+cargo run --release --quiet -p scry-diffusion --example bench_sd \
+    --features "$GPU_FEATURES" --locked -- \
+    --steps 4 --size 64 --runs 1 --warmup 1 --bf16-matmul \
+    --json-out "$TMP_HISTORY"
+
+echo "[pre-push] check_perf_history"
+cargo run --release --quiet -p scry-diffusion --example check_perf_history \
+    --locked -- --history "$TMP_HISTORY"
+
+echo "[pre-push] golden-hash"
+cargo nextest run -p scry-diffusion --release --locked \
+    --features safetensors,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn \
+    --test golden_hash
+
+echo "[pre-push] all gates green"

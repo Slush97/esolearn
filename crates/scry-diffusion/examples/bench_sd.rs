@@ -39,7 +39,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use scry_diffusion::scheduler::ddim::{DdimConfig, DdimScheduler};
 use scry_diffusion::text_encoder::clip_text::{ClipTextConfig, ClipTextEncoder};
@@ -74,6 +74,7 @@ struct Args {
     bf16_matmul: bool,
     no_cudnn: bool,
     profile: bool,
+    json_out: Option<PathBuf>,
 }
 
 impl Args {
@@ -90,6 +91,7 @@ impl Args {
         let mut bf16_matmul = false;
         let mut no_cudnn = false;
         let mut profile = false;
+        let mut json_out: Option<PathBuf> = None;
 
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -146,6 +148,9 @@ impl Args {
                 "--bf16-matmul" => bf16_matmul = true,
                 "--no-cudnn" => no_cudnn = true,
                 "--profile" => profile = true,
+                "--json-out" => {
+                    json_out = Some(PathBuf::from(args.next().ok_or("--json-out needs path")?));
+                }
                 "-h" | "--help" => {
                     println!("{}", USAGE);
                     std::process::exit(0);
@@ -169,6 +174,7 @@ impl Args {
             bf16_matmul,
             no_cudnn,
             profile,
+            json_out,
         })
     }
 }
@@ -191,7 +197,9 @@ Options:
   --warmup N            Discarded warmup runs (default: 1)
   --bf16-matmul         Enable bf16 matmul fast-path (requires scry-gpu-bf16)
   --no-cudnn            Disable cuDNN conv fast-path (requires scry-gpu-cudnn)
-  --profile             Print per-section timing breakdown (requires `profile` feature)";
+  --profile             Print per-section timing breakdown (requires `profile` feature)
+  --json-out PATH       Append one JSON-line summary to PATH (for perf-regression gates).
+                        Reads GIT_SHA from env to tag the entry; falls back to \"unknown\".";
 
 fn median(mut xs: Vec<f64>) -> f64 {
     if xs.is_empty() {
@@ -351,6 +359,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.profile {
         scry_diffusion::profile::print_summary();
     }
+
+    if let Some(path) = args.json_out.as_ref() {
+        write_json_line(path, &args, med_total, &all_step_times)?;
+        println!("\n[json-out] appended one entry to {}", path.display());
+    }
+
+    Ok(())
+}
+
+fn write_json_line(
+    path: &std::path::Path,
+    args: &Args,
+    wall_ms_median: f64,
+    all_step_times: &[f64],
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let epoch_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let sha = std::env::var("GIT_SHA").unwrap_or_else(|_| "unknown".to_string());
+
+    let (step_med, step_min, step_max, n_step) = if all_step_times.is_empty() {
+        (0.0, 0.0, 0.0, 0_usize)
+    } else {
+        (
+            median(all_step_times.to_vec()),
+            all_step_times.iter().copied().fold(f64::INFINITY, f64::min),
+            all_step_times
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max),
+            all_step_times.len(),
+        )
+    };
+
+    let entry = serde_json::json!({
+        "epoch_secs": epoch_secs,
+        "sha": sha,
+        "backend": BACKEND_NAME,
+        "scheduler": "ddim",
+        "size": args.size,
+        "steps": args.steps,
+        "runs": args.runs,
+        "cfg": args.cfg,
+        "seed": args.seed,
+        "bf16_matmul": args.bf16_matmul,
+        "no_cudnn": args.no_cudnn,
+        "wall_ms_median": wall_ms_median,
+        "step_ms_median": step_med,
+        "step_ms_min": step_min,
+        "step_ms_max": step_max,
+        "n_steps_sampled": n_step,
+    });
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{entry}")?;
     Ok(())
 }
 

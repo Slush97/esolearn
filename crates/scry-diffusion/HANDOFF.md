@@ -585,3 +585,238 @@ scaffold doesn't repeat.
   "fused attention is the next attack surface" finding from ViT round 3.
 - The `gpu-resident/scry-vision` branch may still hold an open PR
   (`bf16 strided batched matmul`); confirm via `gh pr list`.
+
+## M9e — CI gates (2026-05-10)
+
+Locks in measurement before M9f's profile drill-down so M9g's perf work
+has a baseline it can't drift past.
+
+**Decision (deferred per MILESTONES.md):** the perf-regression and
+golden-image gates run from a **local pre-push hook**, not GitHub
+Actions. The bench needs a CUDA GPU and the SD 1.5 weight snapshot;
+both are out of reach for `ubuntu-latest` and not worth a self-hosted
+runner at this stage. CI gets a thin artifact-validator job so a PR
+that hand-edits `bench/history.jsonl` or the golden hash fixture still
+fails.
+
+**Pieces:**
+
+- `bench_sd --json-out PATH` — appends one JSON-line summary (epoch,
+  GIT_SHA env, scheduler, gate-config knobs, median/min/max step + wall
+  ms). Doesn't disturb the human-readable bench output.
+- `crates/scry-diffusion/examples/check_perf_history.rs` — reads
+  `bench/history.jsonl`, filters by gate bucket
+  (`size=64 steps=4 scheduler=ddim bf16=true no_cudnn=false` by default),
+  fails with exit 1 if the latest entry's `step_ms_median` is more than
+  `--max-regression` (default 15.0) percent slower than the median of
+  the trailing `--window` (default 10) baseline entries. Exit codes:
+  `0` ok-or-not-enough-history, `1` regression, `2` malformed input.
+- `crates/scry-diffusion/tests/golden_hash.rs` — runs txt2img at
+  `prompt="a photo of a cat" seed=42 cfg=7.5 steps=4 size=64`,
+  quantises the post-decode tensor to u8 HWC, hashes via SHA-256 and
+  compares to `tests/fixtures/golden_hash.txt` (committed). Compile-time
+  `cfg(all(feature = "safetensors", feature = "scry-gpu-cuda"))` so it
+  drops out of CI's matrix; the pre-push hook enables the GPU features
+  to compile + run it. Update with
+  `GOLDEN_HASH_UPDATE=1 cargo nextest run -p scry-diffusion --release
+  --features safetensors,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn
+  --test golden_hash` and commit the new fixture.
+- `.githooks/pre-push` — fmt → clippy → nextest → bench_sd into a
+  *transient* mktemp copy of history.jsonl → check_perf_history → golden
+  hash test. Auto-skips the GPU half if `nvidia-smi` is missing so a
+  laptop checkout still gets the CPU-side gates. Enable with
+  `git config core.hooksPath .githooks`.
+- `.github/workflows/ci.yml` — new `m9e-artifacts` job validates that
+  every line in `bench/history.jsonl` is JSON with the required field
+  set, and that the golden-hash fixture is a 64-char lowercase sha256.
+  Runs on `ubuntu-latest`, no Rust toolchain.
+
+**Baseline seeded on RTX 5070 Ti at HEAD 7280984:**
+`step_ms_median = 19.36 ms`, `wall_ms_median = 93.2 ms` at the gate
+config. One entry; the perf gate prints "not enough history to gate"
+until the second matching entry arrives.
+
+**Gate fail-on-bad demos (verified locally 2026-05-10):**
+- `+12.81%` synthetic candidate → exit 0 (under the +15% threshold).
+- `+17.19%` synthetic candidate → exit 1 with the threshold and observed
+  delta logged.
+- Fixture overwritten to all-zeros → `txt2img_golden_hash` panics with
+  expected/actual hashes and the `GOLDEN_HASH_UPDATE` remediation hint.
+- Fixture restored → test passes again.
+
+**Gotchas to know before extending the baseline:**
+
+- New baseline entries enter `bench/history.jsonl` only by deliberate
+  human action: run the bench against the *committed* file with
+  `--json-out bench/history.jsonl`, eyeball the line, commit. The
+  pre-push hook never mutates the committed file (it copies to a
+  mktemp first), so a push can't smuggle in a baseline.
+- `step_ms_median` for `--steps 4 --runs 1` derives from 3 step
+  deltas (the progress callback fires before each of the 4 steps; the
+  last step's tail isn't captured). If the bench is changed to use
+  more steps or runs, expect the variance envelope to tighten and
+  consider lowering `--max-regression`.
+- The bf16 toggle is process-global on `ScryGpuBackend`. The bench
+  flips it on with `--bf16-matmul` and never restores; safe because
+  the bench process exits, but the gate buckets must pin
+  `bf16_matmul=true` to match. The golden-hash test does the same
+  toggle for the same reason.
+- `golden_hash.rs` quantises to u8 *before* hashing, so cuBLAS / cuDNN
+  sub-LSB jitter doesn't flake the gate. If a real change drops the
+  perceptual hash, that is the gate doing its job — not flakiness.
+  Expect this to need `GOLDEN_HASH_UPDATE=1` after M9g (CFG batch /
+  fused attention / CUDA graphs all change the dataflow enough that a
+  bit-identical hash is unrealistic).
+## M9f — Profile the outer 40% (2026-05-10)
+
+Diagnostic-only milestone — read-only instrumentation that closes the
+"outer 40%" hole the M9c table left open, so M9g can pick F/G/H from
+data instead of intuition.
+
+**Instrumentation added (commit on `feat/m9f`):**
+
+- `unet/blocks.rs::DownBlock::forward` — `down.clone_in`,
+  `down.skip_clone` (per-resnet), `down.downsample_conv`,
+  `down.skip_clone_post`.
+- `unet/blocks.rs::UpBlock::forward` — `up.clone_in`,
+  `up.concat_channels`, `up.upsample_nearest`, `up.upsample_conv`.
+- `unet/attention.rs::SpatialTransformer::forward` — `xfrm.norm`,
+  `xfrm.proj_in`, `xfrm.transpose_in`, `xfrm.transpose_out`,
+  `xfrm.proj_out`, `xfrm.residual`.
+- `unet/mod.rs` — `unet.skip_record_in` (the conv_in skip clone that
+  used to fall through unaccounted between `unet.conv_in` and
+  `unet.down_blocks`).
+
+All new sections compile to zero overhead when the `profile` cargo
+feature is off (existing `time_section` no-op stubs in `profile.rs`).
+Behavior unchanged at default features — the only change in those
+builds is that closure bodies replace direct calls, which the
+optimizer flattens.
+
+**Profile run:** `cargo run -p scry-diffusion --release --example
+bench_sd --features safetensors,decode,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn,profile
+-- --profile --steps 4 --size 512 --bf16-matmul` on RTX 5070 Ti.
+Captured at `bench/profile_2026-05-10.txt`. 3 timed runs + 1 warmup;
+per-step median 159.62 ms / wall median 1414.6 ms (4-step). Profile
+totals are aggregated across all 12 step calls × 2 forwards/CFG = 24
+UNet forwards.
+
+**Decomposition by % of UNet wall-clock.** UNet denominator =
+`unet.conv_in + unet.time_embed + unet.skip_record_in +
+unet.down_blocks + unet.mid_block + unet.up_blocks + unet.tail` =
+**1914.71 ms** across 24 forwards (= ~79.8 ms per UNet forward, the
+expected half of the 159 ms per-step at CFG batch=2-via-2-forwards).
+
+| Section                       |  ms     | % UNet | calls |
+|---|---|---|---|
+| **xfblock.self_attn**         | 1032.99 | 53.95% |   384 |
+|   ↳ attn.softmax              |  247.72 | 12.94% |   768 |
+|   ↳ attn.values  (·V)         |  212.33 | 11.09% |   768 |
+|   ↳ attn.scores  (Q·K^T)      |  146.39 |  7.65% |   768 |
+|   ↳ attn.qkv_proj             |   37.00 |  1.93% |   768 |
+|   ↳ attn.reshape_in/out       |   25.85 |  1.35% |  1536 |
+|   ↳ attn.out_proj             |   24.35 |  1.27% |   768 |
+| **resblock.forward**          |  450.11 | 23.51% |   528 |
+| **xfblock.ff** (GeGLU)        |  127.45 |  6.66% |   384 |
+|   ↳ ff.proj_values            |   26.70 |  1.39% |   384 |
+|   ↳ ff.proj_gate              |   24.07 |  1.26% |   384 |
+|   ↳ ff.proj_out               |   23.94 |  1.25% |   384 |
+|   ↳ ff.gate (mul)             |   22.60 |  1.18% |   384 |
+|   ↳ ff.gate.exact_gelu        |    7.01 |  0.37% |   384 |
+| **xfblock.cross_attn**        |   97.35 |  5.08% |   384 |
+| **up.upsample_conv**          |   53.30 |  2.78% |    72 |
+| **unet.mid_block**            |   44.72 |  2.34% |    24 |
+| **xfrm.norm** (GroupNorm)     |   18.97 |  0.99% |   384 |
+| **down.downsample_conv**      |   14.91 |  0.78% |    72 |
+| **xfrm.proj_in** (1×1)        |   13.03 |  0.68% |   384 |
+| **xfrm.proj_out** (1×1)       |   12.43 |  0.65% |   384 |
+| **xfrm.transpose_out**        |    9.69 |  0.51% |   384 |
+| **unet.tail**                 |    9.48 |  0.50% |    24 |
+| **xfrm.transpose_in**         |    8.20 |  0.43% |   384 |
+| **up.concat_channels**        |    4.81 |  0.25% |   288 |
+| **xfrm.residual** (add)       |    4.52 |  0.24% |   384 |
+| **up.clone_in**               |    2.63 |  0.14% |    96 |
+| **unet.time_embed**           |    2.07 |  0.11% |    24 |
+| **down.skip_clone**           |    1.95 |  0.10% |   192 |
+| **unet.conv_in**              |    1.93 |  0.10% |    24 |
+| **up.upsample_nearest**       |    1.34 |  0.07% |    72 |
+| **down.clone_in**             |    0.96 |  0.05% |    96 |
+| **down.skip_clone_post**      |    0.83 |  0.04% |    72 |
+| **unet.skip_record_in**       |    0.43 |  0.02% |    24 |
+
+**Coverage check.** Sum of all leaves named above = 1909.07 ms =
+**99.70%** of UNet. Unaccounted residual = **5.64 ms = 0.30% of UNet**
+— well below the M9f exit threshold of 5%. (Residual is a mix of
+`time_section` sync_gpu overhead, Vec push/pop, and per-loop helper
+machinery in up/down blocks; not worth pursuing.)
+
+**Where the old "outer 40%" went.** The HANDOFF M9c table called the
+unaccounted bucket "40% — up_blocks/down_blocks aggregate residual,
+helper kernels, launch overhead." After M9c rounds 1–3 (matmul_bias,
+mul_elementwise, to_device cascade) and the M9d bf16 default, the
+*unaccounted* fraction was already much smaller than 40% — the old
+table was a stale framing. M9f's instrumentation confirms that:
+
+- **Helper kernels are tiny.** All `up.*` + `down.*` + `xfrm.*`
+  combined = **148 ms = 7.7% of UNet**. The single biggest helper
+  (`up.upsample_conv` at 2.8%) is a 3×3 conv at the shallowest stage
+  shape — unavoidable cuDNN cost.
+- **No latent host-roundtrip**. Every helper either runs in the µs
+  range (`up.concat_channels` 17 µs/call, `up.clone_in` 27 µs/call,
+  `xfrm.transpose_*` ~22 µs/call) or its on-device kernel time matches
+  the expected work (upsample_conv, downsample_conv at ~200-740
+  µs/call). The to_device-cascade lesson held: nothing here is paying
+  silent upload cost any more.
+- **Self-attention dominates.** `xfblock.self_attn` is **54.0% of
+  UNet** — softmax + scores + values together account for **31.7% of
+  UNet** (12.94 + 11.09 + 7.65). Cross-attention is comparatively
+  cheap (5.1%) because its K/V dim is much smaller than its Q dim.
+
+**What this implies for M9g (do not pre-decide):**
+
+- **G — fused attention** is now the strongest candidate by a wide
+  margin. Self-attention's softmax + scores + values are exactly what
+  FlashAttention's online-softmax fusion targets, and they already
+  account for nearly a third of UNet wall-clock. Even a partial fusion
+  (matmul-softmax-matmul without online softmax) should collapse
+  ~25% of UNet given that the 3 ops currently round-trip an
+  intermediate `[heads, n_q, n_kv]` softmax tensor through global
+  memory.
+- **F — CFG batching** is still the second-best candidate. The two
+  forwards per step are nearly identical wallclock (the bench's median
+  step is 2 × ~80 ms = 159 ms), and cuBLAS at batch=2 should give
+  ~30-40% step-time win at SD shapes (the matmul-strided-batched paths
+  in attention already handle batch dims, so the mechanical cost is
+  refactoring the conv/groupnorm helpers in `unet/{common,blocks}.rs`
+  and the `transpose_chw_to_hwc` style helpers to thread a batch dim).
+- **H — CUDA graphs** is the *weakest* candidate from this profile.
+  The smallest per-call leaves cluster around 10–20 µs (`down.clone_in`
+  10 µs, `xfrm.transpose_in` 21 µs, `attn.reshape_in` 15 µs) — that's
+  the cudaLaunchKernel floor. The total kernel-launch overhead
+  estimate at ~517 dispatches/forward × ~12 µs floor = ~6 ms/forward =
+  ~7.5% of UNet. Worth recovering eventually, but not for a multi-week
+  budget when G is twice as productive.
+
+The decision and one-paragraph rationale referencing the table above
+land in `docs/DECISIONS.md` per the M9g exit criterion. M9f does
+**not** commit to any of F / G / H — that's M9g's job.
+
+**Gotchas the next profile run should know about:**
+
+- The `--profile` feature wraps every `time_section` call in a pair of
+  `cudaDeviceSynchronize` calls. That serialises every dispatch, so
+  the absolute timings under `--profile` are 5-10% slower than the
+  same shape without `--profile`. Use the wall-clock from a
+  `--profile`-OFF run for actual perf claims; use `--profile` only for
+  attribution.
+- The summary's "% total" column is computed against the sum of *every
+  recorded entry's* duration, including parents and children — so it
+  double-counts wrappers like `unet.up_blocks` and its `up.*` /
+  `xfrm.*` / `xfblock.*` children. The "% UNet" column in this section
+  uses only the seven `unet.*` leaf wrappers as the denominator, which
+  is the right framing for talking about UNet wall-clock.
+- Per-call shape variation matters. `attn.softmax` averages 0.32 ms
+  but the deepest stage softmax is on `[heads, 64, 64]` (4K floats)
+  while the shallowest is on `[heads, 4096, 4096]` (16M floats). When
+  profiling FlashAttention later, expect the per-call to spread across
+  ~3 orders of magnitude — average is misleading.

@@ -378,6 +378,8 @@ impl<B: MathBackend> SpatialTransformer<B> {
         feature_map: &Tensor<B>,
         conditioning: &Conditioning<B>,
     ) -> Result<Tensor<B>> {
+        use crate::profile::time_section;
+
         let dims = feature_map.shape.dims();
         debug_assert_eq!(dims.len(), 3);
         let (c, h, w) = (dims[0], dims[1], dims[2]);
@@ -385,19 +387,25 @@ impl<B: MathBackend> SpatialTransformer<B> {
         let n = h * w;
 
         // Pre-norm + 1×1 in projection, still NCHW.
-        let normed = self.norm.forward(feature_map);
-        let proj_in = self.proj_in.forward(&normed);
+        let normed = time_section("xfrm.norm", || self.norm.forward(feature_map));
+        let proj_in = time_section("xfrm.proj_in", || self.proj_in.forward(&normed));
 
         // [C, H, W] -> [H*W, C] for the transformer blocks.
-        let mut x = transpose_chw_to_hwc::<B>(&proj_in, c, n);
+        let mut x = time_section("xfrm.transpose_in", || {
+            transpose_chw_to_hwc::<B>(&proj_in, c, n)
+        });
         for block in &mut self.transformer_blocks {
             x = block.forward(&x, conditioning)?;
         }
 
         // [H*W, C] -> [C, H, W] and 1×1 out projection, then residual.
-        let x_chw = transpose_hwc_to_chw::<B>(&x, n, c, h, w);
-        let proj_out = self.proj_out.forward(&x_chw);
-        Ok(add_same(feature_map, &proj_out))
+        let x_chw = time_section("xfrm.transpose_out", || {
+            transpose_hwc_to_chw::<B>(&x, n, c, h, w)
+        });
+        let proj_out = time_section("xfrm.proj_out", || self.proj_out.forward(&x_chw));
+        Ok(time_section("xfrm.residual", || {
+            add_same(feature_map, &proj_out)
+        }))
     }
 }
 

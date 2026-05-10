@@ -83,14 +83,15 @@ Detailed milestones tracked in the GitHub Project board (M9d through M24). Phase
 - **Branching:** short-lived `feat/<milestone>` branches, PR to main, squash merge.
 - **Commits:** Conventional Commits (`feat:`, `fix:`, `perf:`, `docs:`, `chore:`).
 - **Tests:** `cargo nextest` for unit/integration; `cargo test --doc` periodically.
-- **Per-PR quality gates:** fmt, clippy (workspace pedantic), nextest green, perf regression CI gate (≤15% step-time regression on the smoke bench), HF parity gates for any new model component, golden image hash unchanged.
+- **Per-PR quality gates:** fmt, clippy (workspace pedantic), nextest green, perf-regression gate (≤15% step-time regression on the smoke bench), HF parity gates for any new model component, golden image hash unchanged.
+- **Local pre-push hook:** the perf-regression and golden-image-hash gates need a CUDA GPU and the SD 1.5 weight snapshot, so they live in `.githooks/pre-push` and run before each `git push`, not in CI. Enable once per checkout with `git config core.hooksPath .githooks`. The hook auto-skips the GPU-only gates with a warning when `nvidia-smi` is missing, so a laptop checkout still gets fmt/clippy/nextest. To extend the perf baseline, run `cargo run --release -p scry-diffusion --example bench_sd --features safetensors,decode,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn -- --steps 4 --size 64 --runs 1 --warmup 1 --bf16-matmul --json-out bench/history.jsonl` and commit the appended line.
 - **Per-milestone documentation:** every milestone closes with a HANDOFF entry — either appended to the relevant per-crate HANDOFF doc or summarized in the GitHub Project issue. Future-self reads these to reload context after a week away.
 
 ## Metrics tracked
 
-- **Perf:** `bench/history.jsonl` — append per-PR median step time at fixed config; CI gate fails on >15% regression vs trailing-10 median.
+- **Perf:** `bench/history.jsonl` — appended deliberately per perf-relevant PR with median step time at the gate config (4 steps × 64×64, DDIM, bf16); pre-push gate fails on >15% regression vs trailing-10 median.
 - **Parity:** HF parity test tolerances per component (currently CLIP 1e-4, VAE 1e-3, UNet 1e-3, DDIM 1e-4); regressions fail CI.
-- **Output stability:** golden image hash for fixed seed + config; any change requires a manual override commit.
+- **Output stability:** golden image hash committed at `crates/scry-diffusion/tests/fixtures/golden_hash.txt`; pre-push gate fails on any change. Update with `GOLDEN_HASH_UPDATE=1 cargo nextest run -p scry-diffusion --release --test golden_hash --features safetensors,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn` and commit the new fixture.
 
 ## See also
 
