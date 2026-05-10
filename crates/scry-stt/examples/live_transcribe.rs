@@ -23,7 +23,9 @@ use scry_llm::tensor::Tensor;
 
 use scry_stt::checkpoint::load_whisper_checkpoint;
 use scry_stt::decode::{greedy_decode, DecodeConfig};
-use scry_stt::mel::{log_mel_spectrogram, pad_or_trim_audio, WHISPER_CHUNK_SAMPLES, WHISPER_SAMPLE_RATE};
+use scry_stt::mel::{
+    log_mel_spectrogram, pad_or_trim_audio, WHISPER_CHUNK_SAMPLES, WHISPER_SAMPLE_RATE,
+};
 use scry_stt::model::config::WhisperConfig;
 use scry_stt::tokenizer::WhisperTokenizer;
 
@@ -76,7 +78,7 @@ fn write_wav_f32(path: &str, samples: &[f32], sample_rate: u32) {
     f.write_all(&(sample_rate * 2).to_le_bytes()).unwrap(); // byte rate
     f.write_all(&2u16.to_le_bytes()).unwrap(); // block align
     f.write_all(&16u16.to_le_bytes()).unwrap(); // bits per sample
-    // data chunk
+                                                // data chunk
     f.write_all(b"data").unwrap();
     f.write_all(&data_size.to_le_bytes()).unwrap();
     for &s in samples {
@@ -109,8 +111,7 @@ fn main() {
     let config = WhisperConfig::tiny();
     let model =
         load_whisper_checkpoint::<Backend>(&model_path, &config).expect("Failed to load model");
-    let tokenizer =
-        WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
+    let tokenizer = WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
     let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     println!("done ({load_ms:.0}ms)");
@@ -129,9 +130,7 @@ fn main() {
         .expect("No default input config");
     let sample_rate = input_config.sample_rate().0;
     let channels = input_config.channels() as usize;
-    println!(
-        "  Sample rate: {sample_rate} Hz, channels: {channels}"
-    );
+    println!("  Sample rate: {sample_rate} Hz, channels: {channels}");
     println!();
 
     let decode_config = DecodeConfig {
@@ -141,9 +140,7 @@ fn main() {
 
     // ── Main loop ───────────────────────────────────────────────────────
     loop {
-        println!(
-            "  Press \x1b[1mENTER\x1b[0m to start recording (Ctrl+C to quit)..."
-        );
+        println!("  Press \x1b[1mENTER\x1b[0m to start recording (Ctrl+C to quit)...");
         wait_for_enter();
 
         // Start recording
@@ -171,9 +168,7 @@ fn main() {
             .expect("Failed to build input stream");
 
         stream.play().expect("Failed to start recording");
-        print!(
-            "  \x1b[31m●\x1b[0m Recording... press \x1b[1mENTER\x1b[0m to stop  "
-        );
+        print!("  \x1b[31m●\x1b[0m Recording... press \x1b[1mENTER\x1b[0m to stop  ");
         io::stdout().flush().unwrap();
 
         wait_for_enter();
@@ -240,10 +235,8 @@ fn main() {
         // receive correct normalized values (not 0.0 which represents moderate energy).
         let audio_chunk = pad_or_trim_audio(&audio_16k);
         let mel = log_mel_spectrogram(&audio_chunk);
-        let mel_tensor = Tensor::<Backend>::from_vec(
-            mel.data,
-            Shape::new(&[mel.n_mels, mel.n_frames]),
-        );
+        let mel_tensor =
+            Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
         let encoder_output = model.encode(&mel_tensor);
         let tokens = greedy_decode(&model, &encoder_output, &decode_config);
         let text = tokenizer.decode(&tokens);
@@ -253,14 +246,9 @@ fn main() {
         println!("  Tokens: {:?}", &tokens[..tokens.len().min(20)]);
         println!();
         if text.trim().is_empty() {
-            println!(
-                "  \x1b[90m(no speech detected)\x1b[0m"
-            );
+            println!("  \x1b[90m(no speech detected)\x1b[0m");
         } else {
-            println!(
-                "  \x1b[1;32m>\x1b[0m \x1b[1m\"{}\"\x1b[0m",
-                text.trim()
-            );
+            println!("  \x1b[1;32m>\x1b[0m \x1b[1m\"{}\"\x1b[0m", text.trim());
         }
         println!();
     }

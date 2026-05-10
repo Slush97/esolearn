@@ -11,6 +11,8 @@
 *.bin
 *.gguf
 *.onnx
+# Embedded source assets (small filterbanks, lookup tables) — track these
+!crates/scry-stt/src/mel_filters_80.bin
 
 # LaTeX build artifacts
 *.aux
@@ -33,3 +35,9 @@
 .venv/
 __pycache__/
 *.pyc
+
+# scry-studio (Tauri + Vue) build artifacts
+crates/scry-studio/target/
+crates/scry-studio/frontend/node_modules/
+crates/scry-studio/frontend/dist/
+crates/scry-studio/Cargo.lock

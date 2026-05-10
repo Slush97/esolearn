@@ -45,6 +45,30 @@ required-features = ["dictate"]
 name = "scry-dictate-ctl"
 path = "src/bin/dictate_ctl.rs"
 
+[[example]]
+name = "live_transcribe"
+required-features = ["live", "safetensors"]
+
+[[example]]
+name = "bench_vs_python"
+required-features = ["live", "safetensors"]
+
+[[example]]
+name = "transcribe_wav"
+required-features = ["safetensors"]
+
+[[example]]
+name = "bench_cold_start"
+required-features = ["safetensors"]
+
+[[example]]
+name = "debug_encoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "debug_encoder2"
+required-features = ["safetensors"]
+
 [dev-dependencies]
 pretty_assertions = "1"
 

@@ -27,8 +27,8 @@ use scry_llm::tensor::Tensor;
 use scry_stt::checkpoint::load_whisper_checkpoint;
 use scry_stt::decode::{greedy_decode, DecodeConfig};
 use scry_stt::mel::{log_mel_spectrogram, pad_or_trim_audio, WHISPER_SAMPLE_RATE};
-use scry_stt::model::WhisperModel;
 use scry_stt::model::config::WhisperConfig;
+use scry_stt::model::WhisperModel;
 use scry_stt::tokenizer::WhisperTokenizer;
 
 const SOCKET_PATH: &str = "/tmp/scry-dictate.sock";
@@ -251,10 +251,7 @@ fn dirs_next() -> PathBuf {
 }
 
 fn infer_config(model_dir: &Path) -> WhisperConfig {
-    let dir_name = model_dir
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let dir_name = model_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if dir_name.contains("tiny") {
         WhisperConfig::tiny()
     } else if dir_name.contains("small") {
@@ -342,8 +339,7 @@ fn main() {
     let config = infer_config(&model_dir);
     let model =
         load_whisper_checkpoint::<Backend>(&model_path, &config).expect("Failed to load model");
-    let tokenizer =
-        WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
+    let tokenizer = WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
     eprintln!(
         "scry-dictate: model loaded in {:.0}ms ({})",
         t0.elapsed().as_secs_f64() * 1000.0,
@@ -423,7 +419,11 @@ fn main() {
         // Normalize "toggle" → "start" or "stop" based on current state.
         let cmd = match cmd.as_str() {
             "toggle" => {
-                let mapped = if state == State::Idle { "start" } else { "stop" };
+                let mapped = if state == State::Idle {
+                    "start"
+                } else {
+                    "stop"
+                };
                 eprintln!("scry-dictate: toggle → {mapped}");
                 mapped.to_string()
             }
@@ -508,12 +508,9 @@ fn main() {
                     notify("No speech", "");
                 } else {
                     eprintln!("scry-dictate: \"{text}\"");
-                    if let Err(e) = stats_db.insert(
-                        duration,
-                        &text,
-                        result.token_count,
-                        result.inference_ms,
-                    ) {
+                    if let Err(e) =
+                        stats_db.insert(duration, &text, result.token_count, result.inference_ms)
+                    {
                         eprintln!("scry-dictate: stats insert error: {e}");
                     }
                     notify("Transcribed", &text);
@@ -582,8 +579,7 @@ fn transcribe(
 
     let audio_chunk = pad_or_trim_audio(&audio_16k);
     let mel = log_mel_spectrogram(&audio_chunk);
-    let mel_tensor =
-        Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
+    let mel_tensor = Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
     let encoder_output = model.encode(&mel_tensor);
     let tokens = greedy_decode(model, &encoder_output, decode_config);
     let text = tokenizer.decode(&tokens);

@@ -144,7 +144,10 @@ fn run_python_benchmark(wav_path: &std::path::Path, model_name: &str) -> Option<
 }
 
 /// Run whisper.cpp benchmark and parse JSON output.
-fn run_whispercpp_benchmark(wav_path: &std::path::Path, model_name: &str) -> Option<serde_json::Value> {
+fn run_whispercpp_benchmark(
+    wav_path: &std::path::Path,
+    model_name: &str,
+) -> Option<serde_json::Value> {
     let script = scripts_dir().join("bench_whisper_cpp.py");
     if !script.exists() {
         return None;
@@ -252,8 +255,7 @@ fn transcribe_rust(
     let t_mel = Instant::now();
     let audio_chunk = pad_or_trim_audio(audio_16k);
     let mel = log_mel_spectrogram(&audio_chunk);
-    let mel_tensor =
-        Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
+    let mel_tensor = Tensor::<Backend>::from_vec(mel.data, Shape::new(&[mel.n_mels, mel.n_frames]));
     let mel_ms = t_mel.elapsed().as_secs_f64() * 1000.0;
 
     let t_enc = Instant::now();
@@ -287,9 +289,7 @@ fn transcribe_rust(
         let _ = tokenizer.decode(&tok);
         let total = tw.elapsed().as_secs_f64() * 1000.0;
         if profile {
-            eprintln!(
-                "  [warm {run_i}] total={total:.1}ms  enc={enc_ms:.1}ms  dec={dec_ms:.1}ms"
-            );
+            eprintln!("  [warm {run_i}] total={total:.1}ms  enc={enc_ms:.1}ms  dec={dec_ms:.1}ms");
         }
         warm_runs.push(total);
     }
@@ -379,8 +379,18 @@ fn print_comparison(
 
     print_row("Mel spectrogram", rust.mel_ms, w_mel, py_mel);
     print_row("Encoder", rust.encoder_ms, w_enc, None);
-    print_row("Decode + detok", rust.decode_ms + rust.detok_ms, w_dec, py_decode);
-    print_row("Total inference", rust.total_inference_ms, w_total, py_total);
+    print_row(
+        "Decode + detok",
+        rust.decode_ms + rust.detok_ms,
+        w_dec,
+        py_decode,
+    );
+    print_row(
+        "Total inference",
+        rust.total_inference_ms,
+        w_total,
+        py_total,
+    );
     println!("├─────────────────────────┼──────────────┼──────────────┼──────────────┼────────────┼────────────┤");
     print_row("Warm avg (3 runs)", rust.warm_avg, w_warm, py_warm);
     println!("└─────────────────────────┴──────────────┴──────────────┴──────────────┴────────────┴────────────┘");
@@ -399,8 +409,12 @@ fn print_comparison(
 
     for i in 0..3 {
         let r = rust.warm_runs[i];
-        let w = w_runs.get(i).map_or("       -".to_string(), |v| format!("{v:>8.2}"));
-        let p = py_runs.get(i).map_or("       -".to_string(), |v| format!("{v:>8.2}"));
+        let w = w_runs
+            .get(i)
+            .map_or("       -".to_string(), |v| format!("{v:>8.2}"));
+        let p = py_runs
+            .get(i)
+            .map_or("       -".to_string(), |v| format!("{v:>8.2}"));
         println!(
             "    Run {}: scry-stt {r:>8.2}  |  whisper.cpp {w}  |  Python {p}",
             i + 1
@@ -446,9 +460,7 @@ fn main() {
 
     if !model_path.exists() {
         eprintln!("ERROR: Model not found at {}", model_path.display());
-        eprintln!(
-            "Convert weights: python3 scripts/convert_openai_to_hf.py {model_name}"
-        );
+        eprintln!("Convert weights: python3 scripts/convert_openai_to_hf.py {model_name}");
         eprintln!(
             "Then copy tokenizer.json into {}",
             model_dir(model_name).display()
@@ -468,8 +480,7 @@ fn main() {
     let t0 = Instant::now();
     let model =
         load_whisper_checkpoint::<Backend>(&model_path, &config).expect("Failed to load model");
-    let tokenizer =
-        WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
+    let tokenizer = WhisperTokenizer::from_file(&tokenizer_path).expect("Failed to load tokenizer");
     let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
     println!("done ({load_ms:.0}ms)");
 
@@ -485,9 +496,7 @@ fn main() {
     let sample_rate = input_config.sample_rate().0;
     let channels = input_config.channels();
 
-    println!(
-        "  Mic: \x1b[33m{dev_name}\x1b[0m ({sample_rate}Hz, {channels}ch)"
-    );
+    println!("  Mic: \x1b[33m{dev_name}\x1b[0m ({sample_rate}Hz, {channels}ch)");
 
     let decode_config = DecodeConfig {
         max_tokens: 224,
@@ -521,12 +530,8 @@ fn main() {
             continue;
         }
 
-        let peak = audio_16k
-            .iter()
-            .map(|s| s.abs())
-            .fold(0.0f32, f32::max);
-        let rms =
-            (audio_16k.iter().map(|s| s * s).sum::<f32>() / audio_16k.len() as f32).sqrt();
+        let peak = audio_16k.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+        let rms = (audio_16k.iter().map(|s| s * s).sum::<f32>() / audio_16k.len() as f32).sqrt();
         println!("  peak={peak:.4}, rms={rms:.4}");
 
         if peak < 0.001 {
@@ -553,7 +558,12 @@ fn main() {
         let python_result = run_python_benchmark(&wav_path, model_name);
 
         // ── Side-by-side comparison ──────────────────────────────────────
-        print_comparison(&rust_result, python_result.as_ref(), wcpp_result.as_ref(), load_ms);
+        print_comparison(
+            &rust_result,
+            python_result.as_ref(),
+            wcpp_result.as_ref(),
+            load_ms,
+        );
 
         // Clean up temp WAV
         let _ = std::fs::remove_file(&wav_path);

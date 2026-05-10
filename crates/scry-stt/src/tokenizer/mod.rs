@@ -101,8 +101,7 @@ impl WhisperTokenizer {
     ///
     /// **Warning:** uses GPT-2 token ordering, not Whisper's. Prefer `vocab.bin`.
     fn from_tokenizer_json(path: &Path) -> crate::error::Result<Self> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(SttError::Io)?;
+        let contents = std::fs::read_to_string(path).map_err(SttError::Io)?;
         let json: serde_json::Value = serde_json::from_str(&contents)
             .map_err(|e| SttError::Tokenizer(format!("parse error: {e}")))?;
 
@@ -150,12 +149,7 @@ impl WhisperTokenizer {
                 // For regular tokens, reverse the GPT-2 bytes_to_unicode mapping
                 let bytes: Vec<u8> = token_str
                     .chars()
-                    .map(|c| {
-                        unicode_to_byte
-                            .get(&c)
-                            .copied()
-                            .unwrap_or(b'?')
-                    })
+                    .map(|c| unicode_to_byte.get(&c).copied().unwrap_or(b'?'))
                     .collect();
                 id_to_bytes[*id] = bytes;
             }
@@ -227,10 +221,7 @@ fn build_unicode_to_byte_map() -> HashMap<char, u8> {
     }
 
     // Reverse the map
-    byte_to_unicode
-        .into_iter()
-        .map(|(b, c)| (c, b))
-        .collect()
+    byte_to_unicode.into_iter().map(|(b, c)| (c, b)).collect()
 }
 
 #[cfg(test)]
@@ -252,10 +243,11 @@ mod tests {
 
     #[test]
     fn special_token_check() {
-        // We can't create a WhisperTokenizer without a file, but we can test the constant
-        assert!(EOT_TOKEN >= 50257);
-        assert!(SOT_TOKEN >= 50257);
-        assert!(TIMESTAMP_BEGIN >= 50257);
+        // Compile-time invariant on the special tokens (all live in the
+        // multilingual range above the BPE vocab top of 50257).
+        const _: () = assert!(EOT_TOKEN >= 50257);
+        const _: () = assert!(SOT_TOKEN >= 50257);
+        const _: () = assert!(TIMESTAMP_BEGIN >= 50257);
     }
 
     #[test]

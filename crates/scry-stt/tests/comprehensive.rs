@@ -114,10 +114,8 @@ fn cross_attention_softmax_sums_to_one() {
     let cache = attn.compute_kv_cache(&encoder_out);
 
     // Single decoder position
-    let decoder_state = Tensor::<CpuBackend>::from_vec(
-        vec![0.1f32; d_model],
-        Shape::new(&[1, d_model]),
-    );
+    let decoder_state =
+        Tensor::<CpuBackend>::from_vec(vec![0.1f32; d_model], Shape::new(&[1, d_model]));
     let output = attn.forward(&decoder_state, &cache);
 
     // Output should be finite and same shape
@@ -140,10 +138,8 @@ fn cross_attention_different_inputs_different_outputs() {
     let cache1 = attn.compute_kv_cache(&enc1);
     let cache2 = attn.compute_kv_cache(&enc2);
 
-    let decoder_state = Tensor::<CpuBackend>::from_vec(
-        vec![0.1f32; d_model],
-        Shape::new(&[1, d_model]),
-    );
+    let decoder_state =
+        Tensor::<CpuBackend>::from_vec(vec![0.1f32; d_model], Shape::new(&[1, d_model]));
 
     let out1 = attn.forward(&decoder_state, &cache1);
     let out2 = attn.forward(&decoder_state, &cache2);
@@ -277,7 +273,10 @@ fn full_pipeline_mel_to_tokens() {
     let encoder_output = model.encode(&mel_tensor);
     assert_eq!(encoder_output.shape.dims()[1], config.d_model);
     let enc_vals = encoder_output.to_vec();
-    assert!(enc_vals.iter().all(|v| v.is_finite()), "encoder output has NaN/Inf");
+    assert!(
+        enc_vals.iter().all(|v| v.is_finite()),
+        "encoder output has NaN/Inf"
+    );
 
     // Decode (with random weights, output tokens are meaningless but pipeline should work)
     let decode_config = DecodeConfig {
@@ -314,7 +313,10 @@ fn mel_very_short_audio() {
     // Should still produce valid output (padded to n_fft)
     assert_eq!(mel.n_mels, WHISPER_N_MELS);
     assert!(mel.n_frames >= 1, "must produce at least 1 frame");
-    assert!(!mel.data.iter().any(|v| v.is_nan()), "NaN in short audio mel");
+    assert!(
+        !mel.data.iter().any(|v| v.is_nan()),
+        "NaN in short audio mel"
+    );
 }
 
 #[test]
@@ -332,8 +334,8 @@ fn mel_30_second_chunk() {
     let samples = vec![0.0f32; 16_000 * 30];
     let mel = log_mel_spectrogram(&samples);
 
-    // Expected: 480000 / 160 + 1 = 3001 frames
-    assert_eq!(mel.n_frames, 3001);
+    // 480000 / 160 = 3000 frames (Whisper drops the last STFT frame)
+    assert_eq!(mel.n_frames, 3000);
     assert_eq!(mel.n_mels, WHISPER_N_MELS);
 }
 
@@ -360,6 +362,7 @@ fn mel_output_value_range() {
 }
 
 #[test]
+#[allow(clippy::float_cmp)] // padded region must be exactly 0.0, not approximate
 fn mel_pad_truncate_preserves_values() {
     let samples: Vec<f32> = (0..16_000)
         .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())
@@ -382,7 +385,8 @@ fn mel_pad_truncate_preserves_values() {
         // Padded region should be zeros
         for t in original_frames..padded.n_frames {
             assert_eq!(
-                padded.data[m * padded.n_frames + t], 0.0,
+                padded.data[m * padded.n_frames + t],
+                0.0,
                 "padded region should be 0 at mel={m} frame={t}"
             );
         }
@@ -424,7 +428,10 @@ fn decoder_kv_cache_clear_resets() {
     cache.clear();
     assert_eq!(cache.layers[0].seq_len, 0);
     // Pre-allocated cache retains its buffer; seq_len=0 means no valid data
-    assert!(!cache.layers[0].k.is_empty(), "pre-allocated cache should retain buffer");
+    assert!(
+        !cache.layers[0].k.is_empty(),
+        "pre-allocated cache should retain buffer"
+    );
 }
 
 #[test]
@@ -433,10 +440,8 @@ fn argmax_basic() {
     let config = WhisperConfig::tiny();
     let model = WhisperModel::<CpuBackend>::new(config);
 
-    let encoder_output = Tensor::<CpuBackend>::from_vec(
-        vec![0.01f32; 50 * 384],
-        Shape::new(&[50, 384]),
-    );
+    let encoder_output =
+        Tensor::<CpuBackend>::from_vec(vec![0.01f32; 50 * 384], Shape::new(&[50, 384]));
 
     let decode_config = DecodeConfig {
         max_tokens: 1,
@@ -498,14 +503,20 @@ fn config_d_head_divides_evenly() {
         WhisperConfig::large_v3_turbo(),
     ] {
         assert_eq!(
-            config.d_model % config.n_encoder_heads, 0,
+            config.d_model % config.n_encoder_heads,
+            0,
             "{}: d_model {} not divisible by n_encoder_heads {}",
-            config.name, config.d_model, config.n_encoder_heads
+            config.name,
+            config.d_model,
+            config.n_encoder_heads
         );
         assert_eq!(
-            config.d_model % config.n_decoder_heads, 0,
+            config.d_model % config.n_decoder_heads,
+            0,
             "{}: d_model {} not divisible by n_decoder_heads {}",
-            config.name, config.d_model, config.n_decoder_heads
+            config.name,
+            config.d_model,
+            config.n_decoder_heads
         );
     }
 }
@@ -518,7 +529,7 @@ fn n_frames_formula_matches() {
         let samples = vec![0.0f32; n_samples];
         let mel = log_mel_spectrogram(&samples);
 
-        let expected = n_samples / WHISPER_HOP_LENGTH + 1;
+        let expected = n_samples / WHISPER_HOP_LENGTH;
         assert_eq!(
             mel.n_frames, expected,
             "n_frames mismatch for {seconds}s audio: got {}, expected {expected}",

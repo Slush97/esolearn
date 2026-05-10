@@ -151,10 +151,8 @@ mod tests {
     fn conv1d_output_shape_stride1() {
         let mut rng = fastrand::Rng::with_seed(42);
         let conv = Conv1d::<CpuBackend>::new(80, 512, 3, 1, 1, &mut rng);
-        let input = Tensor::<CpuBackend>::from_vec(
-            vec![0.0f32; 80 * 3000],
-            Shape::new(&[80, 3000]),
-        );
+        let input =
+            Tensor::<CpuBackend>::from_vec(vec![0.0f32; 80 * 3000], Shape::new(&[80, 3000]));
         let output = conv.forward(&input);
         assert_eq!(output.shape.dims(), &[512, 3000]);
     }
@@ -163,10 +161,8 @@ mod tests {
     fn conv1d_output_shape_stride2() {
         let mut rng = fastrand::Rng::with_seed(42);
         let conv = Conv1d::<CpuBackend>::new(512, 512, 3, 2, 1, &mut rng);
-        let input = Tensor::<CpuBackend>::from_vec(
-            vec![0.0f32; 512 * 3000],
-            Shape::new(&[512, 3000]),
-        );
+        let input =
+            Tensor::<CpuBackend>::from_vec(vec![0.0f32; 512 * 3000], Shape::new(&[512, 3000]));
         let output = conv.forward(&input);
         assert_eq!(output.shape.dims(), &[512, 1500]);
     }

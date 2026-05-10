@@ -1,10 +1,10 @@
 use scry_llm::backend::MathBackend;
 use scry_llm::tensor::Tensor;
 
-use crate::model::WhisperModel;
 use crate::model::attention::CrossKvCache;
 use crate::model::decoder::DecoderKvCache;
-use crate::tokenizer::{EOT_TOKEN, SOT_TOKEN, NO_TIMESTAMPS_TOKEN};
+use crate::model::WhisperModel;
+use crate::tokenizer::{EOT_TOKEN, NO_TIMESTAMPS_TOKEN, SOT_TOKEN};
 
 /// Language token for English.
 pub const LANG_EN_TOKEN: usize = 50259;
@@ -131,7 +131,8 @@ pub fn greedy_decode<B: MathBackend>(
         if pos < prompt.len() - 1 {
             model.decode_step_no_logits(tok, pos, &mut self_kv_cache, &cross_kv_caches);
         } else {
-            let logits = model.decode_step_profiled(tok, pos, &mut self_kv_cache, &cross_kv_caches, profile);
+            let logits =
+                model.decode_step_profiled(tok, pos, &mut self_kv_cache, &cross_kv_caches, profile);
             let next_token = if greedy {
                 // Zero-alloc: borrow logits directly with fused suppression
                 argmax_suppressed(&logits.as_slice())

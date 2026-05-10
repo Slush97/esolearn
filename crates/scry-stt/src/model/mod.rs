@@ -46,7 +46,11 @@ impl<B: MathBackend> WhisperModel<B> {
             &mut rng,
         );
 
-        Self { encoder, decoder, config }
+        Self {
+            encoder,
+            decoder,
+            config,
+        }
     }
 
     /// Encode a mel spectrogram into encoder hidden states.
@@ -98,8 +102,13 @@ impl<B: MathBackend> WhisperModel<B> {
         cross_kv_caches: &[CrossKvCache<B>],
         profile: bool,
     ) -> Tensor<B> {
-        self.decoder
-            .forward_step_profiled(token_id, position, self_kv_cache, cross_kv_caches, profile)
+        self.decoder.forward_step_profiled(
+            token_id,
+            position,
+            self_kv_cache,
+            cross_kv_caches,
+            profile,
+        )
     }
 
     /// Run decoder blocks only — updates KV caches but skips the logit projection.

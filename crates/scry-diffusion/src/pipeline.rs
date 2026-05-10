@@ -111,6 +111,18 @@ where
         if params.num_inference_steps == 0 {
             return Err(Error::Scheduler("num_inference_steps must be > 0".into()));
         }
+
+        // Enable the bf16 GemmEx fast-path globally on ScryGpuBackend so users
+        // don't have to set `SCRY_GPU_MATMUL_BF16=1` to get the perf-target
+        // path. Idempotent and best-effort: no-op when scry-gpu is unavailable
+        // (e.g. CpuBackend pipeline) or the feature isn't compiled in. The
+        // toggle is process-wide on `ScryGpuBackend` — call
+        // `set_bf16_matmul(false)` after generate if you need fp32 matmul
+        // for some other workload in the same process.
+        #[cfg(feature = "scry-gpu-bf16")]
+        {
+            let _ = scry_llm::backend::scry_gpu::ScryGpuBackend::set_bf16_matmul(true);
+        }
         let latent_w = (width / VAE_SCALE) as usize;
         let latent_h = (height / VAE_SCALE) as usize;
         let elements = LATENT_CHANNELS * latent_h * latent_w;
