@@ -362,6 +362,7 @@ fn mel_output_value_range() {
 }
 
 #[test]
+#[allow(clippy::float_cmp)] // padded region must be exactly 0.0, not approximate
 fn mel_pad_truncate_preserves_values() {
     let samples: Vec<f32> = (0..16_000)
         .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin())

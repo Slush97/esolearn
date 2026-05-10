@@ -5,7 +5,7 @@
 //! realistic SD 1.5 latent (4×64×64 = 16,384 f32). Reports per-step latency
 //! statistics so we can see the *constant-factor* difference between the two
 //! samplers and whether either is a meaningful fraction of a full
-//! inference-step wall-clock budget (UNet forward ≈ tens to hundreds of ms).
+//! inference-step wall-clock budget (`UNet` forward ≈ tens to hundreds of ms).
 //!
 //! Defaults to the `CpuBackend`. Build with `--features scry-gpu-cuda` to
 //! bench on the GPU path.
@@ -94,7 +94,7 @@ impl Stats {
         let min = s[0];
         let max = s[n - 1];
         let p50 = s[n / 2];
-        let p99 = s[((n as f64) * 0.99) as usize];
+        let p99 = s[(n * 99) / 100];
         let mean: f64 = s.iter().sum::<f64>() / n as f64;
         (min, p50, mean, p99, max)
     }
@@ -122,12 +122,11 @@ where
         let timesteps: Vec<f32> = sched.timesteps().to_vec();
 
         let mut latent = make_tensor(42 + u64::from(run));
-        let mut step_eps_seed = 100 + u64::from(run) * 1000;
+        let seed_base = 100 + u64::from(run) * 1000;
 
         let run_start = Instant::now();
-        for &t in &timesteps {
+        for (step_eps_seed, &t) in (seed_base..).zip(timesteps.iter()) {
             let eps = make_tensor(step_eps_seed);
-            step_eps_seed += 1;
 
             let t0 = Instant::now();
             latent = sched.step(&eps, t, &latent).unwrap();

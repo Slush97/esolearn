@@ -243,10 +243,11 @@ mod tests {
 
     #[test]
     fn special_token_check() {
-        // We can't create a WhisperTokenizer without a file, but we can test the constant
-        assert!(EOT_TOKEN >= 50257);
-        assert!(SOT_TOKEN >= 50257);
-        assert!(TIMESTAMP_BEGIN >= 50257);
+        // Compile-time invariant on the special tokens (all live in the
+        // multilingual range above the BPE vocab top of 50257).
+        const _: () = assert!(EOT_TOKEN >= 50257);
+        const _: () = assert!(SOT_TOKEN >= 50257);
+        const _: () = assert!(TIMESTAMP_BEGIN >= 50257);
     }
 
     #[test]
