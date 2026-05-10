@@ -59,7 +59,10 @@ impl Profile {
         let mut entries: Vec<_> = self.buckets.iter().collect();
         entries.sort_by(|a, b| b.1 .1.partial_cmp(&a.1 .1).unwrap());
         let sum: f64 = entries.iter().map(|(_, (_, ms))| *ms).sum();
-        println!("    {:24} {:>5}   {:>9}   {:>7}   {:>9}", "bucket", "count", "total_ms", "share", "avg_ms");
+        println!(
+            "    {:24} {:>5}   {:>9}   {:>7}   {:>9}",
+            "bucket", "count", "total_ms", "share", "avg_ms"
+        );
         for (name, (count, ms)) in &entries {
             let pct = ms / total_ms * 100.0;
             #[allow(clippy::cast_precision_loss)]
@@ -214,7 +217,9 @@ fn random_input(seed: u64, len: usize) -> Vec<f32> {
     let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
     (0..len)
         .map(|_| {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             #[allow(clippy::cast_precision_loss)]
             let v = ((state >> 32) as i32 as f32) / (i32::MAX as f32);
             v
@@ -254,7 +259,10 @@ fn run(label: &str, config: ResNetConfig, input: &[f32]) {
 
 fn main() {
     println!("=== scry-vision per-op profile ===");
-    println!("Features: scry-gpu-cuda={}", cfg!(feature = "scry-gpu-cuda"));
+    println!(
+        "Features: scry-gpu-cuda={}",
+        cfg!(feature = "scry-gpu-cuda")
+    );
 
     let input = random_input(0xdead_beef, 3 * 224 * 224);
 

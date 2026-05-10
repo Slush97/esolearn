@@ -202,11 +202,7 @@ impl<B: MathBackend> Attention<B> {
             )
         });
         let attn = time_section("attn.softmax", || {
-            B::scaled_softmax(
-                &scores,
-                scale,
-                &Shape::new(&[self.num_heads * n_q, n_kv]),
-            )
+            B::scaled_softmax(&scores, scale, &Shape::new(&[self.num_heads * n_q, n_kv]))
         });
         let out_per_head = time_section("attn.values", || {
             B::matmul_strided_batched(

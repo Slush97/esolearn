@@ -28,12 +28,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: check-${{ matrix.rust }}
-      - run: cargo check --workspace --all-targets --locked
-      # Clippy is pinned to MSRV (1.85.0) — `stable` rotates lints every
-      # 6 weeks and breaks CI for stylistic reasons unrelated to the PR.
-      # MSRV is the version we actually compile against.
-      - name: clippy (pinned to MSRV)
+      # `--all-targets` only on stable: pulls in dev-dependencies, and
+      # one of them (linfa 0.8.1) uses `is_multiple_of` which only
+      # stabilized in Rust 1.87. The lib-only check on 1.85.0 still
+      # validates that the workspace itself compiles on MSRV.
+      - name: cargo check (lib)
         if: matrix.rust == '1.85.0'
+        run: cargo check --workspace --locked
+      - name: cargo check (all targets)
+        if: matrix.rust == 'stable'
+        run: cargo check --workspace --all-targets --locked
+      - name: clippy
+        if: matrix.rust == 'stable'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
         if: matrix.rust == 'stable'

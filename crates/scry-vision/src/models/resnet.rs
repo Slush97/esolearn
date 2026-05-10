@@ -999,7 +999,9 @@ mod tests {
         // var must stay positive: shift sin into [0.5, 1.5]
         let n = block.bn1.running_var.numel();
         block.bn1.running_var = Tensor::from_vec(
-            (0..n).map(|i| 1.0 + ((i as f32) * 0.07 + seed).sin() * 0.4).collect(),
+            (0..n)
+                .map(|i| 1.0 + ((i as f32) * 0.07 + seed).sin() * 0.4)
+                .collect(),
             block.bn1.running_var.shape.clone(),
         );
 
@@ -1010,7 +1012,9 @@ mod tests {
         fill_random(&mut block.bn2.running_mean, seed + 14.0);
         let n2 = block.bn2.running_var.numel();
         block.bn2.running_var = Tensor::from_vec(
-            (0..n2).map(|i| 1.0 + ((i as f32) * 0.07 + seed + 10.0).sin() * 0.4).collect(),
+            (0..n2)
+                .map(|i| 1.0 + ((i as f32) * 0.07 + seed + 10.0).sin() * 0.4)
+                .collect(),
             block.bn2.running_var.shape.clone(),
         );
 
@@ -1022,7 +1026,9 @@ mod tests {
             fill_random(&mut ds_bn.running_mean, seed + 24.0);
             let n3 = ds_bn.running_var.numel();
             ds_bn.running_var = Tensor::from_vec(
-                (0..n3).map(|i| 1.0 + ((i as f32) * 0.07 + seed + 20.0).sin() * 0.4).collect(),
+                (0..n3)
+                    .map(|i| 1.0 + ((i as f32) * 0.07 + seed + 20.0).sin() * 0.4)
+                    .collect(),
                 ds_bn.running_var.shape.clone(),
             );
         }
@@ -1030,8 +1036,15 @@ mod tests {
 
     fn assert_close(a: &[f32], b: &[f32], tol: f32, label: &str) {
         assert_eq!(a.len(), b.len(), "{label}: length mismatch");
-        let max_err = a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
-        assert!(max_err < tol, "{label}: max error {max_err:.2e} > tol {tol:.2e}");
+        let max_err = a
+            .iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_err < tol,
+            "{label}: max error {max_err:.2e} > tol {tol:.2e}"
+        );
     }
 
     fn clone_basic_block(block: &BasicBlock<CpuBackend>) -> BasicBlock<CpuBackend> {
@@ -1039,25 +1052,55 @@ mod tests {
         let mid_ch = block.conv1.out_channels;
         let stride = block.conv1.stride;
         let mut copy = BasicBlock::<CpuBackend>::new(in_ch, mid_ch, stride);
-        copy.conv1.weight = Tensor::from_vec(block.conv1.weight.to_vec(), block.conv1.weight.shape.clone());
-        copy.conv1.bias = Tensor::from_vec(block.conv1.bias.to_vec(), block.conv1.bias.shape.clone());
-        copy.bn1.weight = Tensor::from_vec(block.bn1.weight.to_vec(), block.bn1.weight.shape.clone());
+        copy.conv1.weight = Tensor::from_vec(
+            block.conv1.weight.to_vec(),
+            block.conv1.weight.shape.clone(),
+        );
+        copy.conv1.bias =
+            Tensor::from_vec(block.conv1.bias.to_vec(), block.conv1.bias.shape.clone());
+        copy.bn1.weight =
+            Tensor::from_vec(block.bn1.weight.to_vec(), block.bn1.weight.shape.clone());
         copy.bn1.bias = Tensor::from_vec(block.bn1.bias.to_vec(), block.bn1.bias.shape.clone());
-        copy.bn1.running_mean = Tensor::from_vec(block.bn1.running_mean.to_vec(), block.bn1.running_mean.shape.clone());
-        copy.bn1.running_var = Tensor::from_vec(block.bn1.running_var.to_vec(), block.bn1.running_var.shape.clone());
-        copy.conv2.weight = Tensor::from_vec(block.conv2.weight.to_vec(), block.conv2.weight.shape.clone());
-        copy.conv2.bias = Tensor::from_vec(block.conv2.bias.to_vec(), block.conv2.bias.shape.clone());
-        copy.bn2.weight = Tensor::from_vec(block.bn2.weight.to_vec(), block.bn2.weight.shape.clone());
+        copy.bn1.running_mean = Tensor::from_vec(
+            block.bn1.running_mean.to_vec(),
+            block.bn1.running_mean.shape.clone(),
+        );
+        copy.bn1.running_var = Tensor::from_vec(
+            block.bn1.running_var.to_vec(),
+            block.bn1.running_var.shape.clone(),
+        );
+        copy.conv2.weight = Tensor::from_vec(
+            block.conv2.weight.to_vec(),
+            block.conv2.weight.shape.clone(),
+        );
+        copy.conv2.bias =
+            Tensor::from_vec(block.conv2.bias.to_vec(), block.conv2.bias.shape.clone());
+        copy.bn2.weight =
+            Tensor::from_vec(block.bn2.weight.to_vec(), block.bn2.weight.shape.clone());
         copy.bn2.bias = Tensor::from_vec(block.bn2.bias.to_vec(), block.bn2.bias.shape.clone());
-        copy.bn2.running_mean = Tensor::from_vec(block.bn2.running_mean.to_vec(), block.bn2.running_mean.shape.clone());
-        copy.bn2.running_var = Tensor::from_vec(block.bn2.running_var.to_vec(), block.bn2.running_var.shape.clone());
-        if let (Some((src_dc, src_db)), Some((dst_dc, dst_db))) = (&block.downsample, &mut copy.downsample) {
+        copy.bn2.running_mean = Tensor::from_vec(
+            block.bn2.running_mean.to_vec(),
+            block.bn2.running_mean.shape.clone(),
+        );
+        copy.bn2.running_var = Tensor::from_vec(
+            block.bn2.running_var.to_vec(),
+            block.bn2.running_var.shape.clone(),
+        );
+        if let (Some((src_dc, src_db)), Some((dst_dc, dst_db))) =
+            (&block.downsample, &mut copy.downsample)
+        {
             dst_dc.weight = Tensor::from_vec(src_dc.weight.to_vec(), src_dc.weight.shape.clone());
             dst_dc.bias = Tensor::from_vec(src_dc.bias.to_vec(), src_dc.bias.shape.clone());
             dst_db.weight = Tensor::from_vec(src_db.weight.to_vec(), src_db.weight.shape.clone());
             dst_db.bias = Tensor::from_vec(src_db.bias.to_vec(), src_db.bias.shape.clone());
-            dst_db.running_mean = Tensor::from_vec(src_db.running_mean.to_vec(), src_db.running_mean.shape.clone());
-            dst_db.running_var = Tensor::from_vec(src_db.running_var.to_vec(), src_db.running_var.shape.clone());
+            dst_db.running_mean = Tensor::from_vec(
+                src_db.running_mean.to_vec(),
+                src_db.running_mean.shape.clone(),
+            );
+            dst_db.running_var = Tensor::from_vec(
+                src_db.running_var.to_vec(),
+                src_db.running_var.shape.clone(),
+            );
         }
         copy
     }
@@ -1079,7 +1122,12 @@ mod tests {
         let fused_out = fused.forward(&input);
 
         assert_eq!(fused_out.shape.dims(), ref_out.shape.dims());
-        assert_close(&fused_out.to_vec(), &ref_out.to_vec(), 1e-3, "BasicBlock 16→16");
+        assert_close(
+            &fused_out.to_vec(),
+            &ref_out.to_vec(),
+            1e-3,
+            "BasicBlock 16→16",
+        );
     }
 
     #[test]
@@ -1089,7 +1137,9 @@ mod tests {
         let mut fused = clone_basic_block(&reference);
 
         let input = Tensor::from_vec(
-            (0..8 * 14 * 14).map(|i| ((i as f32) * 0.17).sin()).collect(),
+            (0..8 * 14 * 14)
+                .map(|i| ((i as f32) * 0.17).sin())
+                .collect(),
             Shape::new(&[8, 14, 14]),
         );
 

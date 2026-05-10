@@ -24,10 +24,10 @@
 //! profile::print_summary();
 //! ```
 
-#[cfg(feature = "profile")]
-pub use enabled::*;
 #[cfg(not(feature = "profile"))]
 pub use disabled::*;
+#[cfg(feature = "profile")]
+pub use enabled::*;
 
 #[cfg(feature = "profile")]
 mod enabled {
@@ -117,9 +117,7 @@ mod enabled {
                 } else {
                     0.0
                 };
-                println!(
-                    "{name:<32} {n:>6} {ms:>10.2} {avg:>10.3} {pct:>6.2}%"
-                );
+                println!("{name:<32} {n:>6} {ms:>10.2} {avg:>10.3} {pct:>6.2}%");
             }
         });
     }

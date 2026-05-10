@@ -326,8 +326,8 @@ pub(crate) fn load_split2_linear<B: MathBackend>(
 
     let (bias_a, bias_b) = if has_bias {
         let b_key = format!("{prefix}.bias");
-        let raw_bias = load_f32(view, &b_key)
-            .map_err(|e| Error::Llm(format!("load {b_key}: {e}")))?;
+        let raw_bias =
+            load_f32(view, &b_key).map_err(|e| Error::Llm(format!("load {b_key}: {e}")))?;
         if raw_bias.len() != two_m {
             return Err(Error::Llm(format!(
                 "{b_key}: expected {two_m} elements, got {}",

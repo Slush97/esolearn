@@ -548,14 +548,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // ── cuBLAS strided batched SGEMM ──
 
-fn cpu_matmul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize, trans_a: bool, trans_b: bool) -> Vec<f32> {
+fn cpu_matmul(
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    k: usize,
+    n: usize,
+    trans_a: bool,
+    trans_b: bool,
+) -> Vec<f32> {
     let mut c = vec![0.0f32; m * n];
     for i in 0..m {
         for j in 0..n {
             let mut acc = 0.0f32;
             for kk in 0..k {
-                let av = if trans_a { a[kk * m + i] } else { a[i * k + kk] };
-                let bv = if trans_b { b[j * k + kk] } else { b[kk * n + j] };
+                let av = if trans_a {
+                    a[kk * m + i]
+                } else {
+                    a[i * k + kk]
+                };
+                let bv = if trans_b {
+                    b[j * k + kk]
+                } else {
+                    b[kk * n + j]
+                };
                 acc += av * bv;
             }
             c[i * n + j] = acc;
@@ -603,7 +619,15 @@ fn run_strided_batched(trans_a: bool, trans_b: bool) {
     let mut c_buf = gpu.alloc::<f32>(batch * c_per).unwrap();
 
     gpu.cublas_strided_batched_matmul_async(
-        &a_buf, &b_buf, &mut c_buf, batch as u32, m as u32, n as u32, k as u32, trans_a, trans_b,
+        &a_buf,
+        &b_buf,
+        &mut c_buf,
+        batch as u32,
+        m as u32,
+        n as u32,
+        k as u32,
+        trans_a,
+        trans_b,
     )
     .unwrap();
 
@@ -707,8 +731,20 @@ fn cuda_cudnn_conv2d_matches_cpu_reference() {
 
     let (h_got, w_got) = gpu
         .cudnn_conv2d_forward_async(
-            &in_buf, &filt_buf, &mut out_buf, n, c_in, h_in, w_in, c_out, k_h, k_w, pad, pad,
-            stride, stride,
+            &in_buf,
+            &filt_buf,
+            &mut out_buf,
+            n,
+            c_in,
+            h_in,
+            w_in,
+            c_out,
+            k_h,
+            k_w,
+            pad,
+            pad,
+            stride,
+            stride,
         )
         .unwrap();
     assert_eq!((h_got, w_got), (h_out, w_out));
@@ -745,13 +781,23 @@ fn cuda_cudnn_conv2d_caches_repeat_calls() {
 
     let in_buf = gpu.upload(&input).unwrap();
     let filt_buf = gpu.upload(&filter).unwrap();
-    let mut out_buf = gpu
-        .alloc::<f32>((c_out * h_in * w_in) as usize)
-        .unwrap();
+    let mut out_buf = gpu.alloc::<f32>((c_out * h_in * w_in) as usize).unwrap();
 
     for _ in 0..3 {
         gpu.cudnn_conv2d_forward_async(
-            &in_buf, &filt_buf, &mut out_buf, n, c_in, h_in, w_in, c_out, k, k, pad, pad, stride,
+            &in_buf,
+            &filt_buf,
+            &mut out_buf,
+            n,
+            c_in,
+            h_in,
+            w_in,
+            c_out,
+            k,
+            k,
+            pad,
+            pad,
+            stride,
             stride,
         )
         .unwrap();

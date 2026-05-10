@@ -723,8 +723,7 @@ mod tests {
     // module need to be re-derived. Compile-time check rather than a runtime
     // assert so it can't be skipped.
     #[allow(clippy::assertions_on_constants)]
-    const _CPU_DOES_NOT_PREFER_IM2COL: () =
-        assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
+    const _CPU_DOES_NOT_PREFER_IM2COL: () = assert!(!CpuBackend::PREFERS_IM2COL_OVER_WINOGRAD);
 
     #[test]
     fn cpu_default_strategy_is_auto() {
@@ -783,7 +782,8 @@ mod tests {
         assert!(Conv2d::<CpuBackend>::square(64, 256, 1, 1, 0).is_pointwise_1x1());
         assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 2, 0).is_pointwise_1x1()); // stride-2 downsample
         assert!(!Conv2d::<CpuBackend>::square(64, 256, 3, 1, 1).is_pointwise_1x1()); // 3×3
-        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 1, 1).is_pointwise_1x1()); // pad-1 (rare but possible)
+        assert!(!Conv2d::<CpuBackend>::square(64, 256, 1, 1, 1).is_pointwise_1x1());
+        // pad-1 (rare but possible)
     }
 
     #[test]
@@ -797,7 +797,12 @@ mod tests {
         let fast = conv.forward_1x1(&input);
         let reference = conv.forward_im2col(&input);
         assert_eq!(fast.shape.dims(), reference.shape.dims());
-        assert_close(&fast.to_vec(), &reference.to_vec(), 1e-5, "1x1 fast vs im2col");
+        assert_close(
+            &fast.to_vec(),
+            &reference.to_vec(),
+            1e-5,
+            "1x1 fast vs im2col",
+        );
     }
 
     #[test]
@@ -823,9 +828,15 @@ mod tests {
     /// Build a `BatchNorm2d` with deterministic non-trivial running stats and
     /// affine params, so folding has something to actually do.
     fn random_bn(channels: usize) -> BatchNorm2d<CpuBackend> {
-        let gamma: Vec<f32> = (0..channels).map(|i| 0.5 + (i as f32 * 0.31).sin()).collect();
-        let beta: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.17).cos() * 0.7).collect();
-        let mean: Vec<f32> = (0..channels).map(|i| (i as f32 * 0.21).sin() * 0.4).collect();
+        let gamma: Vec<f32> = (0..channels)
+            .map(|i| 0.5 + (i as f32 * 0.31).sin())
+            .collect();
+        let beta: Vec<f32> = (0..channels)
+            .map(|i| (i as f32 * 0.17).cos() * 0.7)
+            .collect();
+        let mean: Vec<f32> = (0..channels)
+            .map(|i| (i as f32 * 0.21).sin() * 0.4)
+            .collect();
         // Variance must be positive; bias the floor up.
         let var: Vec<f32> = (0..channels)
             .map(|i| 0.25 + (i as f32 * 0.11).cos().abs())
@@ -850,7 +861,12 @@ mod tests {
         let folded = conv_folded.forward(&input);
 
         assert_eq!(folded.shape.dims(), reference.shape.dims());
-        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "3×3 conv-bn fold");
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "3×3 conv-bn fold",
+        );
     }
 
     #[test]
@@ -864,7 +880,12 @@ mod tests {
         conv_folded.fold_batchnorm(&bn);
         let folded = conv_folded.forward(&input);
 
-        assert_close(&folded.to_vec(), &reference.to_vec(), 1e-4, "1×1 conv-bn fold");
+        assert_close(
+            &folded.to_vec(),
+            &reference.to_vec(),
+            1e-4,
+            "1×1 conv-bn fold",
+        );
     }
 
     #[test]

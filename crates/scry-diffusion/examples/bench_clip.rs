@@ -77,7 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     encoder.to_device();
     backend_sync();
-    println!("to_device   : {:.1} ms", t0.elapsed().as_secs_f64() * 1000.0);
+    println!(
+        "to_device   : {:.1} ms",
+        t0.elapsed().as_secs_f64() * 1000.0
+    );
     println!();
 
     for w in 0..warmup {
