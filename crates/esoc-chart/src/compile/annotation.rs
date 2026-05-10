@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Annotation compilation: reference lines, bands, text → scene marks.
+//! Annotation compilation — pipeline pass 7 of 7 (see [`super`]).
+//!
+//! Final pass: emits subtitle, caption, and reference lines/bands/text on
+//! top of the already-rendered plot. Runs after `mark_gen` so annotations
+//! draw above data marks (z-order is also explicitly set where it matters).
 
 use crate::compile::layout;
 use crate::grammar::annotation::Annotation;

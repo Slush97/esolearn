@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Legend generation: collects legend entries from resolved layers and renders them.
+//! Legend generation — pipeline pass 6 of 7 (see [`super`]).
+//!
+//! Walks the resolved layers, collects unique series labels with their
+//! palette colours, and emits swatch + label marks into the legend region
+//! reserved by [`super::layout`]. Placement (right vs. bottom) is decided
+//! upstream by `compute_margins` and threaded through as
+//! [`super::layout::LegendPlacement`].
 
 use crate::compile::stat_transform::ResolvedLayer;
 use crate::new_theme::NewTheme;

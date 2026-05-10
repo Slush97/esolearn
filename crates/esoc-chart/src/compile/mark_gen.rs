@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Mark generation: turns ResolvedLayer data into scene marks.
+//! Mark generation — pipeline pass 6 of 7 (see [`super`] for the overview).
+//!
+//! Consumes a [`ResolvedLayer`] (post stats + position adjustment) plus the
+//! final [`DataBounds`] and plot-area dimensions, and emits the per-layer
+//! geometric marks (rects for bars, points for scatter, paths for areas,
+//! arcs for pies, etc.) into the scene graph under the supplied `plot_id`
+//! parent. One match arm in [`generate_layer_marks_inner`] per [`MarkType`].
+//!
+//! Inputs are assumed validated and statified — this pass does scale + draw
+//! only, no further data transforms.
 
 use crate::compile::stat_boxplot::BoxPlotSummary;
 use crate::compile::stat_transform::ResolvedLayer;

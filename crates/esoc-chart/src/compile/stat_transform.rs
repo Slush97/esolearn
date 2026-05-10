@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Statistical transform resolution: Layer → ResolvedLayer.
+//! Statistical transform resolution — pipeline pass 2 of 7 (see [`super`]).
+//!
+//! Lowers a user-facing [`Layer`] into a [`ResolvedLayer`] by applying its
+//! [`Stat`]: identity (`Stat::None`), binning, aggregation, smoothing, or
+//! box-plot summarisation. Each variant is handled in a sibling module
+//! ([`stat_bin`](super::stat_bin), [`stat_aggregate`](super::stat_aggregate),
+//! [`stat_smooth`](super::stat_smooth), [`stat_boxplot`](super::stat_boxplot)).
+//!
+//! After this pass, all subsequent passes work in `f64` data space against
+//! the resolved arrays — no further lookups into the raw `Layer` are needed.
 
 use crate::compile::stat_aggregate;
 use crate::compile::stat_bin;
