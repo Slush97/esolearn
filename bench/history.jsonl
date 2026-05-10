@@ -1,0 +1,1 @@
+{"backend":"scry-gpu (CUDA)","bf16_matmul":true,"cfg":7.5,"epoch_secs":1778438713,"n_steps_sampled":3,"no_cudnn":false,"runs":1,"scheduler":"ddim","seed":42,"sha":"72809848e2af744a508b3e9e15e54640cb9316f8","size":64,"step_ms_max":20.719253,"step_ms_median":19.355474,"step_ms_min":19.301904,"steps":4,"wall_ms_median":93.185658}

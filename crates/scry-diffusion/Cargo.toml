@@ -34,6 +34,7 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 safetensors = "0.4"
 half = { version = "2", features = ["num-traits"] }
 tempfile = "3"
+sha2 = "0.10"
 
 [[example]]
 name = "txt2img"

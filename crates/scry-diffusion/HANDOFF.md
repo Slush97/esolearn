@@ -585,3 +585,85 @@ scaffold doesn't repeat.
   "fused attention is the next attack surface" finding from ViT round 3.
 - The `gpu-resident/scry-vision` branch may still hold an open PR
   (`bf16 strided batched matmul`); confirm via `gh pr list`.
+
+## M9e — CI gates (2026-05-10)
+
+Locks in measurement before M9f's profile drill-down so M9g's perf work
+has a baseline it can't drift past.
+
+**Decision (deferred per MILESTONES.md):** the perf-regression and
+golden-image gates run from a **local pre-push hook**, not GitHub
+Actions. The bench needs a CUDA GPU and the SD 1.5 weight snapshot;
+both are out of reach for `ubuntu-latest` and not worth a self-hosted
+runner at this stage. CI gets a thin artifact-validator job so a PR
+that hand-edits `bench/history.jsonl` or the golden hash fixture still
+fails.
+
+**Pieces:**
+
+- `bench_sd --json-out PATH` — appends one JSON-line summary (epoch,
+  GIT_SHA env, scheduler, gate-config knobs, median/min/max step + wall
+  ms). Doesn't disturb the human-readable bench output.
+- `crates/scry-diffusion/examples/check_perf_history.rs` — reads
+  `bench/history.jsonl`, filters by gate bucket
+  (`size=64 steps=4 scheduler=ddim bf16=true no_cudnn=false` by default),
+  fails with exit 1 if the latest entry's `step_ms_median` is more than
+  `--max-regression` (default 15.0) percent slower than the median of
+  the trailing `--window` (default 10) baseline entries. Exit codes:
+  `0` ok-or-not-enough-history, `1` regression, `2` malformed input.
+- `crates/scry-diffusion/tests/golden_hash.rs` — runs txt2img at
+  `prompt="a photo of a cat" seed=42 cfg=7.5 steps=4 size=64`,
+  quantises the post-decode tensor to u8 HWC, hashes via SHA-256 and
+  compares to `tests/fixtures/golden_hash.txt` (committed). Compile-time
+  `cfg(all(feature = "safetensors", feature = "scry-gpu-cuda"))` so it
+  drops out of CI's matrix; the pre-push hook enables the GPU features
+  to compile + run it. Update with
+  `GOLDEN_HASH_UPDATE=1 cargo nextest run -p scry-diffusion --release
+  --features safetensors,scry-gpu-cuda,scry-gpu-bf16,scry-gpu-cudnn
+  --test golden_hash` and commit the new fixture.
+- `.githooks/pre-push` — fmt → clippy → nextest → bench_sd into a
+  *transient* mktemp copy of history.jsonl → check_perf_history → golden
+  hash test. Auto-skips the GPU half if `nvidia-smi` is missing so a
+  laptop checkout still gets the CPU-side gates. Enable with
+  `git config core.hooksPath .githooks`.
+- `.github/workflows/ci.yml` — new `m9e-artifacts` job validates that
+  every line in `bench/history.jsonl` is JSON with the required field
+  set, and that the golden-hash fixture is a 64-char lowercase sha256.
+  Runs on `ubuntu-latest`, no Rust toolchain.
+
+**Baseline seeded on RTX 5070 Ti at HEAD 7280984:**
+`step_ms_median = 19.36 ms`, `wall_ms_median = 93.2 ms` at the gate
+config. One entry; the perf gate prints "not enough history to gate"
+until the second matching entry arrives.
+
+**Gate fail-on-bad demos (verified locally 2026-05-10):**
+- `+12.81%` synthetic candidate → exit 0 (under the +15% threshold).
+- `+17.19%` synthetic candidate → exit 1 with the threshold and observed
+  delta logged.
+- Fixture overwritten to all-zeros → `txt2img_golden_hash` panics with
+  expected/actual hashes and the `GOLDEN_HASH_UPDATE` remediation hint.
+- Fixture restored → test passes again.
+
+**Gotchas to know before extending the baseline:**
+
+- New baseline entries enter `bench/history.jsonl` only by deliberate
+  human action: run the bench against the *committed* file with
+  `--json-out bench/history.jsonl`, eyeball the line, commit. The
+  pre-push hook never mutates the committed file (it copies to a
+  mktemp first), so a push can't smuggle in a baseline.
+- `step_ms_median` for `--steps 4 --runs 1` derives from 3 step
+  deltas (the progress callback fires before each of the 4 steps; the
+  last step's tail isn't captured). If the bench is changed to use
+  more steps or runs, expect the variance envelope to tighten and
+  consider lowering `--max-regression`.
+- The bf16 toggle is process-global on `ScryGpuBackend`. The bench
+  flips it on with `--bf16-matmul` and never restores; safe because
+  the bench process exits, but the gate buckets must pin
+  `bf16_matmul=true` to match. The golden-hash test does the same
+  toggle for the same reason.
+- `golden_hash.rs` quantises to u8 *before* hashing, so cuBLAS / cuDNN
+  sub-LSB jitter doesn't flake the gate. If a real change drops the
+  perceptual hash, that is the gate doing its job — not flakiness.
+  Expect this to need `GOLDEN_HASH_UPDATE=1` after M9g (CFG batch /
+  fused attention / CUDA graphs all change the dataflow enough that a
+  bit-identical hash is unrealistic).
