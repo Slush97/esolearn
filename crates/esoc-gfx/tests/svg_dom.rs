@@ -8,7 +8,6 @@
 
 use esoc_color::Color;
 use esoc_gfx::scene_svg::{render_scene_svg, render_scene_svg_with_metadata};
-use esoc_scene::SceneGraph;
 use esoc_scene::bounds::BoundingBox;
 use esoc_scene::mark::{
     Interpolation, LineMark, Mark, PointMark, RectMark, RuleMark, TextAnchor, TextMark,
@@ -16,6 +15,7 @@ use esoc_scene::mark::{
 use esoc_scene::node::Node;
 use esoc_scene::style::{FillStyle, FontStyle, LineCap, MarkerShape, StrokeStyle};
 use esoc_scene::transform::Affine2D;
+use esoc_scene::SceneGraph;
 use roxmltree::{Document, Node as XmlNode};
 
 const W: f32 = 200.0;
@@ -48,10 +48,7 @@ fn count_tag(doc: &Document<'_>, tag: &str) -> usize {
     elements(doc).filter(|n| n.tag_name().name() == tag).count()
 }
 
-fn first_with_tag<'a, 'input>(
-    doc: &'a Document<'input>,
-    tag: &str,
-) -> Option<XmlNode<'a, 'input>> {
+fn first_with_tag<'a, 'input>(doc: &'a Document<'input>, tag: &str) -> Option<XmlNode<'a, 'input>> {
     elements(doc).find(|n| n.tag_name().name() == tag)
 }
 
@@ -230,7 +227,11 @@ fn line_mark_emits_polyline_with_all_points() {
     let pl = first_with_tag(&doc, "polyline").expect("polyline must be emitted");
     let points_attr = pl.attribute("points").expect("polyline missing `points`");
     let pair_count = points_attr.split_whitespace().count();
-    assert_eq!(pair_count, pts.len(), "polyline should encode every input point");
+    assert_eq!(
+        pair_count,
+        pts.len(),
+        "polyline should encode every input point"
+    );
     assert_eq!(pl.attribute("fill"), Some("none"));
     assert_eq!(pl.attribute("stroke-width"), Some("2"));
 }
@@ -351,8 +352,16 @@ fn parent_transform_propagates_to_child_marks() {
     let doc = parse(&svg);
 
     let c = first_with_tag(&doc, "circle").expect("circle must be emitted");
-    assert!(approx(attr_f32(c, "cx"), 100.0), "got cx={}", attr_f32(c, "cx"));
-    assert!(approx(attr_f32(c, "cy"), 25.0), "got cy={}", attr_f32(c, "cy"));
+    assert!(
+        approx(attr_f32(c, "cx"), 100.0),
+        "got cx={}",
+        attr_f32(c, "cx")
+    );
+    assert!(
+        approx(attr_f32(c, "cy"), 25.0),
+        "got cy={}",
+        attr_f32(c, "cy")
+    );
 }
 
 // ── Stroke styling ──────────────────────────────────────────────────

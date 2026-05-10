@@ -120,16 +120,11 @@ fn parse_properties(map: &serde_json::Map<String, serde_json::Value>) -> Propert
     props
 }
 
-fn coords_of<'a>(
-    geom: &'a GeoJsonGeometry,
-    object: &'static str,
-) -> Result<&'a serde_json::Value> {
-    geom.coordinates
-        .as_ref()
-        .ok_or(GeoError::MissingField {
-            object,
-            field: "coordinates",
-        })
+fn coords_of<'a>(geom: &'a GeoJsonGeometry, object: &'static str) -> Result<&'a serde_json::Value> {
+    geom.coordinates.as_ref().ok_or(GeoError::MissingField {
+        object,
+        field: "coordinates",
+    })
 }
 
 fn parse_geometry(geom: &GeoJsonGeometry) -> Result<GeoGeometry> {
@@ -212,9 +207,9 @@ fn parse_polygon_coords(value: &serde_json::Value) -> Result<GeoPolygon> {
 }
 
 fn parse_multi_polygon_coords(value: &serde_json::Value) -> Result<Vec<GeoPolygon>> {
-    let polys = value.as_array().ok_or(GeoError::InvalidCoordinates(
-        "expected array of polygons",
-    ))?;
+    let polys = value
+        .as_array()
+        .ok_or(GeoError::InvalidCoordinates("expected array of polygons"))?;
     polys.iter().map(parse_polygon_coords).collect()
 }
 
@@ -292,10 +287,7 @@ mod tests {
         let coll = parse(input).unwrap();
         assert_eq!(coll.features.len(), 1);
         let GeoGeometry::MultiPolygon(mp) = &coll.features[0].geometry else {
-            unreachable!(
-                "expected MultiPolygon, got {:?}",
-                coll.features[0].geometry
-            )
+            unreachable!("expected MultiPolygon, got {:?}", coll.features[0].geometry)
         };
         assert_eq!(mp.polygons.len(), 2);
     }

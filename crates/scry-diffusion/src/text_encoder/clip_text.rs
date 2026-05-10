@@ -273,6 +273,9 @@ impl<B: MathBackend> TextEncoder<B> for ClipTextEncoder<B> {
 /// time). A missed key triggers a load failure rather than a silent
 /// zero-init.
 #[cfg(feature = "safetensors")]
+use scry_llm::tensor::shape::Shape;
+
+#[cfg(feature = "safetensors")]
 impl<B: MathBackend> ClipTextEncoder<B> {
     /// Load CLIP text encoder weights from a HF safetensors checkpoint.
     ///

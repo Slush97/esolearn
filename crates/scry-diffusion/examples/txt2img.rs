@@ -25,7 +25,7 @@ use scry_diffusion::weights::SafetensorsCheckpoint;
 use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
 
 #[cfg(not(feature = "scry-gpu-cuda"))]
-use scry_llm::backend::cpu::Backend as Backend;
+use scry_llm::backend::cpu::CpuBackend as Backend;
 #[cfg(feature = "scry-gpu-cuda")]
 use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 

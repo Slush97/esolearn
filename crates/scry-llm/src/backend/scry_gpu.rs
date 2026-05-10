@@ -821,7 +821,9 @@ fn as_gpu_buffer_bf16(storage: &ScryGpuStorage) -> Option<Arc<Buffer<half::bf16>
     // contents are identical up to bit-exact casting).
     match buf.bf16.set(Arc::clone(&bf16_arc)) {
         Ok(()) => Some(bf16_arc),
-        Err(_) => Some(Arc::clone(buf.bf16.get().expect("just lost a race; cache populated"))),
+        Err(_) => Some(Arc::clone(
+            buf.bf16.get().expect("just lost a race; cache populated"),
+        )),
     }
 }
 
@@ -2317,14 +2319,7 @@ fn gpu_matmul_persistent(
         #[cfg(feature = "scry-gpu-cuda")]
         MatmulStrategy::CuBlas => {
             ctx.dev
-                .cublas_matmul_async(
-                    buf_a_ref,
-                    buf_b_ref,
-                    &mut out,
-                    m as u32,
-                    n as u32,
-                    k as u32,
-                )
+                .cublas_matmul_async(buf_a_ref, buf_b_ref, &mut out, m as u32, n as u32, k as u32)
                 .ok()?;
         }
     }
@@ -2529,12 +2524,7 @@ fn gpu_matmul_persistent_bf16(
     let mut out = ctx.dev.alloc_uninit::<f32>(m * n).ok()?;
     ctx.dev
         .cublas_matmul_bf16_in_f32_out_async(
-            &a_bf16,
-            &b_bf16,
-            &mut out,
-            m as u32,
-            n as u32,
-            k as u32,
+            &a_bf16, &b_bf16, &mut out, m as u32, n as u32, k as u32,
         )
         .ok()?;
 
@@ -2548,11 +2538,7 @@ fn gpu_matmul_persistent_bf16(
 /// kernel. Used for the transpose-then-cast slow path and the Cpu-fallback
 /// path; the hot path goes through [`as_gpu_buffer_bf16`]'s OnceLock cache.
 #[cfg(feature = "scry-gpu-bf16")]
-fn cast_f32_to_bf16(
-    ctx: &ScryCtx,
-    src: &Buffer<f32>,
-    n: usize,
-) -> Option<Buffer<half::bf16>> {
+fn cast_f32_to_bf16(ctx: &ScryCtx, src: &Buffer<f32>, n: usize) -> Option<Buffer<half::bf16>> {
     let cast_down = ctx.cast_f32_bf16.as_ref()?;
     let dst = ctx.dev.alloc_uninit::<half::bf16>(n).ok()?;
     let n_pc: u32 = n as u32;
@@ -2850,9 +2836,7 @@ impl MathBackend for ScryGpuBackend {
             // initialized (CUDA + scry-gpu-bf16 feature).
             #[cfg(feature = "scry-gpu-bf16")]
             if get_ctx().is_some_and(|c| c.bf16_matmul_enabled.load(Ordering::Relaxed)) {
-                if let Some(gpu_out) =
-                    gpu_matmul_persistent_bf16(a, b, m, k, n, trans_a, trans_b)
-                {
+                if let Some(gpu_out) = gpu_matmul_persistent_bf16(a, b, m, k, n, trans_a, trans_b) {
                     return gpu_out;
                 }
             }
@@ -3049,16 +3033,9 @@ impl MathBackend for ScryGpuBackend {
             }
         }
         #[cfg(feature = "scry-gpu-cuda")]
-        if let Some(gpu_out) = gpu_matmul_strided_batched_persistent(
-            a,
-            b,
-            batch_count,
-            m,
-            k,
-            n,
-            trans_a,
-            trans_b,
-        ) {
+        if let Some(gpu_out) =
+            gpu_matmul_strided_batched_persistent(a, b, batch_count, m, k, n, trans_a, trans_b)
+        {
             return gpu_out;
         }
         let a_stride = m * k;
@@ -3353,9 +3330,9 @@ impl MathBackend for ScryGpuBackend {
         spatial: usize,
         eps: f32,
     ) -> ScryGpuStorage {
-        if let Some(gpu_out) = gpu_group_norm_persistent(
-            input, weight, bias, num_groups, channels, spatial, eps,
-        ) {
+        if let Some(gpu_out) =
+            gpu_group_norm_persistent(input, weight, bias, num_groups, channels, spatial, eps)
+        {
             return gpu_out;
         }
         // CpuBackend has no `group_norm` op — go through the trait default
@@ -3365,13 +3342,7 @@ impl MathBackend for ScryGpuBackend {
         let weight_v = weight.as_vec();
         let bias_v = bias.as_vec();
         cpu(<CpuBackend as MathBackend>::group_norm(
-            &input_v,
-            &weight_v,
-            &bias_v,
-            num_groups,
-            channels,
-            spatial,
-            eps,
+            &input_v, &weight_v, &bias_v, num_groups, channels, spatial, eps,
         ))
     }
 
@@ -3879,7 +3850,9 @@ mod tests {
         // Sized above GPU_SOFTMAX_MIN_ROWS so the kernel engages, with d
         // both small (=64) and larger-than-block (=512) cases.
         for (rows, d) in [(64usize, 64usize), (32, 512)] {
-            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let input: Vec<f32> = (0..rows * d)
+                .map(|i| ((i % 97) as f32) * 0.05 - 2.0)
+                .collect();
             let shape = Shape::new(&[rows, d]);
             let storage = ScryGpuStorage::Cpu(input.clone());
             let gpu = match ScryGpuBackend::to_gpu(&storage) {
@@ -3912,10 +3885,7 @@ mod tests {
             // Each row should sum to 1.
             for r in 0..rows {
                 let s: f32 = g[r * d..(r + 1) * d].iter().sum();
-                assert!(
-                    (s - 1.0).abs() < 1e-4,
-                    "row {r} did not sum to 1: got {s}"
-                );
+                assert!((s - 1.0).abs() < 1e-4, "row {r} did not sum to 1: got {s}");
             }
         }
     }
@@ -3931,7 +3901,9 @@ mod tests {
             (32, 512, -0.25),
             (32, 512, 1.0 / (40.0_f32).sqrt()), // SD self-attn deepest stage
         ] {
-            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let input: Vec<f32> = (0..rows * d)
+                .map(|i| ((i % 97) as f32) * 0.05 - 2.0)
+                .collect();
             let shape = Shape::new(&[rows, d]);
             let storage = ScryGpuStorage::Cpu(input.clone());
             let gpu = match ScryGpuBackend::to_gpu(&storage) {
@@ -3971,7 +3943,9 @@ mod tests {
         // Sized above GPU_LAYERNORM_MIN_ROWS so the kernel engages, with d
         // both small (=64) and larger-than-block (=512) cases.
         for (rows, d) in [(64usize, 64usize), (32, 512)] {
-            let input: Vec<f32> = (0..rows * d).map(|i| ((i % 97) as f32) * 0.05 - 2.0).collect();
+            let input: Vec<f32> = (0..rows * d)
+                .map(|i| ((i % 97) as f32) * 0.05 - 2.0)
+                .collect();
             let gamma: Vec<f32> = (0..d).map(|i| 1.0 + (i as f32) * 0.01).collect();
             let beta: Vec<f32> = (0..d).map(|i| (i as f32) * 0.005 - 0.5).collect();
             let shape = Shape::new(&[rows, d]);
@@ -4066,9 +4040,18 @@ mod tests {
         let g_s = ScryGpuStorage::Cpu(gamma);
         let b_s = ScryGpuStorage::Cpu(beta);
         let (out, means, rstds) = ScryGpuBackend::layernorm(&in_s, &g_s, &b_s, &shape, 1e-5);
-        assert!(!out.is_gpu(), "small layernorm output should fall back to Cpu");
-        assert!(!means.is_gpu(), "small layernorm means should fall back to Cpu");
-        assert!(!rstds.is_gpu(), "small layernorm rstds should fall back to Cpu");
+        assert!(
+            !out.is_gpu(),
+            "small layernorm output should fall back to Cpu"
+        );
+        assert!(
+            !means.is_gpu(),
+            "small layernorm means should fall back to Cpu"
+        );
+        assert!(
+            !rstds.is_gpu(),
+            "small layernorm rstds should fall back to Cpu"
+        );
     }
 
     #[test]
@@ -4164,10 +4147,7 @@ mod tests {
         for (i, (gv, rv)) in g.iter().zip(reference.iter()).enumerate() {
             // erff vs Abramowitz–Stegun: both ~1.5e-7 vs true erf, plus
             // fp32 round-off in the multiply. Generous 1e-5 envelope.
-            assert!(
-                (gv - rv).abs() < 1e-5,
-                "mismatch at {i}: gpu={gv} ref={rv}"
-            );
+            assert!((gv - rv).abs() < 1e-5, "mismatch at {i}: gpu={gv} ref={rv}");
         }
     }
 
@@ -4185,7 +4165,9 @@ mod tests {
         // larger-than-block spatial dims to exercise the per-thread strided loop.
         for (channels, spatial) in [(64usize, 49usize), (32, 256), (128, 1024)] {
             let total = channels * spatial;
-            let input: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.05 - 2.5).collect();
+            let input: Vec<f32> = (0..total)
+                .map(|i| ((i % 113) as f32) * 0.05 - 2.5)
+                .collect();
             let weight: Vec<f32> = (0..channels).map(|c| 0.5 + (c as f32) * 0.01).collect();
             let bias: Vec<f32> = (0..channels).map(|c| (c as f32) * 0.005 - 0.25).collect();
             let mean: Vec<f32> = (0..channels).map(|c| (c as f32) * 0.02 - 0.5).collect();
@@ -4206,8 +4188,9 @@ mod tests {
                 }
             };
 
-            let out =
-                ScryGpuBackend::batchnorm_2d_inference(&gpu_in, &w_s, &b_s, &m_s, &v_s, channels, spatial, eps);
+            let out = ScryGpuBackend::batchnorm_2d_inference(
+                &gpu_in, &w_s, &b_s, &m_s, &v_s, channels, spatial, eps,
+            );
             #[cfg(feature = "scry-gpu-cuda")]
             assert!(
                 out.is_gpu(),
@@ -4246,7 +4229,9 @@ mod tests {
         ];
         for &(c_in, h_in, w_in, k, stride, padding) in cases {
             let total = c_in * h_in * w_in;
-            let input: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.05 - 2.5).collect();
+            let input: Vec<f32> = (0..total)
+                .map(|i| ((i % 113) as f32) * 0.05 - 2.5)
+                .collect();
             let storage = ScryGpuStorage::Cpu(input.clone());
             let gpu = match ScryGpuBackend::to_gpu(&storage) {
                 Ok(g) => g,
@@ -4255,8 +4240,7 @@ mod tests {
                     return;
                 }
             };
-            let gpu_out =
-                ScryGpuBackend::im2col_2d(&gpu, c_in, h_in, w_in, k, k, stride, padding);
+            let gpu_out = ScryGpuBackend::im2col_2d(&gpu, c_in, h_in, w_in, k, k, stride, padding);
             #[cfg(feature = "scry-gpu-cuda")]
             assert!(
                 gpu_out.is_gpu(),
@@ -4264,7 +4248,11 @@ mod tests {
             );
             let g = ScryGpuBackend::to_vec(&gpu_out);
             let c = CpuBackend::im2col_2d(&input, c_in, h_in, w_in, k, k, stride, padding);
-            assert_eq!(g.len(), c.len(), "len mismatch for case ({c_in},{h_in},{w_in},{k},{stride},{padding})");
+            assert_eq!(
+                g.len(),
+                c.len(),
+                "len mismatch for case ({c_in},{h_in},{w_in},{k},{stride},{padding})"
+            );
             // Pure copy/zero kernel — values must match exactly.
             for (i, (gv, cv)) in g.iter().zip(c.iter()).enumerate() {
                 assert!(
@@ -4377,8 +4365,7 @@ mod tests {
             assert!(v.is_gpu(), "v should stay Gpu on CUDA");
         }
 
-        let (qc, kc, vc) =
-            CpuBackend::split_qkv_reshape_heads(&qkv, seq, n_heads, d_head);
+        let (qc, kc, vc) = CpuBackend::split_qkv_reshape_heads(&qkv, seq, n_heads, d_head);
         let qg = ScryGpuBackend::to_vec(&q);
         let kg = ScryGpuBackend::to_vec(&k);
         let vg = ScryGpuBackend::to_vec(&v);
@@ -4402,7 +4389,9 @@ mod tests {
         let d_head = 64;
         let d_model = n_heads * d_head;
         let total = n_heads * seq * d_head;
-        let input: Vec<f32> = (0..total).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let input: Vec<f32> = (0..total)
+            .map(|i| ((i % 173) as f32 - 80.0) * 0.013)
+            .collect();
         let storage = ScryGpuStorage::Cpu(input.clone());
         let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
             Ok(g) => g,
@@ -4432,7 +4421,9 @@ mod tests {
         let d_head = 64;
         let d_model = n_heads * d_head;
         let total = seq * d_model;
-        let input: Vec<f32> = (0..total).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let input: Vec<f32> = (0..total)
+            .map(|i| ((i % 173) as f32 - 80.0) * 0.013)
+            .collect();
         let storage = ScryGpuStorage::Cpu(input.clone());
         let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
             Ok(g) => g,
@@ -4461,7 +4452,9 @@ mod tests {
         let rows = 320;
         let cols = 1024;
         let total = rows * cols;
-        let input: Vec<f32> = (0..total).map(|i| ((i % 211) as f32 - 100.0) * 0.011).collect();
+        let input: Vec<f32> = (0..total)
+            .map(|i| ((i % 211) as f32 - 100.0) * 0.011)
+            .collect();
         let storage = ScryGpuStorage::Cpu(input.clone());
         let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
             Ok(g) => g,
@@ -4496,8 +4489,12 @@ mod tests {
         let m = 2048;
         let k = 320;
         let n = 320;
-        let a: Vec<f32> = (0..m * k).map(|i| ((i % 211) as f32 - 100.0) * 0.011).collect();
-        let b: Vec<f32> = (0..k * n).map(|i| ((i % 173) as f32 - 80.0) * 0.013).collect();
+        let a: Vec<f32> = (0..m * k)
+            .map(|i| ((i % 211) as f32 - 100.0) * 0.011)
+            .collect();
+        let b: Vec<f32> = (0..k * n)
+            .map(|i| ((i % 173) as f32 - 80.0) * 0.013)
+            .collect();
         let bias: Vec<f32> = (0..n).map(|i| ((i % 41) as f32 - 20.0) * 0.07).collect();
         let a_storage = ScryGpuStorage::Cpu(a.clone());
         let b_storage = ScryGpuStorage::Cpu(b.clone());
@@ -4588,7 +4585,9 @@ mod tests {
         let d_head = 80;
         let d_model = n_heads * d_head;
         let total = seq * d_model;
-        let input: Vec<f32> = (0..total).map(|i| ((i % 251) as f32 - 120.0) * 0.017).collect();
+        let input: Vec<f32> = (0..total)
+            .map(|i| ((i % 251) as f32 - 120.0) * 0.017)
+            .collect();
         let storage = ScryGpuStorage::Cpu(input.clone());
         let gpu_in = match ScryGpuBackend::to_gpu(&storage) {
             Ok(g) => g,
@@ -4637,8 +4636,7 @@ mod tests {
         #[cfg(feature = "scry-gpu-cuda")]
         assert!(gpu_out.is_gpu(), "strided batched output should stay Gpu");
 
-        let cpu_out =
-            CpuBackend::matmul_strided_batched(&a, &b, batch, m, k, n, false, false);
+        let cpu_out = CpuBackend::matmul_strided_batched(&a, &b, batch, m, k, n, false, false);
         let g = ScryGpuBackend::to_vec(&gpu_out);
         for (i, (gv, cv)) in g.iter().zip(cpu_out.iter()).enumerate() {
             assert!((gv - cv).abs() < 1e-3, "idx={i}: gpu={gv} cpu={cv}");
@@ -4652,7 +4650,9 @@ mod tests {
         // kernel engages) to exercise the actual call site.
         let shape = Shape::new(&[256, 14, 14]);
         let total = shape.numel();
-        let a: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.03 - 1.5).collect();
+        let a: Vec<f32> = (0..total)
+            .map(|i| ((i % 113) as f32) * 0.03 - 1.5)
+            .collect();
         let b: Vec<f32> = (0..total).map(|i| ((i % 71) as f32) * 0.07 + 0.5).collect();
 
         let gpu_a = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a.clone())) {
@@ -4701,7 +4701,10 @@ mod tests {
         let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
             .expect("upload b after upload a succeeded");
         let out = ScryGpuBackend::add(&gpu_a, &gpu_b, &shape, &shape, &shape);
-        assert!(!out.is_gpu(), "small same-shape add should fall back to Cpu");
+        assert!(
+            !out.is_gpu(),
+            "small same-shape add should fall back to Cpu"
+        );
     }
 
     #[test]
@@ -4812,7 +4815,10 @@ mod tests {
         let gpu_b = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b.clone()))
             .expect("upload b after upload a succeeded");
         let out = ScryGpuBackend::mul_elementwise(&gpu_a, &gpu_b);
-        assert!(!out.is_gpu(), "small mul_elementwise should fall back to Cpu");
+        assert!(
+            !out.is_gpu(),
+            "small mul_elementwise should fall back to Cpu"
+        );
     }
 
     #[test]
@@ -4860,7 +4866,9 @@ mod tests {
         let rows = 77;
         let cols = 2304;
         let total = rows * cols;
-        let a: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.013 - 1.5).collect();
+        let a: Vec<f32> = (0..total)
+            .map(|i| ((i % 113) as f32) * 0.013 - 1.5)
+            .collect();
         let bias: Vec<f32> = (0..cols).map(|c| (c as f32) * 0.0007 - 0.8).collect();
 
         let a_s = ScryGpuStorage::Cpu(a.clone());
@@ -4956,19 +4964,20 @@ mod tests {
         let src2: Vec<f32> = (0..rows * col_count)
             .map(|i| ((i * 13 + 5) as f32) * 0.013 + 0.2)
             .collect();
-        let mut dst = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols])) {
-            // Use a Cpu zeros to mirror what the trait does, then forget the
-            // Gpu attempt — we want the override to do the promotion.
-            Ok(_) => ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols]),
-            Err(e) => {
-                eprintln!("skipping gpu_scatter_columns_promotes_cpu_dst_and_accumulates: {e}");
-                return;
-            }
-        };
-        let gpu_src1 = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src1.clone()))
-            .expect("upload src1");
-        let gpu_src2 = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src2.clone()))
-            .expect("upload src2");
+        let mut dst =
+            match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols])) {
+                // Use a Cpu zeros to mirror what the trait does, then forget the
+                // Gpu attempt — we want the override to do the promotion.
+                Ok(_) => ScryGpuStorage::Cpu(vec![0.0f32; rows * total_cols]),
+                Err(e) => {
+                    eprintln!("skipping gpu_scatter_columns_promotes_cpu_dst_and_accumulates: {e}");
+                    return;
+                }
+            };
+        let gpu_src1 =
+            ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src1.clone())).expect("upload src1");
+        let gpu_src2 =
+            ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(src2.clone())).expect("upload src2");
 
         ScryGpuBackend::scatter_columns(&mut dst, &gpu_src1, rows, total_cols, 0, col_count);
         #[cfg(feature = "scry-gpu-cuda")]
@@ -4996,14 +5005,13 @@ mod tests {
         let mask_value = f32::NEG_INFINITY;
         let scores: Vec<f32> = (0..total).map(|i| ((i % 89) as f32) * 0.04 - 1.5).collect();
 
-        let mut gpu_scores =
-            match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(scores.clone())) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("skipping gpu_apply_causal_mask_and_scale_matches_cpu: {e}");
-                    return;
-                }
-            };
+        let mut gpu_scores = match ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(scores.clone())) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("skipping gpu_apply_causal_mask_and_scale_matches_cpu: {e}");
+                return;
+            }
+        };
         ScryGpuBackend::apply_causal_mask_and_scale(&mut gpu_scores, seq, scale, mask_value);
         #[cfg(feature = "scry-gpu-cuda")]
         assert!(gpu_scores.is_gpu(), "mask+scale over Gpu input stays Gpu");
@@ -5015,12 +5023,12 @@ mod tests {
         for (i, (gv, cv)) in g.iter().zip(cpu_scores.iter()).enumerate() {
             // -INF compares with itself fine; finite cells should match.
             if cv.is_finite() {
-                assert!(
-                    (gv - cv).abs() < 1e-6,
-                    "idx={i}: gpu={gv} cpu={cv}"
-                );
+                assert!((gv - cv).abs() < 1e-6, "idx={i}: gpu={gv} cpu={cv}");
             } else {
-                assert!(gv.is_infinite() && gv.is_sign_negative(), "idx={i}: expected -INF got {gv}");
+                assert!(
+                    gv.is_infinite() && gv.is_sign_negative(),
+                    "idx={i}: expected -INF got {gv}"
+                );
             }
         }
     }
@@ -5030,10 +5038,8 @@ mod tests {
         // Two cases: ResNet stem (64×112×112 → 64×56×56 with k=3, s=2, p=1)
         // and a no-padding case (32×64×64 → 32×32×32 with k=2, s=2, p=0).
         // Both produce >> GPU_POOL_MIN_OUTPUT_ELEMENTS so the kernel engages.
-        let cases: [(usize, usize, usize, usize, usize, usize); 2] = [
-            (64, 112, 112, 3, 2, 1),
-            (32, 64, 64, 2, 2, 0),
-        ];
+        let cases: [(usize, usize, usize, usize, usize, usize); 2] =
+            [(64, 112, 112, 3, 2, 1), (32, 64, 64, 2, 2, 0)];
         for (c, h, w, k, stride, padding) in cases {
             let total_in = c * h * w;
             // Use a deterministic non-monotonic pattern so max isn't trivially
@@ -5103,10 +5109,7 @@ mod tests {
         for (i, (gv, cv)) in g.iter().zip(cref.iter()).enumerate() {
             // Sum/divide of a few cells per output — f32 accumulation order
             // differs slightly. 1e-5 absolute tolerance is plenty.
-            assert!(
-                (gv - cv).abs() < 1e-5,
-                "idx={i}: gpu={gv} cpu={cv}"
-            );
+            assert!((gv - cv).abs() < 1e-5, "idx={i}: gpu={gv} cpu={cv}");
         }
     }
 
@@ -5187,10 +5190,7 @@ mod tests {
             // (oh=0, ow=0) → (ih=0, iw=0)
             assert_eq!(v[out_plane], input[in_plane]);
             // (oh=3, ow=5) → (ih=1, iw=2)
-            assert_eq!(
-                v[out_plane + 3 * w_out + 5],
-                input[in_plane + 1 * w_in + 2]
-            );
+            assert_eq!(v[out_plane + 3 * w_out + 5], input[in_plane + 1 * w_in + 2]);
         }
     }
 
@@ -5207,7 +5207,10 @@ mod tests {
         let avg_input: Vec<f32> = (0..4 * 16 * 16).map(|i| (i as f32) * 0.01).collect();
         let avg_s = ScryGpuStorage::Cpu(avg_input);
         let avg_out = ScryGpuBackend::adaptive_avg_pool_2d(&avg_s, 4, 16, 16, 1, 1);
-        assert!(!avg_out.is_gpu(), "small adaptive_avg_pool should fall back to Cpu");
+        assert!(
+            !avg_out.is_gpu(),
+            "small adaptive_avg_pool should fall back to Cpu"
+        );
     }
 
     #[test]
@@ -5220,12 +5223,14 @@ mod tests {
         // we exercise both the in-block-bounded (cpg*spatial ≤ 256) and
         // strided-loop regimes.
         for &(batch, channels, spatial, num_groups) in &[
-            (1usize, 64usize, 64usize, 32usize),    // cpg=2, gsize=128
-            (1, 320, 32 * 32, 32),                   // cpg=10, gsize=10240
-            (1, 1280, 8 * 8, 32),                    // cpg=40, gsize=2560
+            (1usize, 64usize, 64usize, 32usize), // cpg=2, gsize=128
+            (1, 320, 32 * 32, 32),               // cpg=10, gsize=10240
+            (1, 1280, 8 * 8, 32),                // cpg=40, gsize=2560
         ] {
             let total = batch * channels * spatial;
-            let input: Vec<f32> = (0..total).map(|i| ((i % 113) as f32) * 0.05 - 2.5).collect();
+            let input: Vec<f32> = (0..total)
+                .map(|i| ((i % 113) as f32) * 0.05 - 2.5)
+                .collect();
             let weight: Vec<f32> = (0..channels).map(|c| 0.5 + (c as f32) * 0.01).collect();
             let bias: Vec<f32> = (0..channels).map(|c| (c as f32) * 0.005 - 0.25).collect();
             let eps = 1e-5_f32;
@@ -5242,9 +5247,8 @@ mod tests {
                 }
             };
 
-            let out = ScryGpuBackend::group_norm(
-                &gpu_in, &w_s, &b_s, num_groups, channels, spatial, eps,
-            );
+            let out =
+                ScryGpuBackend::group_norm(&gpu_in, &w_s, &b_s, num_groups, channels, spatial, eps);
             #[cfg(feature = "scry-gpu-cuda")]
             assert!(
                 out.is_gpu(),
@@ -5285,9 +5289,8 @@ mod tests {
         let in_s = ScryGpuStorage::Cpu(input);
         let w_s = ScryGpuStorage::Cpu(weight);
         let b_s = ScryGpuStorage::Cpu(bias);
-        let out = ScryGpuBackend::group_norm(
-            &in_s, &w_s, &b_s, num_groups, channels, spatial, 1e-5,
-        );
+        let out =
+            ScryGpuBackend::group_norm(&in_s, &w_s, &b_s, num_groups, channels, spatial, 1e-5);
         assert!(!out.is_gpu(), "small group_norm should fall back to Cpu");
     }
 
@@ -5358,7 +5361,9 @@ mod tests {
         // outsized magnitudes would dilute the relative-error check.
         let mut state = 0xb_f16_5_71_d_d_u64;
         let mut next = || {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             ((state >> 32) as i32 as f32) / (i32::MAX as f32)
         };
         let a: Vec<f32> = (0..batch * m * k).map(|_| next()).collect();
@@ -5406,9 +5411,7 @@ mod tests {
                 "bf16 strided batched drift at {i}: cpu={cpu_v} bf16={bf_v} rel={rel:.4}"
             );
         }
-        eprintln!(
-            "bf16 strided batched 12×197×64×197 max relative error: {max_rel_err:.5}"
-        );
+        eprintln!("bf16 strided batched 12×197×64×197 max relative error: {max_rel_err:.5}");
     }
 
     #[cfg(feature = "scry-gpu-bf16")]
@@ -5426,7 +5429,9 @@ mod tests {
         // random walk).
         let mut state = 0xb_f16_d_15_u64;
         let mut next = || {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             ((state >> 32) as i32 as f32) / (i32::MAX as f32)
         };
         let a: Vec<f32> = (0..m * k).map(|_| next()).collect();

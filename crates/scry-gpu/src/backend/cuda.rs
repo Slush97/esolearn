@@ -10,9 +10,9 @@
 //! SPIR-V dispatch is not supported — use [`CudaBackend::compile_cuda`] for
 //! native CUDA kernels, or [`CudaBackend::cublas_matmul`] for matrix multiply.
 
-use std::sync::{Arc, Mutex};
 #[cfg(feature = "cudnn")]
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex};
 
 use cudarc::cublas::sys::cublasOperation_t;
 use cudarc::cublas::CudaBlas;
@@ -22,9 +22,9 @@ use cudarc::driver::{
 };
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 
-use crate::backend::{Backend, BackendBufferOps};
 #[cfg(feature = "cudnn")]
 use crate::backend::cuda_cudnn::{Conv2dKey, CudnnState};
+use crate::backend::{Backend, BackendBufferOps};
 use crate::error::{backend_err, BackendOp, GpuError, Result};
 
 // ── Public types ──
@@ -593,10 +593,7 @@ impl CudaBackend {
         // Another thread may have initialized between our `get` and `set` —
         // their value wins (we drop ours), the caller still gets a valid handle.
         let _ = self.cudnn.set(state);
-        Ok(self
-            .cudnn
-            .get()
-            .expect("cuDNN handle was just initialized"))
+        Ok(self.cudnn.get().expect("cuDNN handle was just initialized"))
     }
 
     /// Begin a batch dispatch session.
@@ -624,10 +621,9 @@ impl Backend for CudaBackend {
         let device_name = ctx
             .name()
             .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?;
-        let device_memory =
-            unsafe { cudarc::driver::result::device::total_mem(ctx.cu_device()) }
-                .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?
-                as u64;
+        let device_memory = unsafe { cudarc::driver::result::device::total_mem(ctx.cu_device()) }
+            .map_err(|e| backend_err(BackendOp::DeviceQuery, e))?
+            as u64;
 
         let stream = ctx.default_stream();
         let blas = CudaBlas::new(stream.clone()).map_err(|e| backend_err(BackendOp::CuBlas, e))?;

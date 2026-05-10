@@ -209,7 +209,12 @@ fn build_cache_entry(cudnn: &Arc<Cudnn>, key: Conv2dKey) -> Result<ConvCacheEntr
     let x_desc = cudnn
         .create_4d_tensor::<f32>(
             sys::cudnnTensorFormat_t::CUDNN_TENSOR_NCHW,
-            [key.n as i32, key.c_in as i32, key.h_in as i32, key.w_in as i32],
+            [
+                key.n as i32,
+                key.c_in as i32,
+                key.h_in as i32,
+                key.w_in as i32,
+            ],
         )
         .map_err(|e| backend_err(BackendOp::CuDnn, e))?;
 

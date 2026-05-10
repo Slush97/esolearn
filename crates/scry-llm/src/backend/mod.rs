@@ -223,7 +223,7 @@ pub trait MathBackend: DeviceBackend {
 
         let total = input_v.len();
         let plane = channels * spatial;
-        let n_batch = if plane == 0 { 0 } else { total / plane };
+        let n_batch = total.checked_div(plane).unwrap_or(0);
         let mut out = vec![0.0f32; total];
         let gsize = cpg * spatial;
 
@@ -284,7 +284,7 @@ pub trait MathBackend: DeviceBackend {
         let total = input_v.len();
         let plane = channels * spatial;
         let mut out = vec![0.0f32; total];
-        let n_batch = if plane == 0 { 0 } else { total / plane };
+        let n_batch = total.checked_div(plane).unwrap_or(0);
         for n in 0..n_batch {
             for c in 0..channels {
                 let scale = weight_v[c] / (var_v[c] + eps).sqrt();

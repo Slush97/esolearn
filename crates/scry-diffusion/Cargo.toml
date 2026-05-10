@@ -67,5 +67,9 @@ required-features = ["safetensors"]
 name = "bench_sd"
 required-features = ["safetensors", "decode"]
 
+[[example]]
+name = "bench_clip"
+required-features = ["safetensors"]
+
 [lints]
 workspace = true

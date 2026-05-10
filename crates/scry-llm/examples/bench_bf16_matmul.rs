@@ -35,7 +35,9 @@ fn random_vec(seed: u64, n: usize) -> Vec<f32> {
     let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
     (0..n)
         .map(|_| {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             ((state >> 32) as i32 as f32) / (i32::MAX as f32) * 0.1
         })
         .collect()
@@ -45,10 +47,8 @@ fn bench_shape(label: &str, m: usize, k: usize, n: usize) {
     let a = random_vec(0xa11ce, m * k);
     let b = random_vec(0xb0b, k * n);
 
-    let a_storage =
-        ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a)).expect("upload a");
-    let b_storage =
-        ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b)).expect("upload b");
+    let a_storage = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(a)).expect("upload a");
+    let b_storage = ScryGpuBackend::to_gpu(&ScryGpuStorage::Cpu(b)).expect("upload b");
 
     // fp32 cuBLAS sgemm
     let f32_us = time_us(3, 10, || {
@@ -82,23 +82,23 @@ fn main() {
 
     // ResNet-50 1×1 conv shapes (matmul-equivalent: M=Cout, K=Cin, N=H*W)
     println!("ResNet-50 1×1 convolutions (matmul as M×K × K×N):");
-    bench_shape("stage1 1x1: 64×64×3136",      64,   64, 3136);
-    bench_shape("stage1 1x1: 256×64×3136",    256,   64, 3136);
-    bench_shape("stage2 1x1: 512×256×784",    512,  256,  784);
-    bench_shape("stage3 1x1: 1024×512×196",  1024,  512,  196);
-    bench_shape("stage4 1x1: 2048×1024×49",  2048, 1024,   49);
+    bench_shape("stage1 1x1: 64×64×3136", 64, 64, 3136);
+    bench_shape("stage1 1x1: 256×64×3136", 256, 64, 3136);
+    bench_shape("stage2 1x1: 512×256×784", 512, 256, 784);
+    bench_shape("stage3 1x1: 1024×512×196", 1024, 512, 196);
+    bench_shape("stage4 1x1: 2048×1024×49", 2048, 1024, 49);
 
     // ResNet-50 3×3 conv (im2col): M=Cout, K=Cin*9, N=H*W
     println!("\nResNet-50 3×3 convolutions (im2col-lowered):");
-    bench_shape("stage1 3x3: 64×576×3136",    64,  576, 3136);
-    bench_shape("stage2 3x3: 128×1152×784",  128, 1152,  784);
-    bench_shape("stage3 3x3: 256×2304×196",  256, 2304,  196);
-    bench_shape("stage4 3x3: 512×4608×49",   512, 4608,   49);
+    bench_shape("stage1 3x3: 64×576×3136", 64, 576, 3136);
+    bench_shape("stage2 3x3: 128×1152×784", 128, 1152, 784);
+    bench_shape("stage3 3x3: 256×2304×196", 256, 2304, 196);
+    bench_shape("stage4 3x3: 512×4608×49", 512, 4608, 49);
 
     // Square shapes for reference (compute-bound, all 16-aligned)
     println!("\nSquare shapes (best-case for tensor cores):");
-    bench_shape("256×256×256",    256,  256,  256);
-    bench_shape("512×512×512",    512,  512,  512);
+    bench_shape("256×256×256", 256, 256, 256);
+    bench_shape("512×512×512", 512, 512, 512);
     bench_shape("1024×1024×1024", 1024, 1024, 1024);
     bench_shape("2048×2048×2048", 2048, 2048, 2048);
 }

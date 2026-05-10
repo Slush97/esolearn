@@ -46,7 +46,9 @@ fn random_input(seed: u64, len: usize) -> Vec<f32> {
     let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
     (0..len)
         .map(|_| {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             // Map 32 high bits to [-1, 1).
             ((state >> 32) as i32 as f32) / (i32::MAX as f32)
         })
@@ -73,7 +75,10 @@ fn run_resnet18(input: &[f32]) {
         // launch latency. Mirrors PyTorch's `torch.cuda.synchronize()`.
         ScryGpuBackend::synchronize().expect("synchronize");
     });
-    println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
+    println!(
+        "  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)",
+        cpu_ms / gpu_lazy_ms
+    );
 
     // With weight + input pre-upload: weights live in ScryGpuStorage::Gpu for
     // every forward, so as_gpu_buffer hits the Arc fast path instead of
@@ -88,8 +93,11 @@ fn run_resnet18(input: &[f32]) {
         let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
         ScryGpuBackend::synchronize().expect("synchronize");
     });
-    println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
-        cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
+    println!(
+        "  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+        cpu_ms / gpu_resident_ms,
+        gpu_lazy_ms / gpu_resident_ms
+    );
 
     // Fold BN into preceding conv before upload — eliminates ~21 BN kernel
     // launches and HBM passes per forward (one per BasicBlock + stem).
@@ -161,7 +169,10 @@ fn run_resnet50(input: &[f32]) {
         let _ = std::hint::black_box(gpu_model_lazy.forward(&gpu_input));
         ScryGpuBackend::synchronize().expect("synchronize");
     });
-    println!("  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)", cpu_ms / gpu_lazy_ms);
+    println!(
+        "  ScryGpuBackend (lazy)      : {gpu_lazy_ms:7.1} ms/image  ({:.2}× CPU)",
+        cpu_ms / gpu_lazy_ms
+    );
 
     let mut gpu_model = ResNet::<ScryGpuBackend>::new(ResNetConfig::resnet50(1000));
     gpu_model.to_device();
@@ -173,8 +184,11 @@ fn run_resnet50(input: &[f32]) {
         let _ = std::hint::black_box(gpu_model.forward(&gpu_input_resident));
         ScryGpuBackend::synchronize().expect("synchronize");
     });
-    println!("  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
-        cpu_ms / gpu_resident_ms, gpu_lazy_ms / gpu_resident_ms);
+    println!(
+        "  ScryGpuBackend (pre-upload): {gpu_resident_ms:7.1} ms/image  ({:.2}× CPU, {:.2}× lazy)",
+        cpu_ms / gpu_resident_ms,
+        gpu_lazy_ms / gpu_resident_ms
+    );
 
     // Fold BN into preceding conv before upload. Bottleneck has 3 conv-bn
     // pairs per block; ResNet-50 has 16 blocks, so ~49 BN launches vanish.
