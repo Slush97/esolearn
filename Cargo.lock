@@ -847,6 +847,7 @@ dependencies = [
  "esoc-color",
  "esoc-scene",
  "resvg",
+ "roxmltree",
  "tiny-skia",
 ]
 
