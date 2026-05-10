@@ -779,6 +779,140 @@ extern \"C\" __global__ void scaled_softmax_rowwise(
     }
 }";
 
+    /// Fused multi-head scaled dot-product attention — single kernel for the
+    /// `scores → softmax → values` cascade.
+    ///
+    /// Mathematically equivalent to dispatching
+    /// [`super::matmul::TILED_16X16_CUDA`] (scores = Q · Kᵀ · scale),
+    /// [`SCALED_SOFTMAX_ROWWISE_CUDA`], and a second matmul (out = attn · V)
+    /// — but never materializes the `[num_heads · n_q, n_kv]` softmax
+    /// intermediate. At Stable Diffusion 1.5's deepest self-attn stage
+    /// (`num_heads=8, n_q=n_kv=4096`), that intermediate is ~537 MB of
+    /// device traffic per attention layer; this kernel turns those reads
+    /// + writes into per-block accumulator updates in shared memory.
+    ///
+    /// FlashAttention-1 style online softmax: each block maintains a
+    /// running max `m`, running denom `l`, and `head_dim`-wide accumulator
+    /// `o`. For each K/V row visited, the softmax statistics are
+    /// rescaled by `exp(m_old - m_new)` so they remain numerically
+    /// equivalent to a single-pass softmax over the full row of scores.
+    /// Reference: Dao et al., "FlashAttention" (2022) §3.1.
+    ///
+    /// **Block layout:** `(128, 1, 1)` threads. Each block computes one
+    /// `(head, q_row)` output vector — strided over the head_dim
+    /// elements when `head_dim > 128`. Block reductions use the lower
+    /// 64 threads for the dot-product sum tree (standard pattern; the
+    /// upper 64 hold partials in `red_smem` then drop out of the
+    /// per-step `if (tid < s)` halving).
+    ///
+    /// **Grid:** `(n_q, num_heads, 1)`. One block per output query row
+    /// per head — gives `num_heads × n_q` blocks total. Avoids
+    /// per-warp work imbalance: every block does the same amount of
+    /// `n_kv`-loop work.
+    ///
+    /// **Shared memory:** static, 3·256 + 4 floats (~3.1 KiB):
+    /// `q_smem[256]` (the Q row, loaded once and reused across the
+    /// K/V loop), `o_smem[256]` (the running fp32 accumulator),
+    /// `red_smem[128]` (the dot-product reduction scratch), and the
+    /// four scalars (`m`, `l`, `alpha`, `p`) broadcast from thread 0.
+    /// `head_dim` up to 256 is supported in-place — SD 1.5 uses 40 /
+    /// 80 / 160; SDXL adds 64 / 128.
+    ///
+    /// **Numerical correctness:** matches the unfused cascade within
+    /// `1e-4` abs at fp32 inputs (online-softmax rescale is
+    /// algebraically exact; the fp32 accumulator order differs from
+    /// the cuBLAS strided-batched gemm so individual elements may
+    /// differ by 1 ulp on the order of `1e-7`). The CPU-side cascade
+    /// reference and an equivalence test live in
+    /// `scry_llm::backend::scry_gpu::tests::gpu_fused_attention_*`.
+    ///
+    /// **Kernel signature:** `fused_attention(const float* q, const float* k, const float* v, float* out, unsigned int n_q, unsigned int n_kv, unsigned int d, float scale)`
+    /// where each tensor is `[num_heads, *, d]` row-major (stride
+    /// derived from `n_q` / `n_kv` and `d` inside the kernel).
+    /// **Block size:** `(128, 1, 1)`.
+    #[cfg(feature = "cuda")]
+    pub const FUSED_ATTENTION_CUDA: &str = "\
+extern \"C\" __global__ void fused_attention(
+    const float* q, const float* k, const float* v, float* out,
+    unsigned int n_q, unsigned int n_kv, unsigned int d, float scale
+) {
+    __shared__ float q_smem[256];
+    __shared__ float o_smem[256];
+    __shared__ float red_smem[128];
+    __shared__ float m_sh;
+    __shared__ float l_sh;
+    __shared__ float alpha_sh;
+    __shared__ float p_sh;
+
+    unsigned int head = blockIdx.y;
+    unsigned int q_row = blockIdx.x;
+    unsigned int tid = threadIdx.x;
+    unsigned int bs = blockDim.x;
+
+    unsigned int qstride_per_head = n_q * d;
+    unsigned int kvstride_per_head = n_kv * d;
+    const float* q_ptr = q + head * qstride_per_head + q_row * d;
+    const float* k_head = k + head * kvstride_per_head;
+    const float* v_head = v + head * kvstride_per_head;
+    float* o_ptr = out + head * qstride_per_head + q_row * d;
+
+    // Load Q row into shared; init the fp32 accumulator to zero.
+    for (unsigned int i = tid; i < d; i += bs) {
+        q_smem[i] = q_ptr[i];
+        o_smem[i] = 0.0f;
+    }
+    if (tid == 0) {
+        m_sh = -3.402823466e38f;
+        l_sh = 0.0f;
+    }
+    __syncthreads();
+
+    // Online-softmax sweep over K/V rows.
+    for (unsigned int ki = 0; ki < n_kv; ki++) {
+        const float* k_ptr = k_head + ki * d;
+        const float* v_ptr = v_head + ki * d;
+
+        // Block reduction: dot(q_smem, k_ptr) into red_smem[0].
+        float partial = 0.0f;
+        for (unsigned int i = tid; i < d; i += bs) {
+            partial += q_smem[i] * k_ptr[i];
+        }
+        red_smem[tid] = partial;
+        __syncthreads();
+        for (unsigned int s = bs / 2; s > 0; s >>= 1) {
+            if (tid < s) red_smem[tid] += red_smem[tid + s];
+            __syncthreads();
+        }
+        float score = red_smem[0] * scale;
+
+        // Online-softmax update — done by tid 0, broadcast to the rest
+        // of the block via `alpha_sh` / `p_sh`.
+        if (tid == 0) {
+            float m_old = m_sh;
+            float m_new = fmaxf(m_old, score);
+            alpha_sh = expf(m_old - m_new);
+            p_sh = expf(score - m_new);
+            l_sh = l_sh * alpha_sh + p_sh;
+            m_sh = m_new;
+        }
+        __syncthreads();
+
+        // Rescale the running output and add the new V row weighted by p.
+        float alpha = alpha_sh;
+        float p = p_sh;
+        for (unsigned int i = tid; i < d; i += bs) {
+            o_smem[i] = o_smem[i] * alpha + p * v_ptr[i];
+        }
+        __syncthreads();
+    }
+
+    // Final normalize and write back.
+    float inv_l = 1.0f / l_sh;
+    for (unsigned int i = tid; i < d; i += bs) {
+        o_ptr[i] = o_smem[i] * inv_l;
+    }
+}";
+
     /// Row-wise layer normalization with affine gamma/beta.
     ///
     /// For an input tensor reshaped as `[n_rows, d]`, computes
