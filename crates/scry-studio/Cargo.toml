@@ -1,0 +1,64 @@
+[package]
+name = "scry-studio"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85.0"
+publish = false
+description = "Tauri 2 desktop app for scry-llm, scry-vision, and scry-diffusion"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+scry-llm = { path = "../scry-llm", default-features = false, features = ["safetensors", "tokenizer"] }
+scry-vision = { path = "../scry-vision", default-features = false, features = ["safetensors", "decode"] }
+scry-diffusion = { path = "../scry-diffusion", default-features = false, features = ["safetensors", "decode"] }
+
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+fastrand = "2"
+parking_lot = "0.12"
+anyhow = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = []
+onnx = ["scry-vision/onnx"]
+scry-gpu = [
+  "scry-llm/scry-gpu",
+  "scry-vision/scry-gpu",
+  "scry-diffusion/scry-gpu",
+]
+scry-gpu-cuda = [
+  "scry-gpu",
+  "scry-llm/scry-gpu-cuda",
+  "scry-vision/scry-gpu-cuda",
+  "scry-diffusion/scry-gpu-cuda",
+]
+scry-gpu-bf16 = [
+  "scry-gpu-cuda",
+  "scry-llm/scry-gpu-bf16",
+  "scry-diffusion/scry-gpu-bf16",
+]
+
+[[bin]]
+name = "scry-studio"
+path = "src/main.rs"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_possible_wrap = "allow"
+many_single_char_names = "allow"
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+similar_names = "allow"
+module_name_repetitions = "allow"
+return_self_not_must_use = "allow"
+needless_pass_by_value = "allow"

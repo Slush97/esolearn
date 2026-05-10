@@ -33,3 +33,9 @@
 .venv/
 __pycache__/
 *.pyc
+
+# scry-studio (Tauri + Vue) build artifacts
+crates/scry-studio/target/
+crates/scry-studio/frontend/node_modules/
+crates/scry-studio/frontend/dist/
+crates/scry-studio/Cargo.lock
