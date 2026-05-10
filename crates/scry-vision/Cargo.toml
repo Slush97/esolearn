@@ -60,5 +60,9 @@ required-features = ["scry-gpu-cuda"]
 name = "inspect_keys"
 required-features = ["safetensors"]
 
+[[example]]
+name = "bench_profile"
+required-features = ["scry-gpu-cuda"]
+
 [lints]
 workspace = true

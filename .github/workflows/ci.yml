@@ -28,9 +28,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: check-${{ matrix.rust }}
-      - run: cargo check --workspace --locked
-      - name: clippy
-        if: matrix.rust == 'stable'
+      - run: cargo check --workspace --all-targets --locked
+      # Clippy is pinned to MSRV (1.85.0) — `stable` rotates lints every
+      # 6 weeks and breaks CI for stylistic reasons unrelated to the PR.
+      # MSRV is the version we actually compile against.
+      - name: clippy (pinned to MSRV)
+        if: matrix.rust == '1.85.0'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
         if: matrix.rust == 'stable'
@@ -39,32 +42,59 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
-    needs: check
+    # No `needs: check` — tests run in parallel with check. Branch
+    # protection still gates merge on both. Saves ~60s per PR.
     strategy:
       fail-fast: false
       matrix:
         include:
+          # scry-learn — collapsed from 5 entries to 2. `default`
+          # validates the zero-feature build path; `full` exercises every
+          # feature combo we actually care about in one cache.
           - name: scry-learn-default
-            cmd: cargo test -p scry-learn
-          - name: scry-learn-csv-serde
-            cmd: cargo test -p scry-learn --features csv,serde
-          - name: scry-learn-experimental
-            cmd: cargo test -p scry-learn --features experimental
-          - name: scry-learn-polars
-            cmd: cargo test -p scry-learn --features polars
-          - name: scry-learn-mmap
-            cmd: cargo test -p scry-learn --features mmap
+            cmd: cargo nextest run -p scry-learn --locked --profile ci
+          - name: scry-learn-full
+            cmd: cargo nextest run -p scry-learn --locked --profile ci --features csv,serde,polars,mmap,experimental
+          # scry-llm — preserved variants
           - name: scry-llm-no-default
-            cmd: cargo test -p scry-llm --no-default-features
+            cmd: cargo nextest run -p scry-llm --locked --profile ci --no-default-features
           - name: scry-llm-safetensors-tokenizer
-            cmd: cargo test -p scry-llm --no-default-features --features safetensors,tokenizer
+            cmd: cargo nextest run -p scry-llm --locked --profile ci --no-default-features --features safetensors,tokenizer
+          # New coverage — esoc-* family (was completely uncovered)
+          - name: esoc-color-scene-gfx-chart
+            cmd: cargo nextest run --locked --profile ci -p esoc-color -p esoc-scene -p esoc-gfx -p esoc-chart
+          - name: esoc-geo
+            cmd: cargo nextest run -p esoc-geo --locked --profile ci --all-features
+          # New coverage — vision / cv / diffusion (CPU-only test paths)
+          - name: scry-vision
+            cmd: cargo nextest run -p scry-vision --locked --profile ci --features safetensors
+          - name: scry-cv
+            cmd: cargo nextest run -p scry-cv --locked --profile ci --features image-interop,skia-interop
+          - name: scry-diffusion
+            cmd: cargo nextest run -p scry-diffusion --locked --profile ci --features safetensors,decode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-${{ matrix.name }}
+      - run: ${{ matrix.cmd }}
+
+  doc-tests:
+    # nextest doesn't run doc-tests; one workspace-wide cargo test --doc
+    # picks them up. Cheap because most crates have none.
+    name: doc-tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: test-${{ matrix.name }}
-      - run: ${{ matrix.cmd }}
+          key: doc-tests
+      - run: cargo test --doc --workspace --locked
 
   miri:
     name: miri
