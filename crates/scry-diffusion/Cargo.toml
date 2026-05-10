@@ -64,12 +64,19 @@ name = "check_ddim"
 required-features = ["safetensors"]
 
 [[example]]
+name = "check_dpmpp"
+required-features = ["safetensors"]
+
+[[example]]
 name = "bench_sd"
 required-features = ["safetensors", "decode"]
 
 [[example]]
 name = "bench_clip"
 required-features = ["safetensors"]
+
+[[example]]
+name = "bench_schedulers"
 
 [lints]
 workspace = true

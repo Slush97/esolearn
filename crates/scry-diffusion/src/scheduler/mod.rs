@@ -19,9 +19,13 @@
 //! first cut. Other schedulers (Euler, DPM-Solver++, PNDM, EulerAncestral)
 //! have different `step` math but the same trait.
 
+pub mod common;
 pub mod ddim;
+pub mod dpm_solver_pp;
 
+pub use common::BetaSchedule;
 pub use ddim::DdimScheduler;
+pub use dpm_solver_pp::DpmSolverPpScheduler;
 
 use scry_llm::backend::MathBackend;
 use scry_llm::tensor::Tensor;
