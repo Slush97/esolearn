@@ -179,7 +179,7 @@ impl<B: MathBackend> Unet<B> {
         // Diffusers' `down_block_res_samples = (sample,) + ...` — the
         // conv_in output itself is the first skip.
         let mut skips: Vec<Tensor<B>> = Vec::with_capacity(16);
-        skips.push(clone_tensor(&x));
+        skips.push(time_section("unet.skip_record_in", || clone_tensor(&x)));
         x = time_section("unet.down_blocks", || -> Result<Tensor<B>> {
             let mut cur = x;
             for db in &mut self.down_blocks {

@@ -1,0 +1,61 @@
+=== scry-diffusion SD 1.5 bench ===
+Backend     : scry-gpu (CUDA)
+Snapshot    : /home/esoc/esolearn/crates/scry-diffusion/.assets/sd-1-5
+Prompt      : "a photo of an astronaut riding a horse on mars"
+Size        : 512x512
+Steps       : 4, CFG: 7.5, seed: 42
+Runs        : 3 timed (after 1 warmup)
+[toggle] bf16 matmul: ON
+
+[load] tokenizer + CLIP + UNet + VAE…
+  loaded in 1.3s
+
+[warmup 0]  1505.7 ms total
+[run 0]     1414.6 ms total  median-step 159.48 ms
+[run 1]     1424.9 ms total  median-step 159.76 ms
+[run 2]     1407.1 ms total  median-step 158.67 ms
+
+=== summary ===
+total wall-clock   : median  1414.6 ms over 3 runs
+per-step latency   : median 159.62 ms  (n=9)
+  step min/max     : 158.36 / 163.57 ms
+
+=== profile summary: 12408 entries, 37 unique sections, 4568.15 ms grand total ===
+section                           calls   total ms     avg ms % total
+unet.up_blocks                       24    1169.70     48.737  25.61%
+xfblock.self_attn                   384    1032.99      2.690  22.61%
+unet.down_blocks                     24     686.38     28.599  15.03%
+resblock.forward                    528     450.11      0.852   9.85%
+attn.softmax                        768     247.72      0.323   5.42%
+attn.values                         768     212.33      0.276   4.65%
+attn.scores                         768     146.39      0.191   3.20%
+xfblock.ff                          384     127.45      0.332   2.79%
+xfblock.cross_attn                  384      97.35      0.254   2.13%
+up.upsample_conv                     72      53.30      0.740   1.17%
+unet.mid_block                       24      44.72      1.863   0.98%
+attn.qkv_proj                       768      37.00      0.048   0.81%
+ff.proj_values                      384      26.70      0.070   0.58%
+attn.out_proj                       768      24.35      0.032   0.53%
+ff.proj_gate                        384      24.07      0.063   0.53%
+ff.proj_out                         384      23.94      0.062   0.52%
+ff.gate                             384      22.60      0.059   0.49%
+xfrm.norm                           384      18.97      0.049   0.42%
+down.downsample_conv                 72      14.91      0.207   0.33%
+attn.reshape_out                    768      14.50      0.019   0.32%
+xfrm.proj_in                        384      13.03      0.034   0.29%
+xfrm.proj_out                       384      12.43      0.032   0.27%
+attn.reshape_in                     768      11.35      0.015   0.25%
+xfrm.transpose_out                  384       9.69      0.025   0.21%
+unet.tail                            24       9.48      0.395   0.21%
+xfrm.transpose_in                   384       8.20      0.021   0.18%
+ff.gate.exact_gelu                  384       7.01      0.018   0.15%
+up.concat_channels                  288       4.81      0.017   0.11%
+xfrm.residual                       384       4.52      0.012   0.10%
+up.clone_in                          96       2.63      0.027   0.06%
+unet.time_embed                      24       2.07      0.086   0.05%
+down.skip_clone                     192       1.95      0.010   0.04%
+unet.conv_in                         24       1.93      0.081   0.04%
+up.upsample_nearest                  72       1.34      0.019   0.03%
+down.clone_in                        96       0.96      0.010   0.02%
+down.skip_clone_post                 72       0.83      0.012   0.02%
+unet.skip_record_in                  24       0.43      0.018   0.01%
