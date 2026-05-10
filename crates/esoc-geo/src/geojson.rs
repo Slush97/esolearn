@@ -3,6 +3,11 @@
 //!
 //! Parses `GeoJSON` strings into our types. Nested properties are flattened
 //! to JSON strings.
+//!
+//! Error handling: every fallible step returns a structured [`GeoError`]
+//! variant ([`GeoError::MissingField`], [`GeoError::UnknownGeometryType`],
+//! [`GeoError::InvalidCoordinates`], etc.) — never panics on malformed
+//! input. Tests assert against the specific variant they expect.
 
 use crate::error::{GeoError, Result};
 use crate::geometry::{
@@ -47,7 +52,7 @@ struct GeoJsonGeometry {
 /// Parse a `GeoJSON` string into a `GeoCollection`.
 pub fn parse(input: &str) -> Result<GeoCollection> {
     let root: GeoJsonRoot =
-        serde_json::from_str(input).map_err(|e| GeoError::ParseError(e.to_string()))?;
+        serde_json::from_str(input).map_err(|e| GeoError::GeoJsonSyntax(e.to_string()))?;
 
     match root.type_.as_str() {
         "FeatureCollection" => {
@@ -85,9 +90,7 @@ pub fn parse(input: &str) -> Result<GeoCollection> {
 fn parse_feature(feature: &GeoJsonFeature) -> Result<GeoFeature> {
     let geometry = match &feature.geometry {
         Some(g) => parse_geometry(g)?,
-        None => {
-            return Err(GeoError::ParseError("feature has no geometry".into()));
-        }
+        None => return Err(GeoError::FeatureMissingGeometry),
     };
 
     let properties = match &feature.properties {
@@ -117,81 +120,75 @@ fn parse_properties(map: &serde_json::Map<String, serde_json::Value>) -> Propert
     props
 }
 
+fn coords_of<'a>(
+    geom: &'a GeoJsonGeometry,
+    object: &'static str,
+) -> Result<&'a serde_json::Value> {
+    geom.coordinates
+        .as_ref()
+        .ok_or(GeoError::MissingField {
+            object,
+            field: "coordinates",
+        })
+}
+
 fn parse_geometry(geom: &GeoJsonGeometry) -> Result<GeoGeometry> {
     match geom.type_.as_str() {
         "Point" => {
-            let coords = geom
-                .coordinates
-                .as_ref()
-                .ok_or_else(|| GeoError::ParseError("Point missing coordinates".into()))?;
-            let point = parse_point(coords)?;
+            let point = parse_point(coords_of(geom, "Point")?)?;
             Ok(GeoGeometry::Point(point))
         }
         "LineString" => {
-            let coords = geom
-                .coordinates
-                .as_ref()
-                .ok_or_else(|| GeoError::ParseError("LineString missing coordinates".into()))?;
-            let points = parse_line_coords(coords)?;
+            let points = parse_line_coords(coords_of(geom, "LineString")?)?;
             Ok(GeoGeometry::LineString(GeoLineString { points }))
         }
         "Polygon" => {
-            let coords = geom
-                .coordinates
-                .as_ref()
-                .ok_or_else(|| GeoError::ParseError("Polygon missing coordinates".into()))?;
-            let polygon = parse_polygon_coords(coords)?;
+            let polygon = parse_polygon_coords(coords_of(geom, "Polygon")?)?;
             Ok(GeoGeometry::Polygon(polygon))
         }
         "MultiPolygon" => {
-            let coords = geom
-                .coordinates
-                .as_ref()
-                .ok_or_else(|| GeoError::ParseError("MultiPolygon missing coordinates".into()))?;
-            let polys = parse_multi_polygon_coords(coords)?;
+            let polys = parse_multi_polygon_coords(coords_of(geom, "MultiPolygon")?)?;
             Ok(GeoGeometry::MultiPolygon(GeoMultiPolygon {
                 polygons: polys,
             }))
         }
         "GeometryCollection" => {
-            let geometries = geom.geometries.as_ref().ok_or_else(|| {
-                GeoError::ParseError("GeometryCollection missing geometries".into())
+            let geometries = geom.geometries.as_ref().ok_or(GeoError::MissingField {
+                object: "GeometryCollection",
+                field: "geometries",
             })?;
-            // Return the first geometry, or error
-            if let Some(first) = geometries.first() {
-                parse_geometry(first)
-            } else {
-                Err(GeoError::ParseError("GeometryCollection is empty".into()))
-            }
+            // Lossy: returns the first geometry. esoc-geo's GeoGeometry has
+            // no Collection variant, and this is the historical behavior.
+            geometries
+                .first()
+                .map_or(Err(GeoError::EmptyGeometryCollection), parse_geometry)
         }
-        other => Err(GeoError::ParseError(format!(
-            "unknown geometry type: {other}"
-        ))),
+        other => Err(GeoError::UnknownGeometryType(other.to_string())),
     }
 }
 
 fn parse_point(value: &serde_json::Value) -> Result<GeoPoint> {
     let arr = value
         .as_array()
-        .ok_or_else(|| GeoError::ParseError("expected array for point".into()))?;
+        .ok_or(GeoError::InvalidCoordinates("expected array for point"))?;
     if arr.len() < 2 {
-        return Err(GeoError::ParseError(
-            "point needs at least 2 coordinates".into(),
+        return Err(GeoError::InvalidCoordinates(
+            "point needs at least 2 coordinates",
         ));
     }
     let lon = arr[0]
         .as_f64()
-        .ok_or_else(|| GeoError::ParseError("invalid lon".into()))?;
+        .ok_or(GeoError::InvalidCoordinates("longitude is not a number"))?;
     let lat = arr[1]
         .as_f64()
-        .ok_or_else(|| GeoError::ParseError("invalid lat".into()))?;
+        .ok_or(GeoError::InvalidCoordinates("latitude is not a number"))?;
     Ok(GeoPoint::new(lon, lat))
 }
 
 fn parse_line_coords(value: &serde_json::Value) -> Result<Vec<GeoPoint>> {
     let arr = value
         .as_array()
-        .ok_or_else(|| GeoError::ParseError("expected array for line".into()))?;
+        .ok_or(GeoError::InvalidCoordinates("expected array for line"))?;
     arr.iter().map(parse_point).collect()
 }
 
@@ -202,9 +199,9 @@ fn parse_ring(value: &serde_json::Value) -> Result<Ring> {
 fn parse_polygon_coords(value: &serde_json::Value) -> Result<GeoPolygon> {
     let rings = value
         .as_array()
-        .ok_or_else(|| GeoError::ParseError("expected array of rings".into()))?;
+        .ok_or(GeoError::InvalidCoordinates("expected array of rings"))?;
     if rings.is_empty() {
-        return Err(GeoError::ParseError("polygon has no rings".into()));
+        return Err(GeoError::EmptyPolygon);
     }
     let exterior = parse_ring(&rings[0])?;
     let holes: Result<Vec<Ring>> = rings[1..].iter().map(parse_ring).collect();
@@ -215,9 +212,9 @@ fn parse_polygon_coords(value: &serde_json::Value) -> Result<GeoPolygon> {
 }
 
 fn parse_multi_polygon_coords(value: &serde_json::Value) -> Result<Vec<GeoPolygon>> {
-    let polys = value
-        .as_array()
-        .ok_or_else(|| GeoError::ParseError("expected array of polygons".into()))?;
+    let polys = value.as_array().ok_or(GeoError::InvalidCoordinates(
+        "expected array of polygons",
+    ))?;
     polys.iter().map(parse_polygon_coords).collect()
 }
 
@@ -258,15 +255,12 @@ mod tests {
         let coll = parse(input).unwrap();
         assert_eq!(coll.features.len(), 2);
 
-        // Check first feature (point)
         let f0 = &coll.features[0];
-        match &f0.geometry {
-            GeoGeometry::Point(p) => {
-                assert!((p.lon - (-73.9857)).abs() < 1e-4);
-                assert!((p.lat - 40.7484).abs() < 1e-4);
-            }
-            _ => panic!("expected Point"),
-        }
+        let GeoGeometry::Point(p) = &f0.geometry else {
+            unreachable!("first feature parsed as {:?}, not Point", f0.geometry)
+        };
+        assert!((p.lon - (-73.9857)).abs() < 1e-4);
+        assert!((p.lat - 40.7484).abs() < 1e-4);
         assert_eq!(
             f0.properties.get("name").unwrap().as_str(),
             Some("Empire State Building")
@@ -274,14 +268,11 @@ mod tests {
         assert_eq!(f0.properties.get("height").unwrap().as_f64(), Some(443.2));
         assert_eq!(f0.properties.get("open").unwrap().as_bool(), Some(true));
 
-        // Check second feature (polygon)
         let f1 = &coll.features[1];
-        match &f1.geometry {
-            GeoGeometry::Polygon(p) => {
-                assert_eq!(p.exterior.len(), 5);
-            }
-            _ => panic!("expected Polygon"),
-        }
+        let GeoGeometry::Polygon(poly) = &f1.geometry else {
+            unreachable!("second feature parsed as {:?}, not Polygon", f1.geometry)
+        };
+        assert_eq!(poly.exterior.len(), 5);
     }
 
     #[test]
@@ -300,12 +291,13 @@ mod tests {
 
         let coll = parse(input).unwrap();
         assert_eq!(coll.features.len(), 1);
-        match &coll.features[0].geometry {
-            GeoGeometry::MultiPolygon(mp) => {
-                assert_eq!(mp.polygons.len(), 2);
-            }
-            _ => panic!("expected MultiPolygon"),
-        }
+        let GeoGeometry::MultiPolygon(mp) = &coll.features[0].geometry else {
+            unreachable!(
+                "expected MultiPolygon, got {:?}",
+                coll.features[0].geometry
+            )
+        };
+        assert_eq!(mp.polygons.len(), 2);
     }
 
     #[test]
@@ -337,12 +329,68 @@ mod tests {
         assert!(s.contains("\"a\""));
     }
 
+    // ── Error-path coverage ────────────────────────────────────────
+
     #[test]
-    fn parse_error_missing_geometry() {
+    fn err_feature_missing_geometry() {
         let input = r#"{
             "type": "FeatureCollection",
             "features": [{"type": "Feature", "properties": {}}]
         }"#;
-        assert!(parse(input).is_err());
+        assert!(matches!(
+            parse(input),
+            Err(GeoError::FeatureMissingGeometry)
+        ));
+    }
+
+    #[test]
+    fn err_unknown_geometry_type() {
+        let input = r#"{
+            "type": "Hexagon",
+            "coordinates": [0, 0]
+        }"#;
+        let Err(GeoError::UnknownGeometryType(name)) = parse(input) else {
+            panic!("expected UnknownGeometryType");
+        };
+        assert_eq!(name, "Hexagon");
+    }
+
+    #[test]
+    fn err_point_missing_coordinates() {
+        let input = r#"{"type": "Point"}"#;
+        assert!(matches!(
+            parse(input),
+            Err(GeoError::MissingField {
+                object: "Point",
+                field: "coordinates"
+            })
+        ));
+    }
+
+    #[test]
+    fn err_point_too_few_coords() {
+        let input = r#"{"type": "Point", "coordinates": [1.0]}"#;
+        assert!(matches!(parse(input), Err(GeoError::InvalidCoordinates(_))));
+    }
+
+    #[test]
+    fn err_polygon_no_rings() {
+        let input = r#"{"type": "Polygon", "coordinates": []}"#;
+        assert!(matches!(parse(input), Err(GeoError::EmptyPolygon)));
+    }
+
+    #[test]
+    fn err_geometry_collection_empty() {
+        let input = r#"{"type": "GeometryCollection", "geometries": []}"#;
+        assert!(matches!(
+            parse(input),
+            Err(GeoError::EmptyGeometryCollection)
+        ));
+    }
+
+    #[test]
+    fn err_invalid_json_syntax() {
+        let input = "not json";
+        assert!(matches!(parse(input), Err(GeoError::GeoJsonSyntax(_))));
     }
 }

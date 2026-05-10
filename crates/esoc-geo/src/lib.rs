@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Geographic types, map projections, and spatial utilities.
 //!
+//! **Workspace-internal crate** — not published to crates.io. The public API
+//! is not stable; breaking changes land without deprecation cycles. Depend on
+//! it from another `esoc-*` crate, not from external code.
+//!
 //! `esoc-geo` provides core geographic primitives (`GeoPoint`, `GeoPolygon`,
 //! `GeoFeature`, etc.), spatial operations (centroid, bounds, point-in-polygon,
 //! area), polygon simplification (Ramer-Douglas-Peucker), and several map
