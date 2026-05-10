@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Layout computation for chart margins and spacing.
+//! Layout computation — pipeline pass 5 of 7 (see [`super`]).
+//!
+//! Computes the plot-area margins from chart dimensions, axis label sizes,
+//! and tick label widths. Tick label widths are estimated using a per-glyph
+//! width factor against the *niced* `DataBounds`, so this pass must run
+//! after bounds nicing.
+//!
+//! Also exposes `target_tick_count` (used by the nicer earlier in the
+//! pipeline), `wrap_text` (for title word-wrap), and the [`LegendPlacement`]
+//! enum.
 
 use crate::compile::Margins;
 use crate::grammar::chart::Chart;

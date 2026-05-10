@@ -1,5 +1,89 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Chart → SceneGraph compiler.
+//! Chart → `SceneGraph` compiler.
+//!
+//! This module is the bridge between the grammar-of-graphics
+//! [`Chart`] value the user constructs and the [`SceneGraph`] that
+//! `esoc-gfx` renders. The entry point is [`compile_chart`].
+//!
+//! # Pipeline at a glance
+//!
+//! ```text
+//!   Chart                                grammar::chart::Chart
+//!     │
+//!     │  validate    NaN/Inf, dimension mismatch, treemap non-negative,
+//!     │              parallel-array length checks
+//!     ▼
+//!   resolve stats   stat_transform::resolve_layer per Layer
+//!     │              ├─ stat_bin       (histograms)
+//!     │              ├─ stat_aggregate (group-by mean / sum / count)
+//!     │              ├─ stat_smooth    (loess, lm)
+//!     │              └─ stat_boxplot   (box-and-whisker summaries)
+//!     ▼
+//!   Vec<ResolvedLayer>
+//!     │
+//!     │  position    stack / dodge / fill / jitter (position::apply_positions)
+//!     ▼
+//!   compute bounds  union of x/y across layers (DataBounds)
+//!     │
+//!     │  pad         5% padding for scatter/line/point;
+//!     │              skipped for bar/area/heatmap/treemap
+//!     │  nice        Scale::nice() rounds to tick-aligned domains
+//!     │  zero-anchor bar/area force y=0 inclusion (avoid truncated-bar lies)
+//!     │  override    user-supplied x_domain / y_domain wins
+//!     │  flip        Flipped coord system swaps x ↔ y
+//!     ▼
+//!   compute margins  layout::compute_margins — depends on tick labels, so
+//!                    bounds must be final before this runs
+//!     │
+//!     ▼
+//!   build scene     insert background; then dispatch:
+//!                    ├─ has_facets  → compile_faceted  (facet.rs)
+//!                    └─ otherwise   → compile_single_panel
+//!                       both call:
+//!                         · axis_gen   (axes, gridlines, ticks)
+//!                         · mark_gen   (geometric marks per layer)
+//!                         · legend_gen (legend swatches)
+//!     │
+//!     │  annotations title (with word-wrap), subtitle, caption
+//!     ▼
+//!   SceneGraph
+//! ```
+//!
+//! # Module roles
+//!
+//! | Module             | Responsibility                                          |
+//! | ------------------ | ------------------------------------------------------- |
+//! | `stat_transform`   | `Layer` + `Stat` → `ResolvedLayer` (data after stats)   |
+//! | `stat_bin`         | Histogram binning                                       |
+//! | `stat_aggregate`   | Group-by aggregation (mean, sum, count)                 |
+//! | `stat_smooth`      | Smoothers (lm, loess)                                   |
+//! | `stat_boxplot`     | Quartile / whisker summaries                            |
+//! | `position`         | Stack / dodge / fill / jitter on `ResolvedLayer`s       |
+//! | `layout`           | Margins, tick-count targets, text wrapping              |
+//! | `layout_treemap`   | Squarified treemap rectangle layout                     |
+//! | `mark_gen`         | `ResolvedLayer` → scene marks (per `MarkType`)          |
+//! | `axis_gen`         | Axis lines, gridlines, tick labels                      |
+//! | `legend_gen`       | Legend swatches and labels                              |
+//! | `facet`            | Multi-panel grid layout for faceted charts              |
+//! | `annotation`       | Title, subtitle, caption                                |
+//!
+//! # Invariants
+//!
+//! - `compile_chart` is pure: same `Chart` in → same `SceneGraph` out. No I/O.
+//! - The order in the diagram is load-bearing. In particular: nicing must
+//!   happen before margin computation (margins measure tick label widths
+//!   against the niced domain), and position adjustments must run before
+//!   bounds computation (stacking changes the y range).
+//! - All errors flow through [`ChartError`], never panic.
+//!
+//! # Where to add things
+//!
+//! - **New stat (e.g. `Stat::Density`)** → add a sibling `stat_*.rs`,
+//!   dispatch from `stat_transform::resolve_layer`.
+//! - **New mark type** → add a `MarkType` variant in `grammar::layer`, then
+//!   a generator branch in `mark_gen.rs`.
+//! - **New position adjustment** → add a `Position` variant and handle it in
+//!   `position::apply_positions`.
 
 pub(crate) mod annotation;
 mod axis_gen;

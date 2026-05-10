@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Position adjustments: stack, dodge, fill, jitter.
+//! Position adjustments — pipeline pass 3 of 7 (see [`super`]).
+//!
+//! Mutates a `&mut [ResolvedLayer]` in place to apply stack / dodge / fill /
+//! jitter as configured per layer. Stack and Fill populate `y_baseline`;
+//! Dodge shifts `x_data` by group offsets; Jitter perturbs positions for
+//! overplot relief.
+//!
+//! Runs *before* bounds computation because stacking changes the y range
+//! and dodge shifts the x range — bounds must observe the post-adjustment
+//! data.
 
 use crate::compile::stat_transform::ResolvedLayer;
 use crate::error::Result;

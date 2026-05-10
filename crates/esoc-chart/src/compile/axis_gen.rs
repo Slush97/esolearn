@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Axis, grid, and tick generation.
+//! Axis, grid, and tick generation — pipeline pass 6 of 7 (see [`super`]).
+//!
+//! Called from `compile_single_panel` / `compile_faceted` alongside
+//! `mark_gen`. Reads the niced [`DataBounds`] and the plot-area rectangle
+//! and emits axis lines, gridlines, tick marks, and tick labels into the
+//! scene graph.
 
 use crate::compile::layout;
 use crate::new_theme::NewTheme;

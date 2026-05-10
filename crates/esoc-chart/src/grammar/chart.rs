@@ -187,7 +187,7 @@ impl Chart {
         Ok(svg)
     }
 
-    /// Save as SVG (deprecated — use [`save_svg_to`] for `impl AsRef<Path>`).
+    /// Save as SVG (deprecated — use [`Self::save_svg_to`] for `impl AsRef<Path>`).
     #[deprecated(note = "Use save_svg_to(path) which accepts impl AsRef<Path>")]
     pub fn save_svg(&self, path: &str) -> Result<()> {
         self.save_svg_to(path)

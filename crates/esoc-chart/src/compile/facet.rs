@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Faceting: split data into panels for small multiples.
+//! Faceting — pipeline pass 6 of 7 (see [`super`]).
+//!
+//! Alternative to `compile_single_panel` when a [`Facet`](crate::grammar::facet::Facet)
+//! is configured. Partitions each [`ResolvedLayer`](super::stat_transform::ResolvedLayer)
+//! by `facet_values`, lays the panels out in a grid, then for each panel
+//! invokes the same `axis_gen` + `mark_gen` + `legend_gen` passes a
+//! single-panel chart would use, but parented under a per-panel container.
 
 use crate::compile::stat_transform::ResolvedLayer;
 use crate::grammar::facet::{Facet, FacetScales};

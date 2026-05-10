@@ -32,8 +32,10 @@ pub fn meets_aaa(a: Color, b: Color) -> bool {
 }
 
 /// Pick black or white — whichever has the higher WCAG contrast ratio against
-/// the given background. Strictly better than a binary luminance threshold for
-/// mid-luminance backgrounds (e.g. tab10 green #2ca02c sits right on the edge).
+/// the given background.
+///
+/// Strictly better than a binary luminance threshold for mid-luminance
+/// backgrounds (e.g. tab10 green #2ca02c sits right on the edge).
 pub fn text_color_on(bg: Color) -> Color {
     if contrast_ratio(Color::BLACK, bg) >= contrast_ratio(Color::WHITE, bg) {
         Color::BLACK
