@@ -22,6 +22,9 @@ esoc-color = { version = "0.1.0", path = "../esoc-color" }
 resvg = { version = "0.44", optional = true, default-features = false, features = ["text", "system-fonts"] }
 tiny-skia = { version = "0.11", optional = true }
 
+[dev-dependencies]
+roxmltree = "0.20"
+
 [lints.rust]
 missing_docs = "warn"
 unreachable_pub = "allow"
