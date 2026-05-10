@@ -897,3 +897,125 @@ extern "C" __global__ void wmma_smoke(
         "WMMA bf16 16×16×16 vs reference: max_abs_diff={max_diff:.3e}"
     );
 }
+
+/// Compiles and dispatches the M9g v2 fused-attention WMMA kernel
+/// (`FUSED_ATTENTION_TC_D80_CUDA`) and validates its output against a
+/// pure-CPU bf16 cascade reference. Runs the same SD attention shapes
+/// the kernel is specialized for (`head_dim = 80`, n_q ∈ {64, 256},
+/// n_kv = 64 or 77 for cross-attn). Tolerance: 5e-3 abs — bf16 mma
+/// rounds the products on both Q@K^T and P@V, so the per-element
+/// drift sits well above the 1e-4 envelope of the v1 fp32 kernel.
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_fused_attention_tc_d80_matches_bf16_cascade() {
+    use half::bf16;
+    use scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D80_CUDA;
+
+    const D: usize = 80;
+    const BR: u32 = 16;
+
+    let gpu = cuda_gpu();
+    let cuda_inc = Device::cuda_include_path()
+        .expect("CUDA toolkit include/ not found via CUDA_PATH/CUDA_HOME or standard prefixes");
+    let kernel = gpu
+        .compile_cuda_with_arch(
+            FUSED_ATTENTION_TC_D80_CUDA,
+            "fused_attention_tc_d80",
+            4,
+            [32, 1, 1],
+            Some("compute_80"),
+            &[cuda_inc.as_str()],
+        )
+        .expect("FUSED_ATTENTION_TC_D80 compiles");
+
+    // Self-attn middle (heads=8, n_q=n_kv=256, head_dim=80) and
+    // cross-attn deepest-of-mid (heads=8, n_q=256, n_kv=77, head_dim=80).
+    // Cross-attn exercises the kv_rem != BC tail path (77 % 16 = 13).
+    let cases: &[(usize, usize, usize)] = &[(8, 256, 256), (8, 64, 64), (8, 256, 77)];
+
+    for &(num_heads, n_q, n_kv) in cases {
+        let scale = 1.0f32 / (D as f32).sqrt();
+        let q_total = num_heads * n_q * D;
+        let kv_total = num_heads * n_kv * D;
+
+        let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
+        let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32) * 0.017).cos()).collect();
+        let v: Vec<f32> = (0..kv_total)
+            .map(|i| ((i as f32) * 0.011).sin() * 0.5)
+            .collect();
+
+        let q_bf: Vec<bf16> = q.iter().map(|x| bf16::from_f32(*x)).collect();
+        let k_bf: Vec<bf16> = k.iter().map(|x| bf16::from_f32(*x)).collect();
+        let v_bf: Vec<bf16> = v.iter().map(|x| bf16::from_f32(*x)).collect();
+
+        let q_buf = gpu.upload(&q_bf).unwrap();
+        let k_buf = gpu.upload(&k_bf).unwrap();
+        let v_buf = gpu.upload(&v_bf).unwrap();
+        let out_buf = gpu.alloc::<f32>(q_total).unwrap();
+
+        let pc: [u32; 3] = [n_q as u32, n_kv as u32, scale.to_bits()];
+        let pc_bytes = bytemuck::bytes_of(&pc);
+        let workgroups = [(n_q as u32).div_ceil(BR), num_heads as u32, 1];
+        gpu.run_configured(
+            &kernel,
+            &[&q_buf, &k_buf, &v_buf, &out_buf],
+            workgroups,
+            Some(pc_bytes),
+        )
+        .unwrap();
+
+        let got: Vec<f32> = out_buf.download().unwrap();
+
+        // Reference: bf16-input cascade in fp32, computed on CPU.
+        // S = Q @ K^T per head; scale; softmax; out = S @ V.
+        let mut want = vec![0.0f32; q_total];
+        for h in 0..num_heads {
+            let q_off = h * n_q * D;
+            let kv_off = h * n_kv * D;
+            for i in 0..n_q {
+                // S row in fp32 (post-scale).
+                let mut s_row = vec![0.0f32; n_kv];
+                for j in 0..n_kv {
+                    let mut acc = 0.0f32;
+                    for d in 0..D {
+                        // Cast each multiplicand to bf16 to mimic the
+                        // tensor-core path's product-side rounding.
+                        let qd = q_bf[q_off + i * D + d].to_f32();
+                        let kd = k_bf[kv_off + j * D + d].to_f32();
+                        acc += qd * kd;
+                    }
+                    s_row[j] = acc * scale;
+                }
+                let m = s_row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let exp_row: Vec<f32> = s_row.iter().map(|s| (s - m).exp()).collect();
+                let l = exp_row.iter().sum::<f32>();
+                let p_row: Vec<f32> = exp_row.iter().map(|p| p / l).collect();
+                for d in 0..D {
+                    let mut acc = 0.0f32;
+                    for j in 0..n_kv {
+                        // bf16-round the P*V products to mimic the second mma.
+                        let pj = bf16::from_f32(p_row[j]).to_f32();
+                        let vd = v_bf[kv_off + j * D + d].to_f32();
+                        acc += pj * vd;
+                    }
+                    want[q_off + i * D + d] = acc;
+                }
+            }
+        }
+
+        let max_diff = got
+            .iter()
+            .zip(want.iter())
+            .map(|(g, w)| (g - w).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff < 5e-3,
+            "fused_attn_tc_d80 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e} > tol 5e-3"
+        );
+        eprintln!(
+            "fused_attn_tc_d80 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e}"
+        );
+    }
+}

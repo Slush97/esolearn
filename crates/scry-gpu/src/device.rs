@@ -631,7 +631,14 @@ impl Device {
         binding_count: usize,
         workgroup_size: [u32; 3],
     ) -> Result<Kernel> {
-        self.compile_cuda_with_arch(source, entry_point, binding_count, workgroup_size, None, &[])
+        self.compile_cuda_with_arch(
+            source,
+            entry_point,
+            binding_count,
+            workgroup_size,
+            None,
+            &[],
+        )
     }
 
     /// Compile a CUDA C kernel source into a reusable [`Kernel`] with an

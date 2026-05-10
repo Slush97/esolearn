@@ -908,15 +908,87 @@ baseline 19.36 ms (+2.1%, within noise; M9e perf gate threshold is
 override is a no-op at runtime, so a new bench/history.jsonl entry
 would just record a fresh seed of the same configuration.
 
+### v2 — WMMA tensor-core kernel for `head_dim = 80`
+
+The "real win" v1 listed as future work (rewrite the dot-product
+reduction + V accumulate using tensor cores) landed in three pieces:
+
+1. **scry-gpu infra commit** — `Device::compile_cuda_with_arch` and
+   `Device::cuda_include_path` plumb NVRTC's `--gpu-architecture` and
+   `--include-path` flags so a kernel can `#include <mma.h>`. Smoke
+   test (`cuda_wmma_bf16_16x16x16_smoke`) compiles + dispatches a
+   single-warp WMMA matmul to validate the toolchain.
+
+2. **kernel** — `FUSED_ATTENTION_TC_D80_CUDA` in
+   `crates/scry-gpu/src/shaders.rs`. FlashAttention-2-style: BR=BC=16
+   tiles, online softmax across the K loop, both Q@K^T and P@V on bf16
+   WMMA fragments with fp32 accumulators. Single warp per block (32
+   threads, 16 Q rows per block); `compute_80` arch. Static shared
+   mem ~14.5 KB. The math matches `FUSED_ATTENTION_CUDA` (the v1
+   kernel) but the matmuls go through `mma.sync` instead of CUDA-cores
+   FMAs. `head_dim = 80` is hard-coded via `#define D 80`; the shape
+   covers SD 1.5 mid-stage self-attn (`heads=8, n_q=n_kv∈{1024,256}`)
+   and the corresponding cross-attn (`n_kv=77`).
+
+3. **integration** —
+   `crates/scry-llm/src/backend/scry_gpu.rs::gpu_fused_attention_tc_d80_persistent`
+   pre-casts Q/K/V from f32 to bf16 (matches the
+   `gpu_matmul_strided_batched_persistent_bf16` pattern; the bf16
+   shadow cache fires when Q/K/V were already promoted upstream),
+   dispatches the kernel, returns f32. The
+   `<ScryGpuBackend as MathBackend>::fused_attention` override calls
+   the helper first; on `head_dim != 80` or when the kernel slot is
+   `None` (CUDA toolkit `include/` not discoverable at runtime) it
+   falls through to the existing cuBLAS cascade.
+
+**Correctness.** `gpu_fused_attention_tc_d80_matches_cpu_within_tolerance`
+in `scry-llm` covers four SD shapes through the override. Worst case:
+`max_abs_diff = 7.6e-4` at `(8, 256, 77)`, well under the 5e-3
+tolerance (which is set for bf16 mma rounding on both products).
+`gpu_fused_attention_matches_cpu_within_tolerance` (the v1 helper
+test) still passes — the v1 kernel + helper stay in-tree under
+`#[allow(dead_code)]` for that test.
+
+**Perf (production bench, 30 steps × 512×512, RTX 5070 Ti, bf16
+matmul).** A/B with `SCRY_GPU_FUSED_ATTN_TC=0`:
+
+| Config | wall-clock median | step median |
+|---|---|---|
+| Cascade (TC=0) | 4986 ms | 139.04 ms |
+| TC enabled | 4926 ms | 137.57 ms |
+| Δ | −60 ms (−1.2%) | −1.47 ms (−1.1%) |
+
+Within the 3% per-run noise envelope. Real but small. The realistic
+ceiling on a single-warp v2 covering only `head_dim = 80` was 4–5%,
+since head_dim 80 is roughly 1/3 of SD UNet attention layers and the
+single-warp grid leaves SM occupancy on the table. The "softmax
+intermediate is 12.9% of UNet" win from M9f's profile is the
+*aggregate* over all attention shapes — capturing it requires
+specializations for `head_dim ∈ {40, 160}` and a tuned multi-warp
+block layout.
+
+**Perf gate (gate config: 4 steps × 64×64).** step_ms_median ≈ 18.3 ms
+vs M9e baseline 19.36 ms — within noise. The TC kernel doesn't fire
+at gate config (head_dim = 160 only at the deepest 64-px latent), so
+this measures cascade noise; not a real signal.
+
+**Golden hash:** unchanged from M9e baseline. Same reasoning — the
+TC path doesn't engage at gate config.
+
+**Runtime opt-out:** `SCRY_GPU_FUSED_ATTN_TC=0` reverts the override
+to the cascade. Use for clean A/B benches (the table above) or to
+unblock if the kernel hits a path it shouldn't.
+
 ### Next levers (M9h candidates)
 
-The F-vs-G-vs-H comparison from M9f's "What this implies" section
-is partially out of date now that v1's negative result is in:
+After M9g v2's perf-neutral first cut:
 
-- **Tensor-core fused attention (G v2)** — what M9g really wanted.
-  Multi-day kernel work, biggest theoretical win. Requires
-  `mma.sync` + careful tiling. Pre-requisite skill: PTX intrinsics
-  comfort.
+- **Tune G v2** — extend to `head_dim ∈ {40, 160}` (need 40 padding
+  to 48 / handle non-multiple-of-16 head dim; 160 is straightforward,
+  more N-tiles per matmul). Then go to 4-warp blocks (BR=64) with
+  larger BC tile so each block does enough work to amortize launch
+  overhead and saturate tensor cores. Each lever is independently
+  measurable via the `SCRY_GPU_FUSED_ATTN_TC` toggle.
 - **F — CFG batching** — still ~1.6–1.9× UNet wall-clock ceiling,
   still a multi-week sister-crate refactor (see the F discussion
   rejected at the start of M9g). The shape of the refactor hasn't

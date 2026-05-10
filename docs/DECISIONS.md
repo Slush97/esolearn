@@ -6,6 +6,50 @@ When a decision is later reversed or evolved, the new entry should reference the
 
 ---
 
+## 2026-05-10 · 0008 — M9g v2 lands a tensor-core kernel for `head_dim = 80`; perf-neutral first cut, tuning is M9h
+
+**Decision:** Re-enable the `ScryGpuBackend::fused_attention` override
+on top of a new WMMA tensor-core kernel
+(`FUSED_ATTENTION_TC_D80_CUDA`) specialized for `head_dim = 80`. The
+kernel uses bf16 inputs / fp32 fp32 accumulators via `<mma.h>` WMMA
+fragments — matches the M9g v0 trait shape, replaces the cuBLAS
+strided-batched cascade for SD 1.5's mid-stage self-attention. Other
+head dims (`{40, 160}`) still fall through to the cascade.
+
+**Why ship it perf-neutral.** Production bench at 30 steps × 512×512
+shows TC: 4926 ms vs cascade: 4986 ms — a 1.2% wall-clock improvement,
+within run-to-run noise (3% per-run variance). Numerical correctness is
+solid: `gpu_fused_attention_tc_d80_matches_cpu_within_tolerance` covers
+4 SD shapes with `max_abs_diff` 2–7e-4 vs the CPU bf16-cascade
+reference (5e-3 tolerance). The kernel is the load-bearing
+*infrastructure*: it proves the WMMA path on this NVRTC + driver +
+hardware combo, and gives a baseline to tune from. Shipping the
+scaffolding now keeps the override clean for the M9h tuning passes
+without dragging the kernel work into a separate milestone.
+
+**Why first-cut perf is flat.** The kernel uses a single warp per
+block (32 threads, each block computes 16 Q rows). That leaves
+parallelism on the table: each block finishes faster than its launch
+overhead at SD's mid-stage shapes. Plus only `head_dim = 80` is wired
+up, which is roughly 1/3 of SD UNet attention layers — the other 2/3
+still go through the cascade, so any per-call win is diluted. The
+known levers for M9h are 4-warp blocks, larger BC tile, persistent Q
+in registers, plus the `head_dim ∈ {40, 160}` specializations. None
+require interface changes.
+
+**What this preserves.** The v1 naive online-softmax kernel +
+`gpu_fused_attention_persistent` helper + numerical-equivalence test
+stay in the tree as `#[allow(dead_code)]` — the test still exercises
+that kernel and pins its correctness. The `MathBackend::fused_attention`
+trait method and `Attention::forward` integration point are unchanged
+from v0. A runtime opt-out (`SCRY_GPU_FUSED_ATTN_TC=0`) reverts the
+override to the cascade for clean A/B benchmarking.
+
+**Supersedes 0007**'s "tensor-core variant deferred to a future
+milestone" — that future milestone landed here. Tuning is M9h.
+
+---
+
 ## 2026-05-10 · 0007 — M9g picks G (fused attention), v1 lands as scaffolding only
 
 **Decision:** M9g (next perf milestone after M9f's profile) tackles **G —
