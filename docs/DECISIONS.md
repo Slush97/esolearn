@@ -6,6 +6,52 @@ When a decision is later reversed or evolved, the new entry should reference the
 
 ---
 
+## 2026-05-10 · 0009 — M9h ships `head_dim ∈ {40, 160}` WMMA kernels; -17.9% per-step
+
+**Decision:** Add WMMA tensor-core kernels for `head_dim = 40` and
+`head_dim = 160` (joining the v2 `head_dim = 80` kernel) so the fused
+path covers every attention shape in SD 1.5's UNet. The dispatcher
+in `ScryGpuBackend::fused_attention` routes by head_dim and falls
+through to the cuBLAS cascade only for shapes outside `{40, 80, 160}`.
+
+**Why these two head_dims, in this order, in one milestone.** The
+M9g v2 perf-neutral result wasn't a kernel-quality problem — it was a
+coverage problem. SD 1.5's UNet stage map at `block_out_channels = [320,
+640, 1280, 1280]` ÷ 8 heads gives `head_dim ∈ [40, 80, 160, 160]`. At
+512×512 the stage-0 self-attention runs at `n = 4096` (latent 64×64
+flattened), making its score matrix `[8, 4096, 4096] ≈ 128 MiB` per
+head batch — the largest attention workload in the model by an order
+of magnitude. Catching only stage 1 (d80) leaves the two biggest cost
+buckets on the cascade. Shipping `d40` *and* `d160` together collapses
+all three stages in one milestone rather than two, with shared
+dispatcher / test / threshold plumbing.
+
+**Implementation note on `head_dim = 40`.** 40 is not a multiple of
+16, which the WMMA fragment loaders require. Two options: a special
+"narrow" kernel without WMMA, or pad to `D_PAD = 48` in shared memory
+and let WMMA run over the padded layout with zero-fill on the
+trailing 8 cols. We picked padding because it preserves the d80 /
+d160 kernel structure byte-for-byte (same loop nest, same online
+softmax, just a different smem stride). The padded values contribute
+0 to both matmuls, so the answer is identical to a strict d=40
+kernel. The final store reads stride D_PAD=48 from smem and writes
+stride D=40 to global. Smem cost is tiny (~9 KiB).
+
+**Bench result (RTX 5070 Ti, 30 steps × 512×512, bf16-matmul):**
+135.12 → 110.97 ms/step (-17.9%); 4834 → 4120 ms wall-clock (-14.8%);
+gap vs PyTorch fp16 closes from 4.1× → 3.4×. Profile shows
+`xfblock.self_attn` collapsing from 54% (M9f baseline) → 17.2% of
+UNet wall-clock. M6 HF parity gate unchanged at 1.549e-4; golden
+hash regenerated.
+
+**Doesn't supersede 0008** — extends it. The v2 d80 kernel is byte-
+identical; M9h adds two siblings and a shared dispatcher. Tuning
+levers (4-warp blocks, larger BC tile, narrower d40 without padding)
+remain available for M9i if profiles after CFG batching / CUDA
+graphs land justify another attention pass.
+
+---
+
 ## 2026-05-10 · 0008 — M9g v2 lands a tensor-core kernel for `head_dim = 80`; perf-neutral first cut, tuning is M9h
 
 **Decision:** Re-enable the `ScryGpuBackend::fused_attention` override

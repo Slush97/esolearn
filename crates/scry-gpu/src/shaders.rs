@@ -1122,6 +1122,383 @@ extern \"C\" __global__ void fused_attention_tc_d80(
     }
 }";
 
+    /// Fused multi-head attention via tensor cores — `head_dim = 160`
+    /// specialization (M9h).
+    ///
+    /// Structurally identical to [`FUSED_ATTENTION_TC_D80_CUDA`]; only
+    /// `#define D` differs. 160 is `10 * 16`, so the WMMA K-loop runs 10
+    /// tiles instead of 5 and shared memory grows from ~14.5 KiB to
+    /// ~26.5 KiB. Single warp per block stays the optimal occupancy
+    /// shape: SD 1.5's stage-2 self-attention runs at `n=256` and stage-3
+    /// /mid at `n=64`, both small enough that 4-warp parallelization
+    /// across Q-tiles is unnecessary at these shapes.
+    ///
+    /// **Inputs:** Q, K, V are `__nv_bfloat16`, layout `[num_heads, *, 160]`
+    /// row-major; cast from f32 happens in the caller. Output is f32,
+    /// layout `[num_heads, n_q, 160]`. `n_q` and `n_kv` may be non-multiples
+    /// of the tile sizes — partial tiles are masked.
+    ///
+    /// **Numerical correctness:** matches the unfused bf16 cascade within
+    /// the same envelope as the d80 specialization (5e-3 abs at SD shapes).
+    ///
+    /// **Kernel signature:** `fused_attention_tc_d160(const __nv_bfloat16* q, const __nv_bfloat16* k, const __nv_bfloat16* v, float* out, unsigned int n_q, unsigned int n_kv, float scale)`
+    ///
+    /// **Block size:** `(32, 1, 1)`.
+    /// **Grid:** `((n_q + 15) / 16, num_heads, 1)`.
+    /// **Shared memory:** static, ~26.5 KiB.
+    /// **Required arch:** `compute_80` or higher (bf16 WMMA fragments).
+    #[cfg(feature = "cuda")]
+    pub const FUSED_ATTENTION_TC_D160_CUDA: &str = "\
+#include <mma.h>
+#include <cuda_bf16.h>
+
+using namespace nvcuda;
+
+#define D 160
+#define BR 16
+#define BC 16
+
+extern \"C\" __global__ void fused_attention_tc_d160(
+    const __nv_bfloat16* __restrict__ q,
+    const __nv_bfloat16* __restrict__ k,
+    const __nv_bfloat16* __restrict__ v,
+    float* __restrict__ out,
+    unsigned int n_q,
+    unsigned int n_kv,
+    float scale
+) {
+    __shared__ __nv_bfloat16 q_smem[BR * D];
+    __shared__ __nv_bfloat16 k_smem[BC * D];
+    __shared__ __nv_bfloat16 v_smem[BC * D];
+    __shared__ float s_smem[BR * BC];
+    __shared__ __nv_bfloat16 p_smem[BR * BC];
+    __shared__ float o_smem[BR * D];
+    __shared__ float m_smem[BR];
+    __shared__ float l_smem[BR];
+
+    unsigned int head = blockIdx.y;
+    unsigned int q_tile = blockIdx.x;
+    unsigned int q_start = q_tile * BR;
+    unsigned int tid = threadIdx.x;
+    if (q_start >= n_q) return;
+
+    const __nv_bfloat16* q_head = q + head * n_q * D;
+    const __nv_bfloat16* k_head = k + head * n_kv * D;
+    const __nv_bfloat16* v_head = v + head * n_kv * D;
+    float* out_head = out + head * n_q * D;
+
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        unsigned int row = i / D;
+        unsigned int col = i % D;
+        q_smem[i] = (q_start + row < n_q)
+            ? q_head[(q_start + row) * D + col]
+            : __float2bfloat16(0.0f);
+    }
+    if (tid < BR) {
+        m_smem[tid] = -3.402823466e38f;
+        l_smem[tid] = 0.0f;
+    }
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        o_smem[i] = 0.0f;
+    }
+    __syncwarp();
+
+    for (unsigned int kv_start = 0; kv_start < n_kv; kv_start += BC) {
+        unsigned int kv_rem = (n_kv - kv_start < BC) ? (n_kv - kv_start) : BC;
+
+        for (unsigned int i = tid; i < BC * D; i += 32) {
+            unsigned int row = i / D;
+            unsigned int col = i % D;
+            __nv_bfloat16 kk = (row < kv_rem)
+                ? k_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            __nv_bfloat16 vv = (row < kv_rem)
+                ? v_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            k_smem[i] = kk;
+            v_smem[i] = vv;
+        }
+        __syncwarp();
+
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> s_frag;
+        wmma::fill_fragment(s_frag, 0.0f);
+        for (int kc = 0; kc < D / 16; kc++) {
+            wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> q_frag;
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::col_major> k_frag;
+            wmma::load_matrix_sync(q_frag, q_smem + kc * 16, D);
+            wmma::load_matrix_sync(k_frag, k_smem + kc * 16, D);
+            wmma::mma_sync(s_frag, q_frag, k_frag, s_frag);
+        }
+
+        wmma::store_matrix_sync(s_smem, s_frag, BC, wmma::mem_row_major);
+        __syncwarp();
+
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            unsigned int col = i % BC;
+            s_smem[i] = (col < kv_rem)
+                ? s_smem[i] * scale
+                : -3.402823466e38f;
+        }
+        __syncwarp();
+
+        if (tid < BR) {
+            float m_old = m_smem[tid];
+            float row_max = m_old;
+            for (int c = 0; c < BC; c++) {
+                row_max = fmaxf(row_max, s_smem[tid * BC + c]);
+            }
+            float m_new = row_max;
+            float alpha = expf(m_old - m_new);
+            float row_sum = 0.0f;
+            for (int c = 0; c < BC; c++) {
+                float p = expf(s_smem[tid * BC + c] - m_new);
+                s_smem[tid * BC + c] = p;
+                row_sum += p;
+            }
+            m_smem[tid] = m_new;
+            l_smem[tid] = alpha * l_smem[tid] + row_sum;
+            for (int d = 0; d < D; d++) {
+                o_smem[tid * D + d] *= alpha;
+            }
+        }
+        __syncwarp();
+
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            p_smem[i] = __float2bfloat16(s_smem[i]);
+        }
+        __syncwarp();
+
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> p_frag;
+        wmma::load_matrix_sync(p_frag, p_smem, BC);
+        for (int nc = 0; nc < D / 16; nc++) {
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::row_major> v_frag;
+            wmma::fragment<wmma::accumulator, 16, 16, 16, float> o_frag;
+            wmma::load_matrix_sync(v_frag, v_smem + nc * 16, D);
+            wmma::load_matrix_sync(o_frag, o_smem + nc * 16, D, wmma::mem_row_major);
+            wmma::mma_sync(o_frag, p_frag, v_frag, o_frag);
+            wmma::store_matrix_sync(o_smem + nc * 16, o_frag, D, wmma::mem_row_major);
+        }
+        __syncwarp();
+    }
+
+    if (tid < BR) {
+        float inv_l = 1.0f / l_smem[tid];
+        for (int d = 0; d < D; d++) {
+            o_smem[tid * D + d] *= inv_l;
+        }
+    }
+    __syncwarp();
+
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        unsigned int row = i / D;
+        unsigned int col = i % D;
+        if (q_start + row < n_q) {
+            out_head[(q_start + row) * D + col] = o_smem[i];
+        }
+    }
+}";
+
+    /// Fused multi-head attention via tensor cores — `head_dim = 40`
+    /// specialization (M9h).
+    ///
+    /// 40 is not a multiple of 16, so this kernel pads the WMMA K-loop
+    /// to `D_PAD = 48` (= `3 * 16`) in shared memory while keeping the
+    /// global-memory layout at the actual `head_dim = 40`. Cols
+    /// `40..47` of Q/K/V are zero-filled at load time (real WMMA
+    /// fragments require contiguous tiles), which contributes 0 to the
+    /// Q@K^T and P@V matmuls — same answer as a 40-strict kernel, three
+    /// WMMA tiles instead of "2 + ragged" branchy code. The final
+    /// output is written at stride `D = 40`; smem cols `40..47` of O
+    /// are computed but discarded.
+    ///
+    /// SD 1.5's stage-0 self-attention is the highest-leverage shape in
+    /// the M9h coverage gap — at 512×512, `n_q = n_kv = 4096` per head,
+    /// so the score matrix at this stage is `[8, 4096, 4096]` = 128 MiB
+    /// per head batch. Avoiding that materialization is the single
+    /// largest opportunity remaining after M9g v2 caught stage 1.
+    ///
+    /// **Inputs:** Q, K, V are `__nv_bfloat16`, layout `[num_heads, *, 40]`
+    /// row-major. Output is f32, layout `[num_heads, n_q, 40]`.
+    ///
+    /// **Numerical correctness:** matches the unfused bf16 cascade within
+    /// the same 5e-3 envelope as the d80 / d160 specializations.
+    ///
+    /// **Kernel signature:** `fused_attention_tc_d40(const __nv_bfloat16* q, const __nv_bfloat16* k, const __nv_bfloat16* v, float* out, unsigned int n_q, unsigned int n_kv, float scale)`
+    ///
+    /// **Block size:** `(32, 1, 1)`.
+    /// **Grid:** `((n_q + 15) / 16, num_heads, 1)`.
+    /// **Shared memory:** static, ~9 KiB.
+    /// **Required arch:** `compute_80` or higher (bf16 WMMA fragments).
+    #[cfg(feature = "cuda")]
+    pub const FUSED_ATTENTION_TC_D40_CUDA: &str = "\
+#include <mma.h>
+#include <cuda_bf16.h>
+
+using namespace nvcuda;
+
+#define D 40
+#define D_PAD 48
+#define BR 16
+#define BC 16
+
+extern \"C\" __global__ void fused_attention_tc_d40(
+    const __nv_bfloat16* __restrict__ q,
+    const __nv_bfloat16* __restrict__ k,
+    const __nv_bfloat16* __restrict__ v,
+    float* __restrict__ out,
+    unsigned int n_q,
+    unsigned int n_kv,
+    float scale
+) {
+    __shared__ __nv_bfloat16 q_smem[BR * D_PAD];
+    __shared__ __nv_bfloat16 k_smem[BC * D_PAD];
+    __shared__ __nv_bfloat16 v_smem[BC * D_PAD];
+    __shared__ float s_smem[BR * BC];
+    __shared__ __nv_bfloat16 p_smem[BR * BC];
+    __shared__ float o_smem[BR * D_PAD];
+    __shared__ float m_smem[BR];
+    __shared__ float l_smem[BR];
+
+    unsigned int head = blockIdx.y;
+    unsigned int q_tile = blockIdx.x;
+    unsigned int q_start = q_tile * BR;
+    unsigned int tid = threadIdx.x;
+    if (q_start >= n_q) return;
+
+    const __nv_bfloat16* q_head = q + head * n_q * D;
+    const __nv_bfloat16* k_head = k + head * n_kv * D;
+    const __nv_bfloat16* v_head = v + head * n_kv * D;
+    float* out_head = out + head * n_q * D;
+
+    // Load Q tile [BR x D] into [BR x D_PAD] smem, zero-padding the
+    // tail cols. Out-of-range Q rows also zero so they don't poison
+    // the WMMA fragment loads.
+    for (unsigned int i = tid; i < BR * D_PAD; i += 32) {
+        unsigned int row = i / D_PAD;
+        unsigned int col = i % D_PAD;
+        bool real = (q_start + row < n_q) && (col < D);
+        q_smem[i] = real
+            ? q_head[(q_start + row) * D + col]
+            : __float2bfloat16(0.0f);
+    }
+    if (tid < BR) {
+        m_smem[tid] = -3.402823466e38f;
+        l_smem[tid] = 0.0f;
+    }
+    for (unsigned int i = tid; i < BR * D_PAD; i += 32) {
+        o_smem[i] = 0.0f;
+    }
+    __syncwarp();
+
+    for (unsigned int kv_start = 0; kv_start < n_kv; kv_start += BC) {
+        unsigned int kv_rem = (n_kv - kv_start < BC) ? (n_kv - kv_start) : BC;
+
+        // Load K, V tiles [BC x D] into [BC x D_PAD] smem; pad the
+        // last 8 cols (40..47) and any out-of-range KV rows to zero.
+        for (unsigned int i = tid; i < BC * D_PAD; i += 32) {
+            unsigned int row = i / D_PAD;
+            unsigned int col = i % D_PAD;
+            bool real = (row < kv_rem) && (col < D);
+            __nv_bfloat16 kk = real
+                ? k_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            __nv_bfloat16 vv = real
+                ? v_head[(kv_start + row) * D + col]
+                : __float2bfloat16(0.0f);
+            k_smem[i] = kk;
+            v_smem[i] = vv;
+        }
+        __syncwarp();
+
+        // S = Q @ K^T using WMMA. Padded D-cols contribute 0 to the
+        // dot product, so the result is identical to a strict d=40
+        // kernel.
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> s_frag;
+        wmma::fill_fragment(s_frag, 0.0f);
+        for (int kc = 0; kc < D_PAD / 16; kc++) {
+            wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> q_frag;
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::col_major> k_frag;
+            wmma::load_matrix_sync(q_frag, q_smem + kc * 16, D_PAD);
+            wmma::load_matrix_sync(k_frag, k_smem + kc * 16, D_PAD);
+            wmma::mma_sync(s_frag, q_frag, k_frag, s_frag);
+        }
+
+        wmma::store_matrix_sync(s_smem, s_frag, BC, wmma::mem_row_major);
+        __syncwarp();
+
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            unsigned int col = i % BC;
+            s_smem[i] = (col < kv_rem)
+                ? s_smem[i] * scale
+                : -3.402823466e38f;
+        }
+        __syncwarp();
+
+        if (tid < BR) {
+            float m_old = m_smem[tid];
+            float row_max = m_old;
+            for (int c = 0; c < BC; c++) {
+                row_max = fmaxf(row_max, s_smem[tid * BC + c]);
+            }
+            float m_new = row_max;
+            float alpha = expf(m_old - m_new);
+            float row_sum = 0.0f;
+            for (int c = 0; c < BC; c++) {
+                float p = expf(s_smem[tid * BC + c] - m_new);
+                s_smem[tid * BC + c] = p;
+                row_sum += p;
+            }
+            m_smem[tid] = m_new;
+            l_smem[tid] = alpha * l_smem[tid] + row_sum;
+            // Scale all D_PAD cols of o_smem; the padded cols stay
+            // zero (alpha * 0 = 0) so this is correct and avoids a
+            // bounds check inside the inner loop.
+            for (int d = 0; d < D_PAD; d++) {
+                o_smem[tid * D_PAD + d] *= alpha;
+            }
+        }
+        __syncwarp();
+
+        for (unsigned int i = tid; i < BR * BC; i += 32) {
+            p_smem[i] = __float2bfloat16(s_smem[i]);
+        }
+        __syncwarp();
+
+        // O += P @ V. V's padded cols are zero, so the resulting O
+        // padded cols are zero too (or stay zero if they were).
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_bfloat16, wmma::row_major> p_frag;
+        wmma::load_matrix_sync(p_frag, p_smem, BC);
+        for (int nc = 0; nc < D_PAD / 16; nc++) {
+            wmma::fragment<wmma::matrix_b, 16, 16, 16, __nv_bfloat16, wmma::row_major> v_frag;
+            wmma::fragment<wmma::accumulator, 16, 16, 16, float> o_frag;
+            wmma::load_matrix_sync(v_frag, v_smem + nc * 16, D_PAD);
+            wmma::load_matrix_sync(o_frag, o_smem + nc * 16, D_PAD, wmma::mem_row_major);
+            wmma::mma_sync(o_frag, p_frag, v_frag, o_frag);
+            wmma::store_matrix_sync(o_smem + nc * 16, o_frag, D_PAD, wmma::mem_row_major);
+        }
+        __syncwarp();
+    }
+
+    if (tid < BR) {
+        float inv_l = 1.0f / l_smem[tid];
+        // Scale only the real D cols; the padded cols are unused.
+        for (int d = 0; d < D; d++) {
+            o_smem[tid * D_PAD + d] *= inv_l;
+        }
+    }
+    __syncwarp();
+
+    // Write O to global at stride D (real head_dim), reading from
+    // stride D_PAD smem. Cols 40..47 of o_smem are discarded.
+    for (unsigned int i = tid; i < BR * D; i += 32) {
+        unsigned int row = i / D;
+        unsigned int col = i % D;
+        if (q_start + row < n_q) {
+            out_head[(q_start + row) * D + col] = o_smem[row * D_PAD + col];
+        }
+    }
+}";
+
     /// Row-wise layer normalization with affine gamma/beta.
     ///
     /// For an input tensor reshaped as `[n_rows, d]`, computes

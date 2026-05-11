@@ -206,21 +206,34 @@ struct ScryCtx {
     #[allow(dead_code)] // reactivated when the override re-enables the helper
     fused_attention: Option<::scry_gpu::Kernel>,
     /// M9g v2 tensor-core fused attention specialized for `head_dim = 80`
-    /// (SD 1.5 mid-stage self-attention). bf16 inputs / fp32 output via
-    /// WMMA fragments — bypasses the cuBLAS strided-batched cascade and
-    /// the softmax-intermediate global-memory roundtrip. Compiled with
-    /// `arch=compute_80`; `None` if the CUDA toolkit `include/` directory
-    /// can't be located at runtime (NVRTC has no built-in search path
-    /// for `<mma.h>`). When `None`, [`<ScryGpuBackend as
-    /// MathBackend>::fused_attention`] falls back to the cascade as
-    /// before.
+    /// (SD 1.5 stage-1 self-attention and cross-attention). bf16 inputs /
+    /// fp32 output via WMMA fragments — bypasses the cuBLAS strided-batched
+    /// cascade and the softmax-intermediate global-memory roundtrip.
+    /// Compiled with `arch=compute_80`; `None` if the CUDA toolkit
+    /// `include/` directory can't be located at runtime (NVRTC has no
+    /// built-in search path for `<mma.h>`). When `None`, the
+    /// [`<ScryGpuBackend as MathBackend>::fused_attention`] dispatcher
+    /// falls back to the cascade for this head_dim.
     #[cfg(feature = "scry-gpu-bf16")]
     fused_attention_tc_d80: Option<::scry_gpu::Kernel>,
-    /// Runtime opt-out for the M9g v2 TC fused-attention path. Initialized
-    /// from `SCRY_GPU_FUSED_ATTN_TC=0` at first ctx init; `false` reverts
-    /// the override to the cuBLAS cascade for clean A/B benchmarking.
-    /// Defaults to `true` so the v2 path is on by default once the kernel
-    /// slot exists.
+    /// M9h tensor-core fused attention specialized for `head_dim = 40`
+    /// (SD 1.5 stage-0 self-attn and cross-attn — the largest attention
+    /// shapes in the model: `[8, 4096, 4096]` self-attn scores at 512×512).
+    /// Pads the WMMA K-loop to `D_PAD = 48` in shared memory since 40
+    /// isn't a multiple of 16. Same compile gating as `_d80`.
+    #[cfg(feature = "scry-gpu-bf16")]
+    fused_attention_tc_d40: Option<::scry_gpu::Kernel>,
+    /// M9h tensor-core fused attention specialized for `head_dim = 160`
+    /// (SD 1.5 stage-2 and mid-block attention). 160 = 10 × 16, so the
+    /// kernel structure matches `_d80` with a deeper K-loop and ~26.5 KiB
+    /// of static shared memory.
+    #[cfg(feature = "scry-gpu-bf16")]
+    fused_attention_tc_d160: Option<::scry_gpu::Kernel>,
+    /// Runtime opt-out for the TC fused-attention path (M9g v2 + M9h).
+    /// Initialized from `SCRY_GPU_FUSED_ATTN_TC=0` at first ctx init;
+    /// `false` reverts the override to the cuBLAS cascade for *every*
+    /// head_dim specialization so clean A/B benches are still possible.
+    /// Defaults to `true` so all three specializations engage by default.
     #[cfg(feature = "scry-gpu-bf16")]
     fused_attention_tc_enabled: AtomicBool,
     /// On-device row-wise layernorm with affine gamma/beta. CUDA-only; Vulkan
@@ -422,28 +435,52 @@ fn init_scry_context() -> Result<ScryCtx, String> {
                 [128, 1, 1],
             )
             .map_err(|e| format!("scry-gpu: fused_attention_cuda compile: {e}"))?;
-        // M9g v2 tensor-core fused attention (head_dim = 80 specialization).
-        // Requires NVRTC + `<mma.h>` header path + `compute_80` arch. Compile
-        // is best-effort: if the CUDA toolkit `include/` isn't discoverable
-        // or the arch isn't supported, the slot stays `None` and the
-        // `fused_attention` override falls back to the cuBLAS cascade. The
-        // kernel is correctness-tested in scry-gpu's
-        // `cuda_fused_attention_tc_d80_matches_bf16_cascade` —
-        // `gpu_fused_attention_tc_d80_persistent` here only handles the
-        // f32→bf16 pre-cast and dispatch.
+        // M9g v2 + M9h tensor-core fused attention — three head_dim
+        // specializations (40, 80, 160) covering every attention shape in
+        // SD 1.5's UNet. All three require NVRTC + `<mma.h>` header path
+        // + `compute_80` arch; compile is best-effort, so a `None` slot
+        // for any single head_dim transparently falls back to the cuBLAS
+        // cascade for that specialization only. The kernels are
+        // correctness-tested in scry-gpu's
+        // `cuda_fused_attention_tc_d{40,80,160}_matches_bf16_cascade` —
+        // the helpers here only handle the f32→bf16 pre-cast and dispatch.
         #[cfg(feature = "scry-gpu-bf16")]
-        let fused_attention_tc_d80 = ::scry_gpu::Device::cuda_include_path().and_then(|inc| {
-            dev.compile_cuda_with_arch(
-                ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D80_CUDA,
-                "fused_attention_tc_d80",
-                4,
-                [32, 1, 1],
-                Some("compute_80"),
-                &[inc.as_str()],
-            )
-            .map_err(|e| eprintln!("[scry-llm] M9g v2 fused_attention_tc_d80 compile: {e} — falling back to cascade"))
-            .ok()
-        });
+        let (fused_attention_tc_d40, fused_attention_tc_d80, fused_attention_tc_d160) =
+            match ::scry_gpu::Device::cuda_include_path() {
+                Some(inc) => {
+                    let compile = |src: &str, name: &str| {
+                        dev.compile_cuda_with_arch(
+                            src,
+                            name,
+                            4,
+                            [32, 1, 1],
+                            Some("compute_80"),
+                            &[inc.as_str()],
+                        )
+                        .map_err(|e| {
+                            eprintln!(
+                                "[scry-llm] {name} WMMA compile: {e} — falling back to cascade"
+                            )
+                        })
+                        .ok()
+                    };
+                    (
+                        compile(
+                            ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D40_CUDA,
+                            "fused_attention_tc_d40",
+                        ),
+                        compile(
+                            ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D80_CUDA,
+                            "fused_attention_tc_d80",
+                        ),
+                        compile(
+                            ::scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D160_CUDA,
+                            "fused_attention_tc_d160",
+                        ),
+                    )
+                }
+                None => (None, None, None),
+            };
         let layernorm = dev
             .compile_cuda(
                 ::scry_gpu::shaders::elementwise::LAYERNORM_ROWWISE_CUDA,
@@ -637,6 +674,10 @@ fn init_scry_context() -> Result<ScryCtx, String> {
             #[cfg(feature = "scry-gpu-bf16")]
             fused_attention_tc_d80,
             #[cfg(feature = "scry-gpu-bf16")]
+            fused_attention_tc_d40,
+            #[cfg(feature = "scry-gpu-bf16")]
+            fused_attention_tc_d160,
+            #[cfg(feature = "scry-gpu-bf16")]
             fused_attention_tc_enabled: AtomicBool::new(fused_attention_tc_enabled),
             layernorm: Some(layernorm),
             batchnorm: Some(batchnorm),
@@ -689,6 +730,10 @@ fn init_scry_context() -> Result<ScryCtx, String> {
         fused_attention: None,
         #[cfg(feature = "scry-gpu-bf16")]
         fused_attention_tc_d80: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        fused_attention_tc_d40: None,
+        #[cfg(feature = "scry-gpu-bf16")]
+        fused_attention_tc_d160: None,
         #[cfg(feature = "scry-gpu-bf16")]
         fused_attention_tc_enabled: AtomicBool::new(false),
         layernorm: None,
@@ -1267,39 +1312,35 @@ fn gpu_fused_attention_persistent(
     })
 }
 
-/// `head_dim` value the M9g v2 tensor-core fused-attention kernel is
-/// specialized for. Calls with any other `head_dim` fall through to the
-/// trait-default cuBLAS cascade. SD 1.5's mid-stage self-attention and
-/// cross-attention both run at `head_dim = 80`; deeper / shallower stages
-/// (`head_dim ∈ {40, 160}`) need separate specializations and are TODO.
+/// Minimum total `num_heads · n_q · n_kv` before engaging any TC fused-
+/// attention kernel. Below this the kernel-launch + bf16 pre-cast overhead
+/// beats the bandwidth savings from skipping the softmax intermediate.
+/// Tuned to clear SD 1.5's smallest middle-stage self-attn at 64-px gate
+/// config (heads=8, n_q=64, n_kv=64 → 32_768).
 #[cfg(feature = "scry-gpu-bf16")]
-const GPU_FUSED_ATTN_TC_D80_HEAD_DIM: usize = 80;
+const GPU_FUSED_ATTN_TC_MIN_OPS: usize = 16_384;
 
-/// Minimum total `num_heads · n_q · n_kv` before engaging the v2 TC kernel.
-/// Below this the kernel-launch + bf16 pre-cast overhead beats the bandwidth
-/// savings from skipping the softmax intermediate. Tuned to clear SD 1.5's
-/// smallest middle-stage self-attn at 64-px gate config (heads=8, n_q=64,
-/// n_kv=64 → 32_768) but skip the smallest cross-attn (heads=8, n_q=64,
-/// n_kv=77 at head_dim=160 — different specialization anyway).
-#[cfg(feature = "scry-gpu-bf16")]
-const GPU_FUSED_ATTN_TC_D80_MIN_OPS: usize = 16_384;
-
-/// GPU-resident fused multi-head attention via tensor cores — `head_dim = 80`
-/// specialization. Pre-casts Q/K/V from f32 to bf16 (matching the
+/// GPU-resident fused multi-head attention via tensor cores — generic
+/// helper shared across the d40 / d80 / d160 head_dim specializations.
+/// Pre-casts Q/K/V from f32 to bf16 (matching the
 /// `gpu_matmul_strided_batched_persistent_bf16` pattern; the bf16 shadow
 /// cache fires when Q/K/V were already promoted), then dispatches the
-/// `fused_attention_tc_d80` WMMA kernel. Returns f32 output.
+/// passed-in kernel. Returns f32 output. The caller selects which kernel
+/// to pass based on `head_dim` and is responsible for guarding that
+/// match.
 ///
 /// Returns `None` (caller falls through) when:
 /// - the GPU context is unavailable
-/// - the TC kernel slot is `None` (toolkit `include/` not discoverable at
-///   `init_scry_context`, or the arch isn't supported)
-/// - `head_dim != 80` — only this specialization is wired up so far
-/// - the workload is below `GPU_FUSED_ATTN_TC_D80_MIN_OPS`
+/// - the runtime opt-out is set (`SCRY_GPU_FUSED_ATTN_TC=0`)
+/// - the matmul backend isn't cuBLAS (other paths don't have the bf16
+///   shadow cache wired)
+/// - the workload is below `GPU_FUSED_ATTN_TC_MIN_OPS`
 /// - input lengths don't match the implied `[num_heads, *, head_dim]` layout
 #[cfg(feature = "scry-gpu-bf16")]
 #[allow(clippy::too_many_arguments)]
-fn gpu_fused_attention_tc_d80_persistent(
+fn gpu_fused_attention_tc_persistent(
+    ctx: &ScryCtx,
+    kernel: &::scry_gpu::Kernel,
     q: &ScryGpuStorage,
     k: &ScryGpuStorage,
     v: &ScryGpuStorage,
@@ -1309,21 +1350,16 @@ fn gpu_fused_attention_tc_d80_persistent(
     head_dim: usize,
     scale: f32,
 ) -> Option<ScryGpuStorage> {
-    let ctx = get_ctx()?;
     if !ctx.fused_attention_tc_enabled.load(Ordering::Relaxed) {
         return None;
     }
-    let kernel = ctx.fused_attention_tc_d80.as_ref()?;
     if !matches!(ctx.matmul, MatmulStrategy::CuBlas) {
-        return None;
-    }
-    if head_dim != GPU_FUSED_ATTN_TC_D80_HEAD_DIM {
         return None;
     }
     if num_heads == 0 || n_q == 0 || n_kv == 0 {
         return None;
     }
-    if num_heads.checked_mul(n_q)?.checked_mul(n_kv)? < GPU_FUSED_ATTN_TC_D80_MIN_OPS {
+    if num_heads.checked_mul(n_q)?.checked_mul(n_kv)? < GPU_FUSED_ATTN_TC_MIN_OPS {
         return None;
     }
     let q_total = num_heads * n_q * head_dim;
@@ -1353,9 +1389,9 @@ fn gpu_fused_attention_tc_d80_persistent(
 
     let out = ctx.dev.alloc_uninit::<f32>(q_total).ok()?;
     // Push constants: [n_q: u32, n_kv: u32, scale: f32-as-bits].
-    // head_dim is compile-time-baked into the kernel (`#define D 80`).
+    // head_dim is compile-time-baked into each kernel (`#define D ...`).
     let pc: [u32; 3] = [n_q as u32, n_kv as u32, scale.to_bits()];
-    // Grid: (ceil(n_q / 16), num_heads, 1). 16 = `BR` in the kernel —
+    // Grid: (ceil(n_q / 16), num_heads, 1). 16 = `BR` in the kernels —
     // Q-rows per block. Block size is (32, 1, 1) = single warp.
     dispatch_kernel(
         ctx,
@@ -1369,6 +1405,33 @@ fn gpu_fused_attention_tc_d80_persistent(
         buf: GpuTensorStorage::from_owned(out),
         len: q_total,
     })
+}
+
+/// Dispatch the TC fused-attention path: routes by `head_dim` to the
+/// matching kernel slot (d40 / d80 / d160 — SD 1.5's full coverage).
+/// Returns `None` for any other head_dim, or when the matching kernel
+/// slot is `None`, or when [`gpu_fused_attention_tc_persistent`]'s
+/// preconditions fail. Caller falls through to the cuBLAS cascade.
+#[cfg(feature = "scry-gpu-bf16")]
+#[allow(clippy::too_many_arguments)]
+fn gpu_fused_attention_tc_dispatch(
+    q: &ScryGpuStorage,
+    k: &ScryGpuStorage,
+    v: &ScryGpuStorage,
+    num_heads: usize,
+    n_q: usize,
+    n_kv: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Option<ScryGpuStorage> {
+    let ctx = get_ctx()?;
+    let kernel = match head_dim {
+        40 => ctx.fused_attention_tc_d40.as_ref()?,
+        80 => ctx.fused_attention_tc_d80.as_ref()?,
+        160 => ctx.fused_attention_tc_d160.as_ref()?,
+        _ => return None,
+    };
+    gpu_fused_attention_tc_persistent(ctx, kernel, q, k, v, num_heads, n_q, n_kv, head_dim, scale)
 }
 
 /// Minimum row count before engaging the GPU layernorm path. Below this, CPU
@@ -3504,11 +3567,12 @@ impl MathBackend for ScryGpuBackend {
         head_dim: usize,
         scale: f32,
     ) -> ScryGpuStorage {
-        // M9g v2: tensor-core fused attention (head_dim = 80 specialization
-        // only). Bypasses the cuBLAS cascade and the softmax-intermediate
-        // global-mem roundtrip. Falls through to the cascade for head_dim
-        // ∈ {40, 160} (SD 1.5 outer / inner stages) and any non-bf16 build,
-        // so behavior is preserved when the helper returns `None`.
+        // M9g v2 + M9h: tensor-core fused attention dispatched by
+        // head_dim. SD 1.5's UNet covers {40, 80, 160}; any other
+        // head_dim falls through to the cuBLAS cascade. The dispatcher
+        // also returns `None` for sub-threshold workloads or when the
+        // bf16 shadow cache / kernel slot isn't available, so behavior
+        // is preserved across builds without the WMMA path compiled in.
         //
         // M9g v1's naive CUDA-cores online-softmax kernel
         // (`gpu_fused_attention_persistent`) is correct but ~12× slower
@@ -3518,7 +3582,7 @@ impl MathBackend for ScryGpuBackend {
         // override no longer routes through it.
         #[cfg(feature = "scry-gpu-bf16")]
         if let Some(gpu_out) =
-            gpu_fused_attention_tc_d80_persistent(q, k, v, num_heads, n_q, n_kv, head_dim, scale)
+            gpu_fused_attention_tc_dispatch(q, k, v, num_heads, n_q, n_kv, head_dim, scale)
         {
             return gpu_out;
         }
@@ -4330,26 +4394,34 @@ mod tests {
         }
     }
 
-    /// M9g v2: exercise [`<ScryGpuBackend as MathBackend>::fused_attention`]
-    /// at `head_dim = 80` so the override hits the WMMA tensor-core path
-    /// (`gpu_fused_attention_tc_d80_persistent`). Validates the GPU output
-    /// against the CPU cascade reference. Tolerance: 5e-3 abs — bf16 mma
-    /// rounds the products on both Q@K^T and P@V, well looser than the v1
-    /// fp32 kernel's 1e-4 envelope. Skipped silently if the GPU isn't
-    /// reachable or the TC kernel slot is `None` (e.g. CUDA include path
-    /// not discoverable).
+    /// Shared body of the M9g v2 + M9h TC fused-attention equivalence
+    /// tests. Routes through [`<ScryGpuBackend as
+    /// MathBackend>::fused_attention`] so the per-head_dim dispatcher
+    /// (`gpu_fused_attention_tc_dispatch`) is exercised. Validates the
+    /// GPU output against the CPU cascade reference (cuBLAS-equivalent,
+    /// matmul → scaled_softmax → matmul, all in fp32) at 5e-3 abs —
+    /// looser than the v1 fp32 kernel's 1e-4 envelope because bf16 mma
+    /// rounds the Q@K^T and P@V products. Skipped silently if the GPU
+    /// isn't reachable or the head_dim's TC kernel slot is `None`.
     #[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
-    #[test]
-    fn gpu_fused_attention_tc_d80_matches_cpu_within_tolerance() {
-        let cases = [
-            (8usize, 256usize, 256usize),
-            (8, 64, 64),
-            (8, 256, 77),
-            (8, 1024, 1024),
-        ];
-        for (num_heads, n_q, n_kv) in cases {
-            let head_dim = 80usize;
-            let scale = 1.0f32 / (head_dim as f32).sqrt();
+    fn run_gpu_fused_attention_tc_test(head_dim: usize, cases: &[(usize, usize, usize)]) {
+        let scale = 1.0f32 / (head_dim as f32).sqrt();
+        let slot_present = super::get_ctx()
+            .map(|c| match head_dim {
+                40 => c.fused_attention_tc_d40.is_some(),
+                80 => c.fused_attention_tc_d80.is_some(),
+                160 => c.fused_attention_tc_d160.is_some(),
+                _ => false,
+            })
+            .unwrap_or(false);
+        if !slot_present {
+            eprintln!(
+                "skipping gpu_fused_attention_tc_d{head_dim}: TC kernel slot is None or GPU \
+                 unavailable"
+            );
+            return;
+        }
+        for &(num_heads, n_q, n_kv) in cases {
             let q_total = num_heads * n_q * head_dim;
             let kv_total = num_heads * n_kv * head_dim;
             let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
@@ -4364,25 +4436,12 @@ mod tests {
             let q_gpu = match ScryGpuBackend::to_gpu(&q_storage) {
                 Ok(g) => g,
                 Err(e) => {
-                    eprintln!(
-                        "skipping gpu_fused_attention_tc_d80_matches_cpu_within_tolerance: {e}"
-                    );
+                    eprintln!("skipping gpu_fused_attention_tc_d{head_dim}: {e}");
                     return;
                 }
             };
             let k_gpu = ScryGpuBackend::to_gpu(&k_storage).unwrap();
             let v_gpu = ScryGpuBackend::to_gpu(&v_storage).unwrap();
-
-            if super::get_ctx()
-                .and_then(|c| c.fused_attention_tc_d80.as_ref())
-                .is_none()
-            {
-                eprintln!(
-                    "skipping gpu_fused_attention_tc_d80_matches_cpu_within_tolerance: \
-                     TC kernel slot is None"
-                );
-                return;
-            }
 
             let gpu_out = ScryGpuBackend::fused_attention(
                 &q_gpu, &k_gpu, &v_gpu, num_heads, n_q, n_kv, head_dim, scale,
@@ -4415,14 +4474,43 @@ mod tests {
             }
             assert!(
                 max_diff < 5e-3,
-                "TC fused_attention heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+                "TC fused_attention head_dim={head_dim} heads={num_heads} n_q={n_q} n_kv={n_kv}: \
                  max_abs_diff={max_diff:.3e} > 5e-3"
             );
             eprintln!(
-                "TC fused_attention heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+                "TC fused_attention head_dim={head_dim} heads={num_heads} n_q={n_q} n_kv={n_kv}: \
                  max_abs_diff={max_diff:.3e}"
             );
         }
+    }
+
+    /// M9g v2 d80 path: SD 1.5 stage-1 self-attention and cross-attention.
+    #[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
+    #[test]
+    fn gpu_fused_attention_tc_d80_matches_cpu_within_tolerance() {
+        run_gpu_fused_attention_tc_test(
+            80,
+            &[(8, 256, 256), (8, 64, 64), (8, 256, 77), (8, 1024, 1024)],
+        );
+    }
+
+    /// M9h d160 path: SD 1.5 stage-2 (n=256) + mid-block (n=64) attention,
+    /// plus cross-attn (n_kv=77 exercises the kv_rem != BC tail path).
+    #[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
+    #[test]
+    fn gpu_fused_attention_tc_d160_matches_cpu_within_tolerance() {
+        run_gpu_fused_attention_tc_test(160, &[(8, 256, 256), (8, 64, 64), (8, 256, 77)]);
+    }
+
+    /// M9h d40 path: SD 1.5 stage-0 — the largest attention shapes in
+    /// the model. Tested at moderate n (gate-config 64, mid-shape 256)
+    /// plus cross-attn (n_kv=77). The full 512×512 shape (n=4096) is
+    /// covered end-to-end by the bench harness rather than this unit
+    /// suite — n=4096 reference cascade would dominate test wall-clock.
+    #[cfg(all(feature = "scry-gpu-cuda", feature = "scry-gpu-bf16"))]
+    #[test]
+    fn gpu_fused_attention_tc_d40_matches_cpu_within_tolerance() {
+        run_gpu_fused_attention_tc_test(40, &[(8, 64, 64), (8, 256, 256), (8, 64, 77)]);
     }
 
     #[test]
