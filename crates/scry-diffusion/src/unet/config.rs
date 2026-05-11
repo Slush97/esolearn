@@ -56,6 +56,19 @@ impl UnetConfig {
         }
     }
 
+    /// Stable Diffusion 1.5 inpainting. Identical to [`Self::sd_1_5`]
+    /// except `conv_in` widens to 9 input channels: the 4 noisy-latent
+    /// channels are concatenated with 4 masked-latent channels (VAE-encoded
+    /// `image * (1 - mask)`) and 1 mask channel (downsampled to latent
+    /// resolution). `conv_out` still emits 4 channels — the masked-latent
+    /// and mask are inputs only.
+    pub fn sd_1_5_inpainting() -> Self {
+        Self {
+            in_channels: 9,
+            ..Self::sd_1_5()
+        }
+    }
+
     /// Stable Diffusion XL base. Heavier UNet (~2.6B params).
     pub fn sdxl_base() -> Self {
         Self {

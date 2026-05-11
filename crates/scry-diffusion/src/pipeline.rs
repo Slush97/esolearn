@@ -88,6 +88,39 @@ impl Default for Img2ImgParams {
     }
 }
 
+/// Inputs to a single inpainting generation. Image and mask are passed
+/// separately to [`SdPipeline::inpaint`] because they are backend-typed.
+///
+/// Unlike img2img, inpainting starts from pure noise (no strength
+/// truncation) — the masked-image latent and downsampled mask are
+/// concatenated to the noisy latent at every UNet forward, anchoring
+/// the unmasked region throughout the trajectory.
+#[derive(Debug, Clone)]
+pub struct InpaintParams {
+    /// User-provided text prompt.
+    pub prompt: String,
+    /// Negative prompt for classifier-free guidance. Empty disables.
+    pub negative_prompt: String,
+    /// Number of denoising steps.
+    pub num_inference_steps: u32,
+    /// CFG scale. 1.0 disables CFG (single forward); 7-9 is typical.
+    pub guidance_scale: f32,
+    /// PRNG seed for the initial latent noise.
+    pub seed: u64,
+}
+
+impl Default for InpaintParams {
+    fn default() -> Self {
+        Self {
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            num_inference_steps: 30,
+            guidance_scale: 7.5,
+            seed: 0,
+        }
+    }
+}
+
 /// Top-level Stable-Diffusion pipeline. Hosts both txt2img
 /// ([`Self::generate`]) and img2img ([`Self::img2img`]); the img2img path
 /// is only available when [`Self::vae_encoder`] is `Some`.
@@ -372,6 +405,185 @@ where
         }
 
         // ---- VAE decode + range remap, identical to generate(). ----
+        let decoded = self.vae.decode(&latent)?;
+        let mut pixels = decoded.to_vec();
+        for v in &mut pixels {
+            *v = v.clamp(-1.0, 1.0) * 0.5 + 0.5;
+        }
+        let out_dims = decoded.shape.dims().to_vec();
+        Ok(Tensor::from_vec(pixels, Shape::new(&out_dims)))
+    }
+
+    /// Run an inpaint generation: VAE-encode `image * (1 - mask)` to a
+    /// fixed conditioning latent, concatenate it (plus the latent-resolution
+    /// mask) to the noisy latent at every UNet forward, and denoise from
+    /// pure noise. The unmasked region of `image` stays anchored throughout
+    /// the schedule; the masked region is re-synthesized to match `prompt`.
+    ///
+    /// `image` must be `[3, H, W]` already normalized to `[-1, 1]`. `mask`
+    /// must be `[1, H, W]` in `{0, 1}` (or `[0, 1]`) — `1.0` marks pixels
+    /// to inpaint. `H` and `W` must be multiples of 8. Requires the
+    /// pipeline to be built with a [`Self::vae_encoder`].
+    ///
+    /// The 9-channel UNet input is built per-step as
+    /// `concat([noisy_latent, mask_latent, masked_latent], dim=0)` —
+    /// the channel order HF's `StableDiffusionInpaintPipeline` uses.
+    /// Pair this with a UNet loaded from `UnetConfig::sd_1_5_inpainting()`.
+    ///
+    /// # Errors
+    /// - [`Self::vae_encoder`] is `None`.
+    /// - `image` is not `[3, H, W]`, `mask` is not `[1, H, W]`, or shapes
+    ///   disagree.
+    /// - `H` / `W` not multiples of 8.
+    /// - `num_inference_steps == 0`.
+    /// - Tokenizer / encoder / VAE / UNet / scheduler propagated failures.
+    #[allow(clippy::too_many_lines)]
+    pub fn inpaint(
+        &mut self,
+        params: &InpaintParams,
+        image: &Tensor<B>,
+        mask: &Tensor<B>,
+    ) -> Result<Tensor<B>> {
+        let encoder = self.vae_encoder.as_ref().ok_or_else(|| {
+            Error::Llm("inpaint requires vae_encoder; pipeline was built without one".into())
+        })?;
+        if params.num_inference_steps == 0 {
+            return Err(Error::Scheduler("num_inference_steps must be > 0".into()));
+        }
+        let img_dims = image.shape.dims();
+        if img_dims.len() != 3 || img_dims[0] != 3 {
+            return Err(Error::Llm(format!(
+                "image must be [3, H, W], got {img_dims:?}"
+            )));
+        }
+        let mask_dims = mask.shape.dims();
+        if mask_dims.len() != 3 || mask_dims[0] != 1 {
+            return Err(Error::Llm(format!(
+                "mask must be [1, H, W], got {mask_dims:?}"
+            )));
+        }
+        let (height, width) = (img_dims[1], img_dims[2]);
+        if mask_dims[1] != height || mask_dims[2] != width {
+            return Err(Error::Llm(format!(
+                "mask shape [1, {}, {}] does not match image [3, {height}, {width}]",
+                mask_dims[1], mask_dims[2]
+            )));
+        }
+        let vae_scale = VAE_SCALE as usize;
+        if height == 0 || width == 0 || height % vae_scale != 0 || width % vae_scale != 0 {
+            return Err(Error::Llm(format!(
+                "image size {width}x{height} must be non-zero multiples of {VAE_SCALE}"
+            )));
+        }
+
+        #[cfg(feature = "scry-gpu-bf16")]
+        {
+            let _ = scry_llm::backend::scry_gpu::ScryGpuBackend::set_bf16_matmul(true);
+        }
+
+        let latent_h = height / vae_scale;
+        let latent_w = width / vae_scale;
+        let plane = height * width;
+        let latent_shape = Shape::new(&[LATENT_CHANNELS, latent_h, latent_w]);
+        let input_shape = Shape::new(&[9, latent_h, latent_w]);
+
+        // ---- Text conditioning (cond + uncond). ----
+        let cond_tokens = self.tokenizer.encode(&params.prompt)?;
+        let uncond_tokens = self.tokenizer.encode(&params.negative_prompt)?;
+        let cond_embed = self.text_encoder.encode(&cond_tokens)?;
+        let uncond_embed = self.text_encoder.encode(&uncond_tokens)?;
+
+        // ---- masked_image = image * (1 - mask), broadcast across channels. ----
+        let image_host = image.to_vec();
+        let mask_host = mask.to_vec();
+        let mut masked_image_host = vec![0.0f32; image_host.len()];
+        for c in 0..3 {
+            for p in 0..plane {
+                masked_image_host[c * plane + p] = image_host[c * plane + p] * (1.0 - mask_host[p]);
+            }
+        }
+        let masked_image_t: Tensor<B> = Tensor::from_vec(masked_image_host, image.shape.clone());
+
+        // ---- masked_latent = vae.encode(masked_image).mean * scaling_factor. ----
+        // Inpainting uses the mode of the latent distribution (= mean for
+        // a Gaussian), not a reparameterized sample. The result conditions
+        // every step deterministically.
+        let (mean, _logvar) = encoder.encode(&masked_image_t)?;
+        let scaling = encoder.config.scaling_factor;
+        let masked_latent_storage = B::scale(&mean.data, scaling);
+        let masked_latent_host =
+            Tensor::<B>::new(masked_latent_storage, mean.shape.clone()).to_vec();
+
+        // ---- mask_latent: nearest-downsample to latent res (stride VAE_SCALE). ----
+        // Matches HF's `F.interpolate(mask, size=(h, w), mode='nearest')` for
+        // integer-stride downsampling.
+        let mut mask_latent_host = vec![0.0f32; latent_h * latent_w];
+        for y in 0..latent_h {
+            for x in 0..latent_w {
+                mask_latent_host[y * latent_w + x] =
+                    mask_host[(y * vae_scale) * width + (x * vae_scale)];
+            }
+        }
+
+        // ---- Initial noisy latent. ----
+        let init_sigma = self.scheduler.init_noise_sigma();
+        let elements = LATENT_CHANNELS * latent_h * latent_w;
+        let mut latent_host = sample_standard_normal(elements, params.seed);
+        if (init_sigma - 1.0).abs() > f32::EPSILON {
+            for v in &mut latent_host {
+                *v *= init_sigma;
+            }
+        }
+        let mut latent: Tensor<B> = Tensor::from_vec(latent_host, latent_shape.clone());
+
+        // ---- Denoise loop. ----
+        // Per step: scale noisy latent, build 9-ch UNet input by concatenating
+        // (noisy, mask_latent, masked_latent) along the channel dim, forward
+        // through the cond + uncond branches, CFG combine, scheduler step.
+        // The concat is host-side: scaled.to_vec() rounds the noisy latent
+        // through host memory each step. Pre-uploading the static mask /
+        // masked-latent channels into device storage and using a
+        // backend-side channel-concat op would skip that round-trip; left
+        // for follow-up.
+        self.scheduler.set_timesteps(params.num_inference_steps)?;
+        let timesteps: Vec<f32> = self.scheduler.timesteps().to_vec();
+        let total_steps = u32::try_from(timesteps.len()).unwrap_or(u32::MAX);
+        let do_cfg = params.guidance_scale > 1.0 + f32::EPSILON;
+        let s = params.guidance_scale;
+
+        for (i, &t) in timesteps.iter().enumerate() {
+            if let Some(cb) = self.progress.as_mut() {
+                cb(u32::try_from(i).unwrap_or(u32::MAX), total_steps, t);
+            }
+            let scaled = self.scheduler.scale_model_input(&latent, t)?;
+            let scaled_host = scaled.to_vec();
+            let mut input_host = Vec::with_capacity(9 * latent_h * latent_w);
+            input_host.extend_from_slice(&scaled_host);
+            input_host.extend_from_slice(&mask_latent_host);
+            input_host.extend_from_slice(&masked_latent_host);
+            let unet_input: Tensor<B> = Tensor::from_vec(input_host, input_shape.clone());
+
+            let cond_eps = self.unet.forward(&unet_input, t, &cond_embed)?;
+            let combined = if do_cfg {
+                let uncond_eps = self.unet.forward(&unet_input, t, &uncond_embed)?;
+                let scaled_cond = B::scale(&cond_eps.data, s);
+                let scaled_uncond = B::scale(&uncond_eps.data, 1.0 - s);
+                let storage = B::add(
+                    &scaled_cond,
+                    &scaled_uncond,
+                    &cond_eps.shape,
+                    &uncond_eps.shape,
+                    &cond_eps.shape,
+                );
+                Tensor::new(storage, cond_eps.shape.clone())
+            } else {
+                cond_eps
+            };
+
+            latent = self.scheduler.step(&combined, t, &latent)?;
+        }
+
+        // ---- VAE decode + range remap. ----
         let decoded = self.vae.decode(&latent)?;
         let mut pixels = decoded.to_vec();
         for v in &mut pixels {

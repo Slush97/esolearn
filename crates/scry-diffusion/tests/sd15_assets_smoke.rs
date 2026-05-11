@@ -25,6 +25,10 @@ fn snapshot_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".assets/sd-1-5")
 }
 
+fn inpaint_snapshot_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".assets/sd-1-5-inpainting")
+}
+
 fn skip_if_missing(path: &Path, label: &str) -> bool {
     if path.exists() {
         return false;
@@ -193,4 +197,30 @@ fn unet_forward_shape_smoke() {
         out.to_vec().iter().all(|v| v.is_finite()),
         "unet forward produced non-finite output"
     );
+}
+
+/// Load the SD 1.5 inpainting UNet via `sd_1_5_inpainting()` config.
+/// Confirms the 9-channel `conv_in.weight` slots cleanly into the existing
+/// loader (which already parameterizes on `config.in_channels`).
+#[test]
+fn unet_inpaint_loads_all_keys() {
+    let path = inpaint_snapshot_root().join("unet/diffusion_pytorch_model.fp16.safetensors");
+    if skip_if_missing(&path, "unet_inpaint_loads_all_keys") {
+        return;
+    }
+    let ckpt = SafetensorsCheckpoint::open(&path).expect("open inpaint unet");
+    let _unet = Unet::<CpuBackend>::from_safetensors(UnetConfig::sd_1_5_inpainting(), &ckpt)
+        .expect("from_safetensors with sd_1_5_inpainting config");
+}
+
+/// Sanity-check that `UnetConfig::sd_1_5_inpainting()` carries the
+/// 9-channel input width through — full numerical-equivalence gate is
+/// `examples/check_inpaint.rs`, so no forward exercised here (the
+/// debug-build CPU forward exceeds nextest's 2-min slow-test cutoff).
+#[test]
+fn unet_inpaint_config_widens_conv_in() {
+    let cfg = UnetConfig::sd_1_5_inpainting();
+    assert_eq!(cfg.in_channels, 9);
+    assert_eq!(cfg.out_channels, 4);
+    assert_eq!(cfg.cross_attention_dim, 768);
 }

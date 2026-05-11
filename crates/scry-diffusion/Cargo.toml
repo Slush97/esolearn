@@ -61,6 +61,14 @@ name = "check_img2img"
 required-features = ["safetensors"]
 
 [[example]]
+name = "inpaint"
+required-features = ["safetensors", "decode"]
+
+[[example]]
+name = "check_inpaint"
+required-features = ["safetensors"]
+
+[[example]]
 name = "inspect_clip_keys"
 required-features = ["safetensors"]
 

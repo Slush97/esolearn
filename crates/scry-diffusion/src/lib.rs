@@ -37,4 +37,4 @@ pub mod weights;
 
 pub use conditioning::{Conditioning, SdxlExtras};
 pub use error::{Error, Result};
-pub use pipeline::{GenerationParams, Img2ImgParams, SdPipeline};
+pub use pipeline::{GenerationParams, Img2ImgParams, InpaintParams, SdPipeline};
