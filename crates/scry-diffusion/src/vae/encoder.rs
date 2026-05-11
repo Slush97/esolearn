@@ -35,9 +35,8 @@
 //! Note the **asymmetric padding** on the downsamplers: HF's
 //! `Downsample2D` pads `(0, 1, 0, 1)` (right + bottom only) before a
 //! stride-2 padding-0 conv. `scry_vision::nn::Conv2d` only supports
-//! symmetric padding, so M10 v1 lands a small `pad_2d_zero` helper on
-//! `MathBackend` to bridge the gap. v0 only ships the struct + loader;
-//! [`VaeEncoder::encode`] errors until v1.
+//! symmetric padding, so [`MathBackend::pad_2d_zero`] (with `pad_top =
+//! pad_left = 0`, `pad_bottom = pad_right = 1`) bridges the gap.
 //!
 //! Reference: `diffusers/src/diffusers/models/autoencoders/vae.py::Encoder`,
 //! `models/downsampling.py::Downsample2D`, and
@@ -45,13 +44,23 @@
 //! lives on the outer module, not inside `Encoder`).
 
 use scry_llm::backend::MathBackend;
+use scry_llm::tensor::shape::Shape;
 use scry_llm::tensor::Tensor;
 use scry_vision::nn::conv2d::Conv2d;
 
 use crate::error::{Error, Result};
+use crate::vae::blocks::{
+    clone_tensor, silu_inplace, GroupNormParams, VaeMidAttention, VaeResnetBlock,
+};
 #[cfg(feature = "safetensors")]
 use crate::vae::blocks::{load_mid_attention, load_resnet_block};
-use crate::vae::blocks::{GroupNormParams, VaeMidAttention, VaeResnetBlock};
+
+/// HF's `DiagonalGaussianDistribution` clamps `logvar` to this range — see
+/// `diffusers/src/diffusers/models/autoencoders/vae.py`. Mirroring the
+/// clamp inside `encode()` keeps the returned tensor numerically equivalent
+/// to HF's `latent_dist.logvar`.
+const LOGVAR_MIN: f32 = -30.0;
+const LOGVAR_MAX: f32 = 20.0;
 
 /// VAE encoder configuration.
 #[derive(Debug, Clone)]
@@ -123,14 +132,34 @@ impl<B: MathBackend> VaeDownBlock<B> {
             d.to_device();
         }
     }
+
+    fn forward(&self, input: &Tensor<B>) -> Tensor<B> {
+        let mut x = clone_tensor::<B>(input);
+        for r in &self.resnets {
+            x = r.forward(&x);
+        }
+        if let Some(conv) = &self.downsampler {
+            // Diffusers `Downsample2D`: `F.pad(x, (0, 1, 0, 1))` then a
+            // stride-2 padding-0 conv. The conv was loaded with stride=2
+            // padding=0 (see loader); the asymmetric `(left=0, right=1,
+            // top=0, bottom=1)` pad is supplied here so spatial dims map
+            // `(H, W) → ((H + 1 - 3) / 2 + 1, (W + 1 - 3) / 2 + 1) =
+            // (H/2, W/2)` for the even-sized inputs the VAE sees.
+            let dims = x.shape.dims();
+            let (c, h, w) = (dims[0], dims[1], dims[2]);
+            let padded_data = B::pad_2d_zero(&x.data, c, h, w, 0, 1, 0, 1);
+            let padded = Tensor::new(padded_data, Shape::new(&[c, h + 1, w + 1]));
+            x = conv.forward(&padded);
+        }
+        x
+    }
 }
 
 // -----------------------------------------------------------------------
 // VaeEncoder
 // -----------------------------------------------------------------------
 
-/// VAE encoder. Currently scaffolding only — [`Self::encode`] is wired up
-/// in M10 v1 once the `pad_2d_zero` op lands on `MathBackend`.
+/// VAE encoder. See [`Self::encode`] for the forward pass.
 pub struct VaeEncoder<B: MathBackend> {
     /// Architecture config.
     pub config: VaeEncoderConfig,
@@ -168,23 +197,83 @@ impl<B: MathBackend> VaeEncoder<B> {
     }
 
     /// Encode an image into the parameters of a diagonal Gaussian latent
-    /// distribution. Returns `(mean, logvar)`, each `[out_channels, H/8, W/8]`.
+    /// distribution. Input shape `[in_channels, H, W]` (batch=1 squeezed,
+    /// pixels in `(-1, 1)`); returns `(mean, logvar)`, each
+    /// `[out_channels, H/8, W/8]`. `logvar` is clamped to
+    /// `[LOGVAR_MIN, LOGVAR_MAX]` matching HF's
+    /// `DiagonalGaussianDistribution`.
     ///
-    /// Caller applies the reparameterization `latent = mean + exp(0.5 *
-    /// logvar) * noise` (and the `scaling_factor` multiply) so the caller
-    /// owns the noise tensor — matters for HF parity dumps where a fixed
-    /// noise vector is injected, and for img2img where the pipeline picks
-    /// a deterministic RNG.
+    /// The reparameterization `latent = mean + exp(0.5 * logvar) * noise`
+    /// (and the `scaling_factor` multiply) happens at the call site so the
+    /// caller owns the noise tensor — matters for HF parity dumps where a
+    /// fixed noise vector is injected, and for img2img where the pipeline
+    /// picks a deterministic RNG.
     ///
     /// # Errors
-    /// M10 v0 ships scaffolding only. The forward pass requires a
-    /// `pad_2d_zero` op on `MathBackend` (HF's downsamplers use
-    /// asymmetric padding) which lands in M10 v1. Until then this
-    /// returns [`Error::Llm`].
-    pub fn encode(&self, _image: &Tensor<B>) -> Result<(Tensor<B>, Tensor<B>)> {
-        Err(Error::Llm(
-            "vae encoder forward not yet implemented (M10 v1: needs asymmetric pad_2d op)".into(),
-        ))
+    /// Returns [`Error::Llm`] if the input rank or channel count don't
+    /// match `in_channels`, or if `H` / `W` aren't multiples of the
+    /// downsample factor (8 for SD 1.5 with three stride-2 stages).
+    pub fn encode(&self, image: &Tensor<B>) -> Result<(Tensor<B>, Tensor<B>)> {
+        let dims = image.shape.dims();
+        if dims.len() != 3 || dims[0] != self.config.in_channels {
+            return Err(Error::Llm(format!(
+                "vae encode: expected [{}, H, W] image, got {:?}",
+                self.config.in_channels, dims
+            )));
+        }
+        let (h, w) = (dims[1], dims[2]);
+        let downsamples = self
+            .down_blocks
+            .iter()
+            .filter(|b| b.downsampler.is_some())
+            .count();
+        let factor = 1usize << downsamples;
+        if h % factor != 0 || w % factor != 0 {
+            return Err(Error::Llm(format!(
+                "vae encode: H and W must be multiples of {factor}, got [{h}, {w}]"
+            )));
+        }
+
+        // Conv stem.
+        let mut x = self.conv_in.forward(image);
+
+        // Down blocks (4 stages, 3 stride-2 transitions).
+        for block in &self.down_blocks {
+            x = block.forward(&x);
+        }
+
+        // Mid block: ResNet → SelfAttn → ResNet.
+        x = self.mid_resnet0.forward(&x);
+        x = self.mid_attn.forward(&x);
+        x = self.mid_resnet1.forward(&x);
+
+        // Output norm → SiLU → conv (deepest → 2 * out_channels).
+        x = self.conv_norm_out.forward(&x);
+        x = silu_inplace::<B>(&x);
+        x = self.conv_out.forward(&x);
+
+        // 1×1 quant_conv refines the (mean ⫶ logvar) packed tensor.
+        let params = self.quant_conv.forward(&x);
+
+        // Split channel-wise into mean[0..C], logvar[C..2C] and clamp logvar.
+        // NCHW layout makes the split a contiguous slice — for parity work on
+        // CPU this routes through host vec; GPU backends inherit the same
+        // path until a dedicated split op lands.
+        let pdims = params.shape.dims();
+        let (c2, ph, pw) = (pdims[0], pdims[1], pdims[2]);
+        let c = self.config.out_channels;
+        debug_assert_eq!(c2, 2 * c);
+        let plane = ph * pw;
+        let params_v = B::to_vec(&params.data);
+        let mean_v = params_v[..c * plane].to_vec();
+        let mut logvar_v = params_v[c * plane..].to_vec();
+        for v in &mut logvar_v {
+            *v = v.clamp(LOGVAR_MIN, LOGVAR_MAX);
+        }
+        let out_shape = Shape::new(&[c, ph, pw]);
+        let mean = Tensor::new(B::from_vec(mean_v, &out_shape), out_shape.clone());
+        let logvar = Tensor::new(B::from_vec(logvar_v, &out_shape), out_shape);
+        Ok((mean, logvar))
     }
 }
 
