@@ -98,6 +98,96 @@ impl LlamaConfig {
         self.hidden_size / self.n_heads
     }
 
+    /// Derive a `LlamaConfig` from GGUF file metadata.
+    ///
+    /// Reads the `llama.*` keys written by `llama.cpp/convert_hf_to_gguf.py`
+    /// for Llama-family models. `tie_word_embeddings` is inferred from the
+    /// presence of an `output.weight` tensor (untied) vs its absence (tied
+    /// to `token_embd.weight`); RoPE scaling defaults to the Llama 3 schedule
+    /// when `context_length > 8192` and no explicit scaling metadata is present.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::ScryLlmError::WeightLoadError`] if the
+    /// architecture is not `llama` or any required key is missing.
+    #[cfg(feature = "gguf")]
+    pub fn from_gguf(file: &crate::gguf::GgufFile) -> crate::error::Result<Self> {
+        use crate::error::ScryLlmError;
+        let arch = file
+            .metadata_string("general.architecture")
+            .ok_or_else(|| ScryLlmError::WeightLoadError("missing general.architecture".into()))?;
+        if arch != "llama" {
+            return Err(ScryLlmError::WeightLoadError(format!(
+                "expected general.architecture=llama, got {arch}"
+            )));
+        }
+        let get_u32 = |key: &str| -> crate::error::Result<u32> {
+            file.metadata_u32(key)
+                .ok_or_else(|| ScryLlmError::WeightLoadError(format!("missing {key}")))
+        };
+        let hidden = get_u32("llama.embedding_length")? as usize;
+        let n_layers = get_u32("llama.block_count")? as usize;
+        let n_heads = get_u32("llama.attention.head_count")? as usize;
+        let n_kv_heads = file
+            .metadata_u32("llama.attention.head_count_kv")
+            .map_or(n_heads, |v| v as usize);
+        let intermediate = get_u32("llama.feed_forward_length")? as usize;
+        let context_len = file
+            .metadata_u32("llama.context_length")
+            .map_or(131_072, |v| v as usize);
+        let rms_eps = file
+            .metadata_f32("llama.attention.layer_norm_rms_epsilon")
+            .unwrap_or(1e-5);
+        let rope_theta = file
+            .metadata_f32("llama.rope.freq_base")
+            .unwrap_or(500_000.0);
+
+        // Vocab size: prefer the embedding tensor shape (the authoritative
+        // source for the model's actual matrix dim); fall back to
+        // `tokenizer.ggml.tokens` array length for files where the embed
+        // tensor isn't reachable yet.
+        let vocab_size = file
+            .tensor_info("token_embd.weight")
+            .map(|t| t.shape[0])
+            .or_else(|| match file.metadata("tokenizer.ggml.tokens")? {
+                crate::gguf::GgufMetadataValue::Array(items) => Some(items.len()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                ScryLlmError::WeightLoadError(
+                    "cannot determine vocab_size (no token_embd.weight and no tokenizer.ggml.tokens)"
+                        .into(),
+                )
+            })?;
+
+        // `output.weight` present ⇔ untied head.
+        let tie_word_embeddings = file.tensor_info("output.weight").is_none();
+
+        // Llama 3 RoPE scaling: applied for long-context Llama 3.x models.
+        // GGUF doesn't carry the precise schedule for Llama 3's custom scaling
+        // in a stable key, so we infer from context length. Llama 1/2 (4K/8K)
+        // get None; Llama 3.x (>8K) gets the canonical schedule baked in.
+        let rope_scaling = if context_len > 8192 {
+            Self::llama3_rope_scaling()
+        } else {
+            None
+        };
+
+        Ok(Self {
+            vocab_size,
+            hidden_size: hidden,
+            intermediate_size: intermediate,
+            n_layers,
+            n_heads,
+            n_kv_heads,
+            max_seq_len: context_len,
+            rms_norm_eps: rms_eps,
+            rope_theta,
+            tie_word_embeddings,
+            rope_scaling,
+        })
+    }
+
     /// Parse from HuggingFace `config.json`.
     #[cfg(feature = "tokenizer")]
     pub fn from_hf_config(json: &serde_json::Value) -> Option<Self> {
@@ -961,6 +1051,132 @@ impl<B: MathBackend> LlamaModel<B> {
     pub fn n_params(&self) -> usize {
         self.parameters().iter().map(|t| t.numel()).sum()
     }
+
+    /// Load a Llama model from a GGUF file (llama.cpp's on-disk format).
+    ///
+    /// `LlamaConfig` is derived from the GGUF metadata
+    /// ([`LlamaConfig::from_gguf`]); all weight tensors are dequantized to
+    /// `f32` on the host, transposed from GGUF's `[out, in]` layout to the
+    /// model's expected `[in, out]` row-major layout, and uploaded via
+    /// `B::from_vec`. No `bf16` fast path — quantized GGUF weights have no
+    /// pre-existing bf16 byte view, so all paths go through dequant→f32.
+    ///
+    /// Supported quant tensor types: F32, F16, BF16, Q4_K, Q5_K, Q8_0.
+    /// Q6_K and other K-quants are recognized at parse time but not yet
+    /// dequant-supported; a Q4_K_M mix that puts `token_embd` / `output`
+    /// in Q6_K will fail here (planned: extend `gguf::quants`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::ScryLlmError`] for missing/unsupported
+    /// metadata, missing tensors, or dequant failures.
+    #[cfg(feature = "gguf")]
+    #[allow(clippy::too_many_lines)]
+    pub fn from_gguf(path: impl AsRef<std::path::Path>) -> crate::error::Result<Self> {
+        use crate::error::ScryLlmError;
+        let file = crate::gguf::GgufFile::open(path)?;
+        let config = LlamaConfig::from_gguf(&file)?;
+
+        let load = |name: &str| -> crate::error::Result<Vec<f32>> {
+            file.tensor_f32(name)
+                .map_err(|e| ScryLlmError::WeightLoadError(format!("load tensor '{name}': {e}")))
+        };
+        let load_and_transpose =
+            |name: &str, rows: usize, cols: usize| -> crate::error::Result<Vec<f32>> {
+                let data = load(name)?;
+                if data.len() != rows * cols {
+                    return Err(ScryLlmError::WeightLoadError(format!(
+                        "tensor '{name}': dequant size {} != expected {rows}×{cols} = {}",
+                        data.len(),
+                        rows * cols
+                    )));
+                }
+                Ok(transpose(&data, rows, cols))
+            };
+
+        let h = config.hidden_size;
+        let inter = config.intermediate_size;
+        let hd = config.head_dim();
+        let q_dim = config.n_heads * hd;
+        let k_dim = config.n_kv_heads * hd;
+        let v_dim = k_dim;
+
+        let embed = load("token_embd.weight")?;
+        let embed_tokens = Tensor::from_vec(embed, Shape::new(&[config.vocab_size, h]));
+
+        let mut layers = Vec::with_capacity(config.n_layers);
+        for i in 0..config.n_layers {
+            let p = format!("blk.{i}");
+
+            let q_w = load_and_transpose(&format!("{p}.attn_q.weight"), q_dim, h)?;
+            let k_w = load_and_transpose(&format!("{p}.attn_k.weight"), k_dim, h)?;
+            let v_w = load_and_transpose(&format!("{p}.attn_v.weight"), v_dim, h)?;
+            let o_w = load_and_transpose(&format!("{p}.attn_output.weight"), h, q_dim)?;
+
+            let gate_w = load_and_transpose(&format!("{p}.ffn_gate.weight"), inter, h)?;
+            let up_w = load_and_transpose(&format!("{p}.ffn_up.weight"), inter, h)?;
+            let down_w = load_and_transpose(&format!("{p}.ffn_down.weight"), h, inter)?;
+
+            let input_ln_w = load(&format!("{p}.attn_norm.weight"))?;
+            let post_ln_w = load(&format!("{p}.ffn_norm.weight"))?;
+
+            let qkv_w = fuse_qkv_weights(&q_w, &k_w, &v_w, h, q_dim, k_dim, v_dim);
+
+            let freqs = compute_rope_freqs(hd, config.rope_theta, config.rope_scaling.as_ref());
+            let freqs_f32: Vec<f32> = freqs.iter().map(|&f| f as f32).collect();
+            let freqs_device = B::from_vec(freqs_f32, &Shape::new(&[hd / 2]));
+
+            let layer = LlamaDecoderLayer {
+                input_layernorm: RMSNorm {
+                    weight: Tensor::from_vec(input_ln_w, Shape::new(&[h])),
+                    eps: config.rms_norm_eps,
+                },
+                self_attn: LlamaAttention {
+                    q_proj: Tensor::from_vec(q_w, Shape::new(&[h, q_dim])),
+                    k_proj: Tensor::from_vec(k_w, Shape::new(&[h, k_dim])),
+                    v_proj: Tensor::from_vec(v_w, Shape::new(&[h, v_dim])),
+                    o_proj: Tensor::from_vec(o_w, Shape::new(&[q_dim, h])),
+                    qkv_proj: Tensor::from_vec(qkv_w, Shape::new(&[h, q_dim + k_dim + v_dim])),
+                    n_heads: config.n_heads,
+                    n_kv_heads: config.n_kv_heads,
+                    head_dim: hd,
+                    rope_freqs: freqs,
+                    rope_freqs_device: freqs_device,
+                },
+                post_attention_layernorm: RMSNorm {
+                    weight: Tensor::from_vec(post_ln_w, Shape::new(&[h])),
+                    eps: config.rms_norm_eps,
+                },
+                mlp: LlamaMLP {
+                    gate_proj: Tensor::from_vec(gate_w, Shape::new(&[h, inter])),
+                    up_proj: Tensor::from_vec(up_w, Shape::new(&[h, inter])),
+                    down_proj: Tensor::from_vec(down_w, Shape::new(&[inter, h])),
+                },
+            };
+            layers.push(layer);
+        }
+
+        let norm_w = load("output_norm.weight")?;
+        let norm = RMSNorm {
+            weight: Tensor::from_vec(norm_w, Shape::new(&[h])),
+            eps: config.rms_norm_eps,
+        };
+
+        let lm_head = if config.tie_word_embeddings {
+            None
+        } else {
+            let lm_w = load("output.weight")?;
+            Some(Tensor::from_vec(lm_w, Shape::new(&[config.vocab_size, h])))
+        };
+
+        Ok(Self {
+            config,
+            embed_tokens,
+            layers,
+            norm,
+            lm_head,
+        })
+    }
 }
 
 impl<B: MathBackend> Module<B> for LlamaModel<B> {
@@ -1129,7 +1345,7 @@ fn f16_to_f32(h: u16) -> f32 {
 }
 
 /// Transpose `[rows, cols]` → `[cols, rows]` (row-major).
-#[cfg(feature = "safetensors")]
+#[cfg(any(feature = "safetensors", feature = "gguf"))]
 fn transpose(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; rows * cols];
     for r in 0..rows {

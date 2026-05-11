@@ -3,6 +3,8 @@ pub mod backend;
 pub mod checkpoint;
 pub mod error;
 pub mod generate;
+#[cfg(feature = "gguf")]
+pub mod gguf;
 pub mod nn;
 pub mod ops;
 #[cfg(feature = "quantize")]
