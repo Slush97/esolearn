@@ -80,22 +80,43 @@ Use the existing `profile.rs` / `--profile` machinery. Add timing sections insid
 
 ---
 
-### ⬜ M9g — Pick F/G/H based on M9f
-**Scope:** Based on M9f's profile breakdown, commit to one of:
+### ✅ M9g — Pick F/G/H based on M9f — done 2026-05-10
+**Picked G (fused attention).** Three commits on `feat/m9g`:
 
-- **F — CFG batching** (UNet at batch=2 for cond + uncond in one pass). HANDOFF estimates ~50% step win. 1-2 weeks. Major refactor: every UNet op site assumes batch=1, plus helpers (`transpose_chw_to_hwc`, `concat_channels`) need batched-input support. Pick this if M9f shows that uncond and cond passes are nearly-identical wallclock and dispatch counts.
-- **G — Fused attention** (FlashAttention-style or matmul-softmax-matmul fusion). Multi-week. Attacks the 13% self_attn. Pattern: `matmul_then_gelu_batched_for_bench` at `scry-llm/src/backend/scry_gpu.rs:1975` is the existing PoC for `Device::batch()`-mediated fusion. Pick this if M9f shows attention dispatches dominate the named sections after CFG batching is theorized away.
-- **H — CUDA graphs** (record UNet step once, replay 30×). Multi-week. Requires extending `Device::batch()` / `Device::run_configured_async` with a recordable graph primitive; cuBLAS dispatches won't capture into a Vulkan-style batch, so the bf16 path may need its own cuBLAS-graph recording. Pick this if M9f shows the outer 40% is launch-overhead dominated (many small kernels each <100µs).
+- **v0** (`47cb5bc`) — `fused_attention` trait scaffolding + `Attention::forward` call site.
+- **v1** (`4b6b95c`) — Naive CUDA-cores online-softmax kernel. Correct (1e-4 vs cascade) but ~12× slower at SD shapes. Kept as `#[allow(dead_code)]` scaffolding for the equivalence test.
+- **v2** (`eb93d1a`) — WMMA tensor-core kernel for `head_dim = 80` only. FlashAttention-2 style, BR=BC=16, 1 warp/block, compute_80 arch. Correctness 2-7e-4 across 4 SD shapes; perf neutral (-1.2%, within noise) because d80 only catches SD 1.5's stage 1, not the wall-clock-dominant stages 0 + 2.
 
-The choice is a one-paragraph decision logged in `docs/DECISIONS.md` referencing the M9f profile data. Then implement.
+Continued in M9h.
 
-**Exit:** Pick one, log decision, implement, parity gates pass, bench shows the projected improvement (or close enough).
+### ✅ M9h — Full head_dim coverage for fused attention — done 2026-05-10
+**Scope:** Add WMMA specializations for `head_dim ∈ {40, 160}` so the M9g v2 fused kernel covers every attention shape in SD 1.5's UNet. Stage 0 (head_dim=40, n=4096 at 512×512) was the wall-clock dominant shape that v2 missed.
 
-**Depends on:** M9f.
+**Implementation:**
+- `FUSED_ATTENTION_TC_D160_CUDA` — structurally identical to d80 since 160 = 10 × 16; only `#define D 160` differs. Static shared memory grows to ~26.5 KiB.
+- `FUSED_ATTENTION_TC_D40_CUDA` — pads the WMMA K-loop to `D_PAD = 48` in shared memory (40 is not a multiple of 16). Q/K/V loaders zero-fill cols 40..47; the padded contributions are 0 across both matmuls so the answer is identical to a strict d=40 kernel. Final store reads stride D_PAD=48 from smem and writes stride D=40 to global.
+- `ScryGpuBackend::fused_attention` now routes through `gpu_fused_attention_tc_dispatch` which picks the matching kernel slot by head_dim. Old `_d80_persistent` helper was folded into a generic `_tc_persistent` body so all three head_dims share one dispatch path.
 
-**Risk:** Spending the multi-week budget on the wrong lever. M9f exists specifically to mitigate this.
+**Validation:**
+- Per-head_dim WMMA-vs-cascade tests in `scry-gpu/tests/cuda_compute.rs` (all three pass, max_abs_diff well under the 5e-3 tolerance).
+- Per-head_dim equivalence tests through the public override in `scry-llm` (all three pass).
+- M6 HF parity gate holds at 1.549e-4 — same number as before M9h. Golden hash regenerated (kernel swap = different bit-level output).
+
+**Perf (RTX 5070 Ti, 30 steps, 512×512, bf16-matmul, A/B via `SCRY_GPU_FUSED_ATTN_TC`):**
+
+| | Cascade (M9g v2 baseline) | M9h (all 3 TC kernels) | Δ |
+|---|---|---|---|
+| Per-step | 135.12 ms | **110.97 ms** | **-17.9%** |
+| 30-step image | 4834 ms | **4120 ms** | **-14.8%** |
+| Gap vs PyTorch fp16 (32.9 ms/step) | 4.1× | **3.4×** | |
+
+Profile post-M9h: `xfblock.self_attn` dropped from 54% (M9f) → 17.2% of UNet wall-clock. The fused-attention dispatch (`attn.fused` section, 16.45%) is now the largest single line, but it's bounded by tensor-core throughput rather than memory bandwidth on softmax-intermediate writes. Next frontier is convolutions (resblock 12.4% + up/down blocks containing most of the remaining 38%) or CUDA graphs.
+
+**Open levers for M9i+:** 4-warp blocks (estimated additional 5-10% on the larger shapes where one warp doesn't saturate the SM), `head_dim=40` cleanup (eliminate the 8-col padding by adding a single ragged WMMA tile — micro-optimization, probably <2%), and longer-horizon F (CFG batching) / H (CUDA graphs).
 
 **Failed-experiments callout (do not retry standalone):** Fused KV projection was tried (single `[n_kv, cross_dim] × [cross_dim, 2·inner_dim]` matmul + gather_columns to slice K/V halves). Math was correct (1.549e-4 vs HF, bit-identical to pre-fuse), but bench regressed ~5% at 512×512. Root cause: cuBLAS GemmEx in bf16 picks a worse algorithm for the wider M output. Only retry as part of a full fused-attn kernel where K/V output gets directly consumed by the next matmul without a `gather_columns` round-trip through global memory.
+
+**Remaining F/H levers (deferred):** F (CFG batching) is still the largest theoretical win on the table — UNet at batch=2 for cond + uncond in one pass, HANDOFF estimates ~50% step win, 1-2 week refactor across every UNet op call site. H (CUDA graphs) is orthogonal and layers on top of any other lever; requires extending `Device::batch()` with a recordable graph primitive and a separate cuBLAS-graph recording path for the bf16 dispatches.
 
 ---
 

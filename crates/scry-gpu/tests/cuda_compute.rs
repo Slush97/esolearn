@@ -1019,3 +1019,214 @@ fn cuda_fused_attention_tc_d80_matches_bf16_cascade() {
         );
     }
 }
+
+/// CPU bf16-input cascade reference shared by the d40/d80/d160 TC
+/// fused-attention tests. Computes `out = softmax((Q @ K^T) * scale) @ V`
+/// in fp32 with bf16 product-side rounding to mimic the WMMA path.
+#[cfg(feature = "bf16")]
+fn bf16_cascade_reference(
+    q_bf: &[half::bf16],
+    k_bf: &[half::bf16],
+    v_bf: &[half::bf16],
+    num_heads: usize,
+    n_q: usize,
+    n_kv: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Vec<f32> {
+    use half::bf16;
+    let mut want = vec![0.0f32; num_heads * n_q * head_dim];
+    for h in 0..num_heads {
+        let q_off = h * n_q * head_dim;
+        let kv_off = h * n_kv * head_dim;
+        for i in 0..n_q {
+            let mut s_row = vec![0.0f32; n_kv];
+            for j in 0..n_kv {
+                let mut acc = 0.0f32;
+                for d in 0..head_dim {
+                    let qd = q_bf[q_off + i * head_dim + d].to_f32();
+                    let kd = k_bf[kv_off + j * head_dim + d].to_f32();
+                    acc += qd * kd;
+                }
+                s_row[j] = acc * scale;
+            }
+            let m = s_row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let exp_row: Vec<f32> = s_row.iter().map(|s| (s - m).exp()).collect();
+            let l = exp_row.iter().sum::<f32>();
+            let p_row: Vec<f32> = exp_row.iter().map(|p| p / l).collect();
+            for d in 0..head_dim {
+                let mut acc = 0.0f32;
+                for j in 0..n_kv {
+                    let pj = bf16::from_f32(p_row[j]).to_f32();
+                    let vd = v_bf[kv_off + j * head_dim + d].to_f32();
+                    acc += pj * vd;
+                }
+                want[q_off + i * head_dim + d] = acc;
+            }
+        }
+    }
+    want
+}
+
+/// M9h d160 specialization — same structure as the d80 test. Validates
+/// the WMMA kernel against the bf16-input cascade at the SD 1.5 stage-2
+/// and mid-block attention shapes (`head_dim = 160`).
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_fused_attention_tc_d160_matches_bf16_cascade() {
+    use half::bf16;
+    use scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D160_CUDA;
+
+    const D: usize = 160;
+    const BR: u32 = 16;
+
+    let gpu = cuda_gpu();
+    let cuda_inc = Device::cuda_include_path()
+        .expect("CUDA toolkit include/ not found via CUDA_PATH/CUDA_HOME or standard prefixes");
+    let kernel = gpu
+        .compile_cuda_with_arch(
+            FUSED_ATTENTION_TC_D160_CUDA,
+            "fused_attention_tc_d160",
+            4,
+            [32, 1, 1],
+            Some("compute_80"),
+            &[cuda_inc.as_str()],
+        )
+        .expect("FUSED_ATTENTION_TC_D160 compiles");
+
+    // SD 1.5 stage-2 (n=256), mid (n=64), cross-attn (n_kv=77).
+    let cases: &[(usize, usize, usize)] = &[(8, 256, 256), (8, 64, 64), (8, 256, 77)];
+
+    for &(num_heads, n_q, n_kv) in cases {
+        let scale = 1.0f32 / (D as f32).sqrt();
+        let q_total = num_heads * n_q * D;
+        let kv_total = num_heads * n_kv * D;
+
+        let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
+        let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32) * 0.017).cos()).collect();
+        let v: Vec<f32> = (0..kv_total)
+            .map(|i| ((i as f32) * 0.011).sin() * 0.5)
+            .collect();
+
+        let q_bf: Vec<bf16> = q.iter().map(|x| bf16::from_f32(*x)).collect();
+        let k_bf: Vec<bf16> = k.iter().map(|x| bf16::from_f32(*x)).collect();
+        let v_bf: Vec<bf16> = v.iter().map(|x| bf16::from_f32(*x)).collect();
+
+        let q_buf = gpu.upload(&q_bf).unwrap();
+        let k_buf = gpu.upload(&k_bf).unwrap();
+        let v_buf = gpu.upload(&v_bf).unwrap();
+        let out_buf = gpu.alloc::<f32>(q_total).unwrap();
+
+        let pc: [u32; 3] = [n_q as u32, n_kv as u32, scale.to_bits()];
+        let pc_bytes = bytemuck::bytes_of(&pc);
+        let workgroups = [(n_q as u32).div_ceil(BR), num_heads as u32, 1];
+        gpu.run_configured(
+            &kernel,
+            &[&q_buf, &k_buf, &v_buf, &out_buf],
+            workgroups,
+            Some(pc_bytes),
+        )
+        .unwrap();
+
+        let got: Vec<f32> = out_buf.download().unwrap();
+        let want = bf16_cascade_reference(&q_bf, &k_bf, &v_bf, num_heads, n_q, n_kv, D, scale);
+
+        let max_diff = got
+            .iter()
+            .zip(want.iter())
+            .map(|(g, w)| (g - w).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff < 5e-3,
+            "fused_attn_tc_d160 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e} > tol 5e-3"
+        );
+        eprintln!(
+            "fused_attn_tc_d160 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e}"
+        );
+    }
+}
+
+/// M9h d40 specialization — exercises the `D_PAD = 48` padded WMMA
+/// layout. SD 1.5 stage-0 attention shapes are the largest in the
+/// model; the n_q=64 / n_kv=64 case is the gate-config shape, the
+/// n_q=256 / n_kv=256 case sanity-checks at a heavier shape without
+/// burning bench-time on n=4096.
+#[cfg(feature = "bf16")]
+#[test]
+fn cuda_fused_attention_tc_d40_matches_bf16_cascade() {
+    use half::bf16;
+    use scry_gpu::shaders::elementwise::FUSED_ATTENTION_TC_D40_CUDA;
+
+    const D: usize = 40;
+    const BR: u32 = 16;
+
+    let gpu = cuda_gpu();
+    let cuda_inc = Device::cuda_include_path()
+        .expect("CUDA toolkit include/ not found via CUDA_PATH/CUDA_HOME or standard prefixes");
+    let kernel = gpu
+        .compile_cuda_with_arch(
+            FUSED_ATTENTION_TC_D40_CUDA,
+            "fused_attention_tc_d40",
+            4,
+            [32, 1, 1],
+            Some("compute_80"),
+            &[cuda_inc.as_str()],
+        )
+        .expect("FUSED_ATTENTION_TC_D40 compiles");
+
+    // SD 1.5 stage-0: gate-config (n=64), mid-shape (n=256), cross-attn
+    // (n_kv=77 exercises the kv_rem != BC tail path).
+    let cases: &[(usize, usize, usize)] = &[(8, 64, 64), (8, 256, 256), (8, 64, 77)];
+
+    for &(num_heads, n_q, n_kv) in cases {
+        let scale = 1.0f32 / (D as f32).sqrt();
+        let q_total = num_heads * n_q * D;
+        let kv_total = num_heads * n_kv * D;
+
+        let q: Vec<f32> = (0..q_total).map(|i| ((i as f32) * 0.013).sin()).collect();
+        let k: Vec<f32> = (0..kv_total).map(|i| ((i as f32) * 0.017).cos()).collect();
+        let v: Vec<f32> = (0..kv_total)
+            .map(|i| ((i as f32) * 0.011).sin() * 0.5)
+            .collect();
+
+        let q_bf: Vec<bf16> = q.iter().map(|x| bf16::from_f32(*x)).collect();
+        let k_bf: Vec<bf16> = k.iter().map(|x| bf16::from_f32(*x)).collect();
+        let v_bf: Vec<bf16> = v.iter().map(|x| bf16::from_f32(*x)).collect();
+
+        let q_buf = gpu.upload(&q_bf).unwrap();
+        let k_buf = gpu.upload(&k_bf).unwrap();
+        let v_buf = gpu.upload(&v_bf).unwrap();
+        let out_buf = gpu.alloc::<f32>(q_total).unwrap();
+
+        let pc: [u32; 3] = [n_q as u32, n_kv as u32, scale.to_bits()];
+        let pc_bytes = bytemuck::bytes_of(&pc);
+        let workgroups = [(n_q as u32).div_ceil(BR), num_heads as u32, 1];
+        gpu.run_configured(
+            &kernel,
+            &[&q_buf, &k_buf, &v_buf, &out_buf],
+            workgroups,
+            Some(pc_bytes),
+        )
+        .unwrap();
+
+        let got: Vec<f32> = out_buf.download().unwrap();
+        let want = bf16_cascade_reference(&q_bf, &k_bf, &v_bf, num_heads, n_q, n_kv, D, scale);
+
+        let max_diff = got
+            .iter()
+            .zip(want.iter())
+            .map(|(g, w)| (g - w).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff < 5e-3,
+            "fused_attn_tc_d40 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e} > tol 5e-3"
+        );
+        eprintln!(
+            "fused_attn_tc_d40 heads={num_heads} n_q={n_q} n_kv={n_kv}: \
+             max_abs_diff={max_diff:.3e}"
+        );
+    }
+}
