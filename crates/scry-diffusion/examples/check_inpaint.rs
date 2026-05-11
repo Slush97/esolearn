@@ -122,7 +122,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input9_numel = 9 * latent_size * latent_size;
 
     if image_flat.len() != img_numel {
-        return Err(format!("image_norm: expected {img_numel} elems, got {}", image_flat.len()).into());
+        return Err(format!(
+            "image_norm: expected {img_numel} elems, got {}",
+            image_flat.len()
+        )
+        .into());
     }
     if mask_flat.len() != mask_numel {
         return Err(format!("mask: expected {mask_numel} elems, got {}", mask_flat.len()).into());
@@ -162,7 +166,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let (md, mn, mp) = max_abs_diff(&our_masked_image, &masked_image_flat);
-    report("masked_image (sanity)", md, mn, mp).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+    report("masked_image (sanity)", md, mn, mp)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     println!("  loading VAE encoder...");
     let vae_path = base_snapshot.join("vae/diffusion_pytorch_model.safetensors");
@@ -173,10 +178,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let encoder = VaeEncoder::<CpuBackend>::from_safetensors(vae_cfg, &vae_ckpt)?;
     println!("  loaded in {:.1}s", t0_load.elapsed().as_secs_f32());
 
-    let masked_image_t = Tensor::<CpuBackend>::from_vec(
-        our_masked_image,
-        Shape::new(&[3, image_size, image_size]),
-    );
+    let masked_image_t =
+        Tensor::<CpuBackend>::from_vec(our_masked_image, Shape::new(&[3, image_size, image_size]));
     println!("  encoding masked image...");
     let t_enc = Instant::now();
     let (mean, _logvar) = encoder.encode(&masked_image_t)?;
@@ -204,8 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---- Sub-check C: UNet forward with 9-channel input -------------
     println!("\n[C] UNet forward (9-channel conv_in, inpainting weights)");
     println!("  loading inpainting UNet...");
-    let unet_path =
-        inpaint_snapshot.join("unet/diffusion_pytorch_model.fp16.safetensors");
+    let unet_path = inpaint_snapshot.join("unet/diffusion_pytorch_model.fp16.safetensors");
     let unet_ckpt = SafetensorsCheckpoint::open(&unet_path)?;
     let t_unet_load = Instant::now();
     let mut unet =
@@ -217,10 +219,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         embeddings: cond_embed,
         extras: None,
     };
-    let unet_input = Tensor::<CpuBackend>::from_vec(
-        hf_unet_input,
-        Shape::new(&[9, latent_size, latent_size]),
-    );
+    let unet_input =
+        Tensor::<CpuBackend>::from_vec(hf_unet_input, Shape::new(&[9, latent_size, latent_size]));
     println!("  running UNet forward at t={t0}...");
     let t_fwd = Instant::now();
     let unet_out = unet.forward(&unet_input, t0, &conditioning)?;

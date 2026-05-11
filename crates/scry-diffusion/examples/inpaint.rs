@@ -204,10 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mask_img = image::open(&args.mask)?.to_luma8();
     let (mw, mh) = (mask_img.width() as usize, mask_img.height() as usize);
     if mw != w || mh != h {
-        return Err(format!(
-            "mask {mw}×{mh} must match init {w}×{h}"
-        )
-        .into());
+        return Err(format!("mask {mw}×{mh} must match init {w}×{h}").into());
     }
     let mut mask_chw = vec![0.0_f32; plane];
     let mask_raw = mask_img.as_raw();
