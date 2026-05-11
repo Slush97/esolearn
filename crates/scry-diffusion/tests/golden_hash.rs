@@ -28,7 +28,7 @@ use scry_diffusion::tokenizer::Tokenizer;
 use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::{decoder::VaeDecoderConfig, VaeDecoder};
 use scry_diffusion::weights::SafetensorsCheckpoint;
-use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
+use scry_diffusion::{GenerationParams, SdPipeline};
 use scry_llm::backend::scry_gpu::ScryGpuBackend as Backend;
 use sha2::{Digest, Sha256};
 
@@ -111,11 +111,12 @@ fn txt2img_golden_hash() {
         .expect("vae build");
     let scheduler = DdimScheduler::new(DdimConfig::sd_1_5()).expect("ddim");
 
-    let mut pipeline = Txt2ImgPipeline {
+    let mut pipeline = SdPipeline {
         tokenizer,
         text_encoder,
         unet,
         vae,
+        vae_encoder: None,
         scheduler,
         progress: None,
     };

@@ -516,6 +516,49 @@ pub trait MathBackend: DeviceBackend {
         Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
     }
 
+    /// 2D zero-padding, NCHW layout, with **asymmetric pad support**.
+    ///
+    /// Input is `[channels, h_in, w_in]`; output is
+    /// `[channels, h_in + pad_top + pad_bottom, w_in + pad_left + pad_right]`
+    /// with the input copied into the `(pad_top.., pad_left..)` region and
+    /// zeros everywhere else. Matches `torch.nn.functional.pad(x, (pad_left,
+    /// pad_right, pad_top, pad_bottom), mode="constant", value=0)` —
+    /// note PyTorch's pad order is `(W_left, W_right, H_top, H_bottom)`.
+    ///
+    /// HF's `Downsample2D` in the VAE encoder uses `pad(0, 1, 0, 1)`
+    /// (i.e. `pad_right=1, pad_bottom=1`) before a stride-2 padding-0
+    /// conv — `scry_vision::nn::Conv2d` only supports symmetric padding,
+    /// so the asymmetric pad lives here.
+    ///
+    /// The default impl runs on host via `to_vec`/`from_vec`; GPU backends
+    /// can override to keep tensors device-resident.
+    fn pad_2d_zero(
+        input: &Self::Storage,
+        channels: usize,
+        h_in: usize,
+        w_in: usize,
+        pad_top: usize,
+        pad_bottom: usize,
+        pad_left: usize,
+        pad_right: usize,
+    ) -> Self::Storage {
+        let h_out = h_in + pad_top + pad_bottom;
+        let w_out = w_in + pad_left + pad_right;
+        let input_v = Self::to_vec(input);
+        let mut out = vec![0.0f32; channels * h_out * w_out];
+        for c in 0..channels {
+            let in_plane = c * h_in * w_in;
+            let out_plane = c * h_out * w_out;
+            for ih in 0..h_in {
+                let oh = ih + pad_top;
+                let in_row = in_plane + ih * w_in;
+                let out_row = out_plane + oh * w_out + pad_left;
+                out[out_row..out_row + w_in].copy_from_slice(&input_v[in_row..in_row + w_in]);
+            }
+        }
+        Self::from_vec(out, &Shape::new(&[channels, h_out, w_out]))
+    }
+
     /// 2D nearest-neighbor upsample by an integer factor, NCHW layout.
     ///
     /// Input is `[channels, h_in, w_in]`; output is
@@ -607,7 +650,11 @@ pub trait MathBackend: DeviceBackend {
     /// Elementwise multiply: `a * b` (same shape, no broadcast).
     fn mul_elementwise(a: &Self::Storage, b: &Self::Storage) -> Self::Storage;
 
-    /// Scale all elements: `a * scalar`.
+    /// Scale all elements: `a * scalar`. Must allocate fresh storage —
+    /// callers (notably `vae::blocks::clone_tensor` and the analogous
+    /// `unet/common.rs` helper) rely on `scale(_, 1.0)` producing an
+    /// independent copy so a subsequent in-place op on the result cannot
+    /// alias `a`. Do not add an in-place fast path for `scalar == 1.0`.
     fn scale(a: &Self::Storage, scalar: f32) -> Self::Storage;
 
     /// 2D transpose: input `[rows, cols]` (row-major) → output `[cols, rows]`

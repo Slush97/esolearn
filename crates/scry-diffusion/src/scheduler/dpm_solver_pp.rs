@@ -378,6 +378,36 @@ impl<B: MathBackend> Scheduler<B> for DpmSolverPpScheduler<B> {
 
         Ok(next_latent)
     }
+
+    fn add_noise(
+        &self,
+        original: &Tensor<B>,
+        noise: &Tensor<B>,
+        timestep: f32,
+    ) -> Result<Tensor<B>> {
+        if original.shape.numel() != noise.shape.numel() {
+            return Err(Error::Scheduler(format!(
+                "original ({}) and noise ({}) length mismatch",
+                original.shape.numel(),
+                noise.shape.numel()
+            )));
+        }
+        let t_idx = timestep_to_index(timestep, self.alphas_cumprod.len())?;
+        let alpha_prod_t = self.alphas_cumprod[t_idx as usize];
+        let sqrt_alpha = alpha_prod_t.sqrt();
+        let sqrt_one_minus = (1.0 - alpha_prod_t).sqrt();
+        let scaled_orig = B::scale(&original.data, sqrt_alpha);
+        let scaled_noise = B::scale(&noise.data, sqrt_one_minus);
+        let out_shape = original.shape.clone();
+        let storage = B::add(
+            &scaled_orig,
+            &scaled_noise,
+            &out_shape,
+            &noise.shape,
+            &out_shape,
+        );
+        Ok(Tensor::new(storage, out_shape))
+    }
 }
 
 #[cfg(test)]
@@ -533,5 +563,41 @@ mod tests {
         for (a, b) in expected.iter().zip(&got) {
             assert!((a - b).abs() < 1e-6, "expected {a}, got {b}");
         }
+    }
+
+    #[test]
+    fn add_noise_matches_ddim_coefficients() {
+        // DPM++ and DDIM share their training-time `alphas_cumprod` (the
+        // existing `alphas_cumprod_match_ddim_construction` test asserts
+        // bit-for-bit equality at construction), so add_noise must yield
+        // the same √ᾱ_t · original + √(1 − ᾱ_t) · noise for both.
+        use crate::scheduler::ddim::{DdimConfig, DdimScheduler};
+
+        let dpm = DpmSolverPpScheduler::<CpuBackend>::new(DpmSolverPpConfig::sd_1_5()).unwrap();
+        let ddim = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor((0..16).map(|i| 0.01 * (i as f32 + 1.0)).collect());
+        let noise = cpu_tensor((0..16).map(|i| 0.02 * (i as f32 - 7.0)).collect());
+
+        let want =
+            <DdimScheduler as Scheduler<CpuBackend>>::add_noise(&ddim, &original, &noise, 500.0)
+                .unwrap();
+        let got = <DpmSolverPpScheduler<CpuBackend> as Scheduler<CpuBackend>>::add_noise(
+            &dpm, &original, &noise, 500.0,
+        )
+        .unwrap();
+        for (a, b) in want.to_vec().iter().zip(&got.to_vec()) {
+            assert!((a - b).abs() < 1e-7, "want {a}, got {b}");
+        }
+    }
+
+    #[test]
+    fn add_noise_shape_mismatch_errors() {
+        let s = DpmSolverPpScheduler::<CpuBackend>::new(DpmSolverPpConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor(vec![0.0; 16]);
+        let noise = cpu_tensor(vec![0.0; 8]);
+        let err = <DpmSolverPpScheduler<CpuBackend> as Scheduler<CpuBackend>>::add_noise(
+            &s, &original, &noise, 500.0,
+        );
+        assert!(err.is_err());
     }
 }

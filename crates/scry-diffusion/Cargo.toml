@@ -41,11 +41,23 @@ name = "txt2img"
 required-features = ["safetensors", "decode"]
 
 [[example]]
+name = "img2img"
+required-features = ["safetensors", "decode"]
+
+[[example]]
 name = "check_text_encoder"
 required-features = ["safetensors"]
 
 [[example]]
 name = "check_vae_decoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "check_vae_encoder"
+required-features = ["safetensors"]
+
+[[example]]
+name = "check_img2img"
 required-features = ["safetensors"]
 
 [[example]]

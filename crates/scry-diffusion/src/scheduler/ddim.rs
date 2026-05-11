@@ -217,6 +217,36 @@ impl<B: MathBackend> Scheduler<B> for DdimScheduler {
         let storage = B::add(&scaled_x, &scaled_pred, &out_shape, &out_shape, &out_shape);
         Ok(Tensor::new(storage, out_shape))
     }
+
+    fn add_noise(
+        &self,
+        original: &Tensor<B>,
+        noise: &Tensor<B>,
+        timestep: f32,
+    ) -> Result<Tensor<B>> {
+        if original.shape.numel() != noise.shape.numel() {
+            return Err(Error::Scheduler(format!(
+                "original ({}) and noise ({}) length mismatch",
+                original.shape.numel(),
+                noise.shape.numel()
+            )));
+        }
+        let t_idx = timestep_to_index(timestep, self.alphas_cumprod.len())?;
+        let alpha_prod_t = self.alphas_cumprod[t_idx as usize];
+        let sqrt_alpha = alpha_prod_t.sqrt();
+        let sqrt_one_minus = (1.0 - alpha_prod_t).sqrt();
+        let scaled_orig = B::scale(&original.data, sqrt_alpha);
+        let scaled_noise = B::scale(&noise.data, sqrt_one_minus);
+        let out_shape = original.shape.clone();
+        let storage = B::add(
+            &scaled_orig,
+            &scaled_noise,
+            &out_shape,
+            &noise.shape,
+            &out_shape,
+        );
+        Ok(Tensor::new(storage, out_shape))
+    }
 }
 
 #[cfg(test)]
@@ -324,5 +354,60 @@ mod tests {
         let latent = cpu_tensor(vec![0.0; 4]);
         let err = <DdimScheduler as Scheduler<CpuBackend>>::step(&mut s, &eps, 958.0, &latent);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn add_noise_at_t0_returns_near_original() {
+        // At the smallest timestep ᾱ_t is closest to 1, so the noise term
+        // contributes ~√(1 − ᾱ_0) ≈ √0.00085 ≈ 0.029 of the noise. The
+        // original side gets √ᾱ_0 ≈ 0.99957. We use t=0 here as a sanity
+        // check that the coefficient lookup hits the head of the table.
+        let s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor(vec![1.0; 16]);
+        let noise = cpu_tensor(vec![0.0; 16]);
+        let mixed = <DdimScheduler as Scheduler<CpuBackend>>::add_noise(&s, &original, &noise, 0.0)
+            .unwrap();
+        let v = mixed.to_vec();
+        let sqrt_alpha = s.alphas_cumprod[0].sqrt();
+        for x in &v {
+            assert!((x - sqrt_alpha).abs() < 1e-6, "got {x}, want {sqrt_alpha}");
+        }
+    }
+
+    #[test]
+    fn add_noise_at_last_timestep_is_mostly_noise() {
+        // ᾱ_{T-1} ≈ 0.0047 for SD 1.5, so √(1 − ᾱ) ≈ 0.998 and √ᾱ ≈ 0.068.
+        let s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor(vec![0.0; 16]);
+        let noise = cpu_tensor(vec![1.0; 16]);
+        let mixed =
+            <DdimScheduler as Scheduler<CpuBackend>>::add_noise(&s, &original, &noise, 999.0)
+                .unwrap();
+        let v = mixed.to_vec();
+        let want = (1.0 - s.alphas_cumprod[999]).sqrt();
+        for x in &v {
+            assert!((x - want).abs() < 1e-6, "got {x}, want {want}");
+        }
+    }
+
+    #[test]
+    fn add_noise_shape_mismatch_errors() {
+        let s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor(vec![0.0; 16]);
+        let noise = cpu_tensor(vec![0.0; 8]);
+        let err = <DdimScheduler as Scheduler<CpuBackend>>::add_noise(&s, &original, &noise, 500.0);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn add_noise_does_not_require_set_timesteps() {
+        // add_noise is stateless — img2img calls it before the denoise
+        // loop, and we want users to be able to wire that without an
+        // off-the-trajectory `set_timesteps` first.
+        let s = DdimScheduler::new(DdimConfig::sd_1_5()).unwrap();
+        let original = cpu_tensor(vec![0.5; 16]);
+        let noise = cpu_tensor(vec![0.5; 16]);
+        let ok = <DdimScheduler as Scheduler<CpuBackend>>::add_noise(&s, &original, &noise, 500.0);
+        assert!(ok.is_ok());
     }
 }
