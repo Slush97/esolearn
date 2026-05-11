@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Scheduler-only microbenchmark — DDIM vs DPM-Solver++(2M).
+//! Scheduler-only microbenchmark — DDIM vs DPM-Solver++(2M) vs LCM vs Turbo.
 //!
 //! Times `Scheduler::step` (and `scale_model_input`) in isolation on a
 //! realistic SD 1.5 latent (4×64×64 = 16,384 f32). Reports per-step latency
-//! statistics so we can see the *constant-factor* difference between the two
-//! samplers and whether either is a meaningful fraction of a full
+//! statistics so we can see the *constant-factor* difference between the
+//! samplers and whether any is a meaningful fraction of a full
 //! inference-step wall-clock budget (`UNet` forward ≈ tens to hundreds of ms).
 //!
 //! Defaults to the `CpuBackend`. Build with `--features scry-gpu-cuda` to
@@ -24,6 +24,8 @@ use std::time::Instant;
 
 use scry_diffusion::scheduler::ddim::{DdimConfig, DdimScheduler};
 use scry_diffusion::scheduler::dpm_solver_pp::{DpmSolverPpConfig, DpmSolverPpScheduler};
+use scry_diffusion::scheduler::lcm::{LcmConfig, LcmScheduler};
+use scry_diffusion::scheduler::turbo::{TurboConfig, TurboScheduler};
 use scry_diffusion::scheduler::Scheduler;
 use scry_llm::backend::DeviceBackend;
 use scry_llm::tensor::shape::Shape;
@@ -115,12 +117,20 @@ where
     S: Scheduler<Backend>,
     Setup: FnMut() -> S,
 {
+    bench_scheduler_n(label, STEPS, &mut build)
+}
+
+fn bench_scheduler_n<S, Setup>(label: &str, steps: u32, build: &mut Setup) -> (Stats, Stats)
+where
+    S: Scheduler<Backend>,
+    Setup: FnMut() -> S,
+{
     let mut per_step = Stats::default();
     let mut per_run = Stats::default();
 
     for run in 0..(WARMUP + RUNS) {
         let mut sched = build();
-        sched.set_timesteps(STEPS).unwrap();
+        sched.set_timesteps(steps).unwrap();
         let timesteps: Vec<f32> = sched.timesteps().to_vec();
 
         let mut latent = make_tensor(42 + u64::from(run));
@@ -151,7 +161,8 @@ where
         fence();
     }
 
-    print_row(label, &per_step, &per_run);
+    let suffix = format!("{label} ({steps} steps)");
+    print_row(&suffix, &per_step, &per_run);
     (per_step, per_run)
 }
 
@@ -196,6 +207,18 @@ fn main() {
         });
 
     println!();
+    println!("== Few-step samplers (Scheduler::step) ==");
+    let (lcm_step, lcm_run) = bench_scheduler_n::<LcmScheduler, _>("LCM", 4, &mut || {
+        LcmScheduler::new(LcmConfig::sd_1_5()).unwrap()
+    });
+    let (turbo1_step, turbo1_run) = bench_scheduler_n::<TurboScheduler, _>("Turbo", 1, &mut || {
+        TurboScheduler::new(TurboConfig::sdxl_turbo()).unwrap()
+    });
+    let (turbo4_step, turbo4_run) = bench_scheduler_n::<TurboScheduler, _>("Turbo", 4, &mut || {
+        TurboScheduler::new(TurboConfig::sdxl_turbo()).unwrap()
+    });
+
+    println!();
     println!("== Scheduler::scale_model_input (trait default = B::scale(_, 1.0)) ==");
     let _smi_ddim = bench_scale_model_input::<DdimScheduler, _>("DDIM scale_model_input", || {
         DdimScheduler::new(DdimConfig::sd_1_5()).unwrap()
@@ -209,27 +232,37 @@ fn main() {
     println!("== Summary ==");
     let (_, ddim_p50, ddim_mean, _, _) = ddim_step.summary();
     let (_, dpm_p50, dpm_mean, _, _) = dpm_step.summary();
+    let (_, lcm_p50, lcm_mean, _, _) = lcm_step.summary();
+    let (_, turbo1_p50, turbo1_mean, _, _) = turbo1_step.summary();
+    let (_, turbo4_p50, turbo4_mean, _, _) = turbo4_step.summary();
     let (_, ddim_run_p50, ddim_run_mean, _, _) = ddim_run.summary();
     let (_, dpm_run_p50, dpm_run_mean, _, _) = dpm_run.summary();
-    println!("  DDIM      step p50/mean: {ddim_p50:>7.2} / {ddim_mean:>7.2} μs  | 30-step run p50/mean: {ddim_run_p50:>7.3} / {ddim_run_mean:>7.3} ms");
-    println!("  DPM++(2M) step p50/mean: {dpm_p50:>7.2} / {dpm_mean:>7.2} μs  | 30-step run p50/mean: {dpm_run_p50:>7.3} / {dpm_run_mean:>7.3} ms");
-    println!(
-        "  ratio (DPM++ / DDIM) p50: step {:.2}×   30-step run {:.2}×",
-        dpm_p50 / ddim_p50,
-        dpm_run_p50 / ddim_run_p50
-    );
+    let (_, lcm_run_p50, lcm_run_mean, _, _) = lcm_run.summary();
+    let (_, turbo1_run_p50, turbo1_run_mean, _, _) = turbo1_run.summary();
+    let (_, turbo4_run_p50, turbo4_run_mean, _, _) = turbo4_run.summary();
+    println!("  DDIM       step p50/mean: {ddim_p50:>7.2} / {ddim_mean:>7.2} μs  | 30-step run p50/mean: {ddim_run_p50:>7.3} / {ddim_run_mean:>7.3} ms");
+    println!("  DPM++(2M)  step p50/mean: {dpm_p50:>7.2} / {dpm_mean:>7.2} μs  | 30-step run p50/mean: {dpm_run_p50:>7.3} / {dpm_run_mean:>7.3} ms");
+    println!("  LCM        step p50/mean: {lcm_p50:>7.2} / {lcm_mean:>7.2} μs  |  4-step run p50/mean: {lcm_run_p50:>7.3} / {lcm_run_mean:>7.3} ms");
+    println!("  Turbo (1)  step p50/mean: {turbo1_p50:>7.2} / {turbo1_mean:>7.2} μs  |  1-step run p50/mean: {turbo1_run_p50:>7.3} / {turbo1_run_mean:>7.3} ms");
+    println!("  Turbo (4)  step p50/mean: {turbo4_p50:>7.2} / {turbo4_mean:>7.2} μs  |  4-step run p50/mean: {turbo4_run_p50:>7.3} / {turbo4_run_mean:>7.3} ms");
     println!();
     println!("== End-to-end model (scheduler + UNet) ==");
     // Project realistic per-step UNet costs to put scheduler in context.
     // Numbers are wall-clock-per-UNet-forward at SD 1.5 / 512×512 / batch 2 (CFG).
+    // LCM and Turbo run at guidance_scale=1.0 (batch 1) — half the UNet cost
+    // per step compared to DDIM/DPM++ which need both cond + uncond.
     for &unet_ms in &[10.0_f64, 30.0, 100.0] {
         let ddim_total = unet_ms * 30.0 + ddim_run_p50;
         let dpm_total = unet_ms * 20.0 + dpm_run_p50;
+        // Few-step samplers skip CFG → factor of 0.5 on the per-step UNet ms.
+        let lcm_total = unet_ms * 0.5 * 4.0 + lcm_run_p50;
+        let turbo1_total = unet_ms * 0.5 * 1.0 + turbo1_run_p50;
+        let turbo4_total = unet_ms * 0.5 * 4.0 + turbo4_run_p50;
         let sched_pct_ddim = 100.0 * ddim_run_p50 / ddim_total;
         let sched_pct_dpm = 100.0 * dpm_run_p50 / dpm_total;
+        let sched_pct_lcm = 100.0 * lcm_run_p50 / lcm_total;
         println!(
-            "  UNet={unet_ms:>5.1} ms/step → DDIM(30) {ddim_total:>7.1} ms (sched {sched_pct_ddim:>4.2}%)   DPM++(20) {dpm_total:>7.1} ms (sched {sched_pct_dpm:>4.2}%)   speedup {:>4.2}×",
-            ddim_total / dpm_total
+            "  UNet={unet_ms:>5.1} ms/step → DDIM(30) {ddim_total:>7.1} ms (sched {sched_pct_ddim:>4.2}%)   DPM++(20) {dpm_total:>7.1} ms (sched {sched_pct_dpm:>4.2}%)   LCM(4) {lcm_total:>6.1} ms (sched {sched_pct_lcm:>4.2}%)   Turbo(1) {turbo1_total:>5.1} ms   Turbo(4) {turbo4_total:>5.1} ms"
         );
     }
     println!();
@@ -237,5 +270,8 @@ fn main() {
         "Verdict: scheduler constant-factor grew (DPM++ ≈ {:.1}× DDIM per step) but is",
         dpm_p50 / ddim_p50
     );
-    println!("dwarfed by UNet cost; DPM++'s 1/3 fewer UNet calls wins end-to-end at any realistic UNet ms.");
+    println!("dwarfed by UNet cost; DPM++'s 1/3 fewer UNet calls wins end-to-end at any realistic");
+    println!(
+        "UNet ms. LCM(4)/Turbo(1) collapse total UNet work by another order of magnitude on top."
+    );
 }

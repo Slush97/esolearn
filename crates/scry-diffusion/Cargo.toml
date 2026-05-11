@@ -41,6 +41,10 @@ name = "txt2img"
 required-features = ["safetensors", "decode"]
 
 [[example]]
+name = "txt2img_lcm"
+required-features = ["safetensors", "decode"]
+
+[[example]]
 name = "img2img"
 required-features = ["safetensors", "decode"]
 

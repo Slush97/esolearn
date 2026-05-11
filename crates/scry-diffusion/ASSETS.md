@@ -119,6 +119,54 @@ Every other tensor matches the base checkpoint at 1e-7. The loader
 picks up the wider shape via `UnetConfig::sd_1_5_inpainting()`; nothing
 else in the model code knows or cares.
 
+## LCM-Dreamshaper-v7 (M12 visual gate)
+
+Full SD 1.5-compatible LCM-distilled checkpoint from
+[`SimianLuo/LCM_Dreamshaper_v7`](https://huggingface.co/SimianLuo/LCM_Dreamshaper_v7).
+Pairs with the base SD 1.5 tokenizer / text encoder / VAE — those three
+are byte-identical between the two snapshots, so only the LCM UNet
+(~3.4 GB) is fetched fresh; the example symlinks the rest from
+`.assets/sd-1-5/`.
+
+```text
+crates/scry-diffusion/.assets/lcm-dreamshaper-v7/
+├── tokenizer/       -> ../sd-1-5/tokenizer
+├── text_encoder/    -> ../sd-1-5/text_encoder
+├── vae/             -> ../sd-1-5/vae
+└── unet/
+    ├── config.json
+    └── diffusion_pytorch_model.safetensors             # ~3.4 GB
+```
+
+### Download
+
+```bash
+mkdir -p crates/scry-diffusion/.assets/lcm-dreamshaper-v7
+hf download SimianLuo/LCM_Dreamshaper_v7 \
+    unet/diffusion_pytorch_model.safetensors unet/config.json \
+    --local-dir crates/scry-diffusion/.assets/lcm-dreamshaper-v7
+
+cd crates/scry-diffusion/.assets/lcm-dreamshaper-v7
+ln -sf ../sd-1-5/tokenizer ./tokenizer
+ln -sf ../sd-1-5/text_encoder ./text_encoder
+ln -sf ../sd-1-5/vae ./vae
+```
+
+### What changes vs base SD 1.5
+
+The UNet adds `time_embedding.cond_proj.weight` — a bias-free
+`Linear(256, 320)` that projects a 256-d sinusoidal embedding of the
+guidance scale `w` into the time embedding (HF's "guidance-distilled"
+trick that lets LCM run at `cfg=1.0` while still behaving as if CFG were
+active). Loader picks it up automatically when present; the caller wires
+`w` via [`Unet::set_guidance_scale`] (LCM-Dreamshaper was distilled with
+`w = guidance_scale − 1 = 7.0`). Vanilla SD checkpoints leave this key
+absent and `cached_cond_emb` stays `None`, so the path is a no-op for
+non-LCM models.
+
+Trained at 768×768; runs at 512×512 too but visibly higher quality at
+the trained resolution. See `examples/txt2img_lcm.rs`.
+
 ## SDXL (M10)
 
 When SDXL work begins, mirror this structure under

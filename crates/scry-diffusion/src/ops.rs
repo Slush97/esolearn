@@ -69,6 +69,38 @@ pub fn sinusoidal_timestep_embedding<B: MathBackend>(
     Ok(Tensor::from_vec(emb, Shape::new(&[d_model])))
 }
 
+/// LCM-style sinusoidal embedding for the guidance-scale input `w`.
+///
+/// Mirrors `lcm_pipeline.py::get_w_embedding` byte-for-byte:
+/// * scale `w` by 1000,
+/// * `half = embedding_dim / 2` log-spaced frequencies derived from
+///   `log(10000) / (half − 1)` (NB the `half − 1` denominator vs the
+///   `half` used by [`sinusoidal_timestep_embedding`]),
+/// * **`[sin, cos]`** concat order — the opposite of diffusers'
+///   `flip_sin_to_cos=True` timestep embedding,
+/// * trailing zero pad for odd `embedding_dim`.
+///
+/// The result is the input to LCM's `time_embedding.cond_proj`.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub fn lcm_w_embedding(w: f32, embedding_dim: usize) -> Vec<f32> {
+    let mut emb = vec![0.0_f32; embedding_dim];
+    let half = embedding_dim / 2;
+    if half == 0 {
+        return emb;
+    }
+    let w_scaled = w * 1000.0_f32;
+    let denom = (half.saturating_sub(1).max(1)) as f32;
+    let log_max = 10_000.0_f32.ln();
+    for i in 0..half {
+        let freq = (-log_max * (i as f32) / denom).exp();
+        let arg = w_scaled * freq;
+        emb[i] = arg.sin();
+        emb[half + i] = arg.cos();
+    }
+    emb
+}
+
 /// Nearest-neighbor 2D upsample by an integer factor, NCHW layout.
 ///
 /// SD UNet UpBlocks call this between resolution stages. PyTorch's default is
