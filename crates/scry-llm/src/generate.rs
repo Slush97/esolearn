@@ -1,5 +1,48 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use crate::backend::MathBackend;
 use crate::tensor::Tensor;
+
+/// Cooperative cancellation handle for streaming generation.
+///
+/// Clones share state via `Arc<AtomicBool>`. Calling [`CancelToken::cancel`] on any clone
+/// signals every observer. The flag is checked between forward passes — mid-kernel
+/// preemption is not supported.
+///
+/// # Examples
+///
+/// ```
+/// use scry_llm::generate::CancelToken;
+/// let token = CancelToken::new();
+/// let mirror = token.clone();
+/// assert!(!mirror.is_cancelled());
+/// token.cancel();
+/// assert!(mirror.is_cancelled());
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct CancelToken {
+    flag: Arc<AtomicBool>,
+}
+
+impl CancelToken {
+    /// Construct a new, not-yet-cancelled token.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Signal cancellation. Idempotent.
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Check whether [`Self::cancel`] has been invoked on this token or any clone.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+}
 
 /// Trait for causal language models, decoupling generation from specific architectures.
 pub trait CausalLM<B: MathBackend> {
@@ -44,48 +87,132 @@ impl Default for SamplingConfig {
     }
 }
 
-/// Generate tokens autoregressively from a prompt.
+/// Iterator yielding generated tokens one at a time.
 ///
-/// Uses KV-cache for efficient single-token forward passes.
-/// Returns the generated token IDs (not including the prompt).
+/// Owns the KV cache for the duration of the stream — dropping the iterator
+/// releases the cache (and any backend resources it holds). The cancellation
+/// token passed to [`generate_stream`] is checked at the start of every
+/// `next()` call; cancelling causes the iterator to short-circuit to `None`.
+///
+/// The first call to `next()` returns the first sampled token (prefill has
+/// already run in [`generate_stream`]). Each subsequent call runs one
+/// decode-step forward pass.
+pub struct TokenStream<'a, B: MathBackend, M: CausalLM<B>> {
+    model: &'a M,
+    cache: M::Cache,
+    config: SamplingConfig,
+    rng: &'a mut fastrand::Rng,
+    cancel: CancelToken,
+    vocab_size: usize,
+    prompt_len: usize,
+    /// Tokens emitted so far. Increments at the *end* of each `next()` call.
+    generated: usize,
+    /// Most recently emitted token. After prefill (before first `next()`) this
+    /// is the first sampled token; after each emit it becomes the just-emitted token.
+    last_emitted: usize,
+    /// Whether the first sampled token has been returned to the caller yet.
+    first_emitted: bool,
+}
+
+impl<B: MathBackend, M: CausalLM<B>> Iterator for TokenStream<'_, B, M> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        if self.generated >= self.config.max_tokens {
+            return None;
+        }
+        if self.cancel.is_cancelled() {
+            return None;
+        }
+
+        if !self.first_emitted {
+            self.first_emitted = true;
+            self.generated = 1;
+            return Some(self.last_emitted);
+        }
+
+        // Position to feed: the slot where `last_emitted` lives in the cache.
+        // After emitting `generated` tokens, the most recent one sits at
+        // index `prompt_len + generated - 1`.
+        let position = self.prompt_len + self.generated - 1;
+        let logits = self
+            .model
+            .forward_with_cache(self.last_emitted, position, &mut self.cache);
+        let logits_vec = logits.to_vec();
+        let token = sample_token(&logits_vec[..self.vocab_size], &self.config, self.rng);
+        self.last_emitted = token;
+        self.generated += 1;
+        Some(token)
+    }
+}
+
+/// Start a streaming generation. Runs prefill eagerly, returns an iterator that
+/// yields one decoded token per `next()` call.
+///
+/// `cancel` is checked between forward passes. Drop the iterator to release the
+/// KV cache early; the iterator owns it, so no manual teardown is required.
+///
+/// # Panics
+///
+/// Panics if `prompt_tokens` is empty.
+pub fn generate_stream<'a, B: MathBackend, M: CausalLM<B>>(
+    model: &'a M,
+    prompt_tokens: &[usize],
+    config: SamplingConfig,
+    rng: &'a mut fastrand::Rng,
+    cancel: CancelToken,
+) -> TokenStream<'a, B, M> {
+    assert!(
+        !prompt_tokens.is_empty(),
+        "generate_stream: prompt_tokens must not be empty"
+    );
+
+    let max_seq = prompt_tokens.len() + config.max_tokens;
+    let mut cache = model.new_kv_cache(max_seq);
+    let vocab_size = model.vocab_size();
+
+    let mut first_token = 0usize;
+    for (pos, &token_id) in prompt_tokens.iter().enumerate() {
+        let logits = model.forward_with_cache(token_id, pos, &mut cache);
+        if pos == prompt_tokens.len() - 1 {
+            let logits_vec = logits.to_vec();
+            first_token = sample_token(&logits_vec[..vocab_size], &config, rng);
+        }
+    }
+
+    TokenStream {
+        model,
+        cache,
+        config,
+        rng,
+        cancel,
+        vocab_size,
+        prompt_len: prompt_tokens.len(),
+        generated: 0,
+        last_emitted: first_token,
+        first_emitted: false,
+    }
+}
+
+/// Generate tokens autoregressively from a prompt (blocking).
+///
+/// Thin wrapper over [`generate_stream`] that drains the iterator into a `Vec`.
+/// Uses KV-cache for efficient single-token forward passes. Returns the
+/// generated token IDs (not including the prompt).
 pub fn generate<B: MathBackend, M: CausalLM<B>>(
     model: &M,
     prompt_tokens: &[usize],
     config: &SamplingConfig,
     rng: &mut fastrand::Rng,
 ) -> Vec<usize> {
-    assert!(
-        !prompt_tokens.is_empty(),
-        "generate: prompt_tokens must not be empty"
-    );
-
-    let max_seq = prompt_tokens.len() + config.max_tokens;
-    let mut cache = model.new_kv_cache(max_seq);
-    let vocab_size = model.vocab_size();
-    let mut generated = Vec::with_capacity(config.max_tokens);
-
-    // Prefill: process prompt tokens through the model
-    for (pos, &token_id) in prompt_tokens.iter().enumerate() {
-        let logits = model.forward_with_cache(token_id, pos, &mut cache);
-        if pos == prompt_tokens.len() - 1 {
-            let logits_vec = logits.to_vec();
-            let token = sample_token(&logits_vec[..vocab_size], config, rng);
-            generated.push(token);
-        }
-    }
-
-    // Autoregressive generation
-    for i in 1..config.max_tokens {
-        let last_token = generated[generated.len() - 1];
-        let position = prompt_tokens.len() + i - 1;
-
-        let logits = model.forward_with_cache(last_token, position, &mut cache);
-        let logits_vec = logits.to_vec();
-        let token = sample_token(&logits_vec[..vocab_size], config, rng);
-        generated.push(token);
-    }
-
-    generated
+    generate_stream(
+        model,
+        prompt_tokens,
+        config.clone(),
+        rng,
+        CancelToken::new(),
+    )
+    .collect()
 }
 
 /// Sample a single token from logits using temperature, top-k, and top-p filtering.
