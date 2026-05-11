@@ -1,0 +1,36 @@
+{
+  "source_gguf_basename": "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+  "tensors": [
+    {
+      "name": "output_norm.weight",
+      "source_dtype": "F32",
+      "full_shape": [
+        2560
+      ],
+      "n_full": 2560,
+      "head_count": 256,
+      "bin": "output_norm_weight.f32"
+    },
+    {
+      "name": "per_layer_proj_norm.weight",
+      "source_dtype": "F32",
+      "full_shape": [
+        256
+      ],
+      "n_full": 256,
+      "head_count": 256,
+      "bin": "per_layer_proj_norm_weight.f32"
+    },
+    {
+      "name": "blk.0.attn_k.weight",
+      "source_dtype": "Q4_K",
+      "full_shape": [
+        2560,
+        512
+      ],
+      "n_full": 1310720,
+      "head_count": 256,
+      "bin": "blk_0_attn_k_weight.f32"
+    }
+  ]
+}

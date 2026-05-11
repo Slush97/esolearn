@@ -462,7 +462,9 @@ impl HfTokenizer {
             decoder.insert(id, token.clone());
         }
 
-        // Parse merges: ["token1 token2", ...]
+        // Parse merges. Two supported shapes:
+        //   - old: `"first second"` (space-separated string per entry; GPT-2 / Llama 2)
+        //   - new: `["first", "second"]` (array per entry; Llama 3+, tokenizers ≥ 0.14)
         let merges_arr = model
             .get("merges")
             .and_then(|v| v.as_array())
@@ -470,17 +472,33 @@ impl HfTokenizer {
 
         let mut bpe_ranks = HashMap::with_capacity(merges_arr.len());
         for (rank, merge_val) in merges_arr.iter().enumerate() {
-            let merge_str = merge_val
-                .as_str()
-                .ok_or_else(|| format!("invalid merge at rank {rank}"))?;
-            let mut parts = merge_str.splitn(2, ' ');
-            let first = parts
-                .next()
-                .ok_or_else(|| format!("invalid merge format at rank {rank}"))?;
-            let second = parts
-                .next()
-                .ok_or_else(|| format!("invalid merge format at rank {rank}"))?;
-            bpe_ranks.insert((first.to_string(), second.to_string()), rank);
+            let (first, second): (String, String) = if let Some(s) = merge_val.as_str() {
+                let mut parts = s.splitn(2, ' ');
+                let first = parts
+                    .next()
+                    .ok_or_else(|| format!("invalid merge format at rank {rank}"))?;
+                let second = parts
+                    .next()
+                    .ok_or_else(|| format!("invalid merge format at rank {rank}"))?;
+                (first.to_string(), second.to_string())
+            } else if let Some(pair) = merge_val.as_array() {
+                if pair.len() != 2 {
+                    return Err(format!(
+                        "invalid merge format at rank {rank}: expected 2-element array, got {} elements",
+                        pair.len()
+                    ));
+                }
+                let first = pair[0].as_str().ok_or_else(|| {
+                    format!("invalid merge format at rank {rank}: pair[0] not a string")
+                })?;
+                let second = pair[1].as_str().ok_or_else(|| {
+                    format!("invalid merge format at rank {rank}: pair[1] not a string")
+                })?;
+                (first.to_string(), second.to_string())
+            } else {
+                return Err(format!("invalid merge at rank {rank}"));
+            };
+            bpe_ranks.insert((first, second), rank);
         }
 
         // Parse added_tokens for special tokens

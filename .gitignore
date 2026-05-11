@@ -14,6 +14,11 @@
 # Embedded source assets (small filterbanks, lookup tables) — track these
 !crates/scry-stt/src/mel_filters_80.bin
 
+# Per-developer downloaded model fixtures (GGUFs are already ignored above; this
+# also catches sibling tokenizer.json / huggingface cache for the same model)
+crates/scry-llm/tests/fixtures/llama-3.2-1b-instruct/
+crates/scry-llm/tests/fixtures/llama-3.2-1b/
+
 # LaTeX build artifacts
 *.aux
 *.log

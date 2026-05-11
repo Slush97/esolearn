@@ -22,6 +22,9 @@ pub enum ScryLlmError {
 
     #[error("checkpoint error: {0}")]
     CheckpointError(String),
+
+    #[error("gguf parse error: {0}")]
+    GgufError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ScryLlmError>;
