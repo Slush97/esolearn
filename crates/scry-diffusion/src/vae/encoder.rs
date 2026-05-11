@@ -450,7 +450,7 @@ impl<B: MathBackend> VaeEncoder<B> {
         let relevant: std::collections::HashSet<String> = view
             .names()
             .into_iter()
-            .filter(|n| n.starts_with("encoder.") || n.starts_with("quant_conv"))
+            .filter(|n| n.starts_with("encoder.") || n.starts_with("quant_conv."))
             .cloned()
             .collect();
         let missing: Vec<String> = relevant.difference(&consumed).cloned().collect();

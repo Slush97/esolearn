@@ -43,8 +43,8 @@
 //! ```
 //!
 //! No cross-attention (no text conditioning); the mid-block has a
-//! self-attention layer. Reuses [`crate::unet::resblock::ResBlock`] but with
-//! `time_embed_dim = 0` (the VAE doesn't take a timestep).
+//! self-attention layer. The VAE has its own residual flavor in
+//! [`blocks::VaeResnetBlock`] (no timestep input, unlike UNet's `ResBlock`).
 
 mod blocks;
 pub mod decoder;

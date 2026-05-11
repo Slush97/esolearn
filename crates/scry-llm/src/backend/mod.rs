@@ -650,7 +650,11 @@ pub trait MathBackend: DeviceBackend {
     /// Elementwise multiply: `a * b` (same shape, no broadcast).
     fn mul_elementwise(a: &Self::Storage, b: &Self::Storage) -> Self::Storage;
 
-    /// Scale all elements: `a * scalar`.
+    /// Scale all elements: `a * scalar`. Must allocate fresh storage —
+    /// callers (notably `vae::blocks::clone_tensor` and the analogous
+    /// `unet/common.rs` helper) rely on `scale(_, 1.0)` producing an
+    /// independent copy so a subsequent in-place op on the result cannot
+    /// alias `a`. Do not add an in-place fast path for `scalar == 1.0`.
     fn scale(a: &Self::Storage, scalar: f32) -> Self::Storage;
 
     /// 2D transpose: input `[rows, cols]` (row-major) → output `[cols, rows]`
