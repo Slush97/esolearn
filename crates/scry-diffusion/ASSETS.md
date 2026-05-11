@@ -74,6 +74,51 @@ references locally via `crates/scry-diffusion/bench_pytorch.py` (lands in
 M9) or by hand in a Python REPL. Reference numpy dumps go under
 `.assets/refs/` and stay gitignored too.
 
+## SD 1.5 inpainting (M11)
+
+Layout under `crates/scry-diffusion/.assets/sd-1-5-inpainting/`:
+
+```text
+crates/scry-diffusion/.assets/sd-1-5-inpainting/
+├── tokenizer/
+│   ├── vocab.json                                      # ~1.1 MB
+│   └── merges.txt                                      # ~513 KB
+└── unet/
+    └── diffusion_pytorch_model.fp16.safetensors        # ~1.7 GB (fp16)
+```
+
+The text encoder and VAE are byte-identical to the base SD 1.5 ones, so
+the inpaint example points back at `sd-1-5/text_encoder/` and
+`sd-1-5/vae/` rather than duplicating the bytes locally.
+
+### Download
+
+The original `runwayml/stable-diffusion-inpainting` HF repo was pulled in
+mid-2024; the community org `stable-diffusion-v1-5/` mirrors it,
+ungated:
+
+```bash
+mkdir -p crates/scry-diffusion/.assets/sd-1-5-inpainting
+
+hf download stable-diffusion-v1-5/stable-diffusion-inpainting unet/diffusion_pytorch_model.fp16.safetensors --local-dir crates/scry-diffusion/.assets/sd-1-5-inpainting
+
+hf download stable-diffusion-v1-5/stable-diffusion-inpainting tokenizer/vocab.json --local-dir crates/scry-diffusion/.assets/sd-1-5-inpainting
+hf download stable-diffusion-v1-5/stable-diffusion-inpainting tokenizer/merges.txt --local-dir crates/scry-diffusion/.assets/sd-1-5-inpainting
+```
+
+`hf`'s positional filename form is the reliable way — `--include` with
+multiple file globs silently drops the include flag on `huggingface_hub
+1.13`.
+
+### What changes vs base SD 1.5
+
+The only structural difference is the UNet's `conv_in.weight`, which
+widens from `[320, 4, 3, 3]` to `[320, 9, 3, 3]` — 4 noisy-latent
+channels + 1 mask channel + 4 masked-latent channels, in that order.
+Every other tensor matches the base checkpoint at 1e-7. The loader
+picks up the wider shape via `UnetConfig::sd_1_5_inpainting()`; nothing
+else in the model code knows or cares.
+
 ## SDXL (M10)
 
 When SDXL work begins, mirror this structure under
