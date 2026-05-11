@@ -26,7 +26,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use scry_llm::generate::{generate, SamplingConfig};
+use std::io::Write;
+
+use scry_llm::generate::{generate_stream, CancelToken, SamplingConfig};
 use scry_llm::nn::llama::LlamaModel;
 use scry_llm::tokenizer::HfTokenizer;
 
@@ -136,12 +138,30 @@ fn main() -> ExitCode {
     };
     let mut rng = fastrand::Rng::with_seed(args.seed);
 
-    let t0 = Instant::now();
-    let generated = generate(&model, &token_ids, &cfg, &mut rng);
-    let elapsed = t0.elapsed();
+    // Stream tokens to stdout as they arrive. Per-token decode would mangle
+    // multi-byte UTF-8 (the tokenizer's lossy conversion drops half-sequences),
+    // so we re-decode the cumulative buffer each step and emit the diff.
+    print!("{}", args.prompt);
+    let _ = std::io::stdout().flush();
 
-    let text = tokenizer.decode(&generated);
-    println!("{}{}", args.prompt, text);
+    let cancel = CancelToken::new();
+    let mut generated: Vec<usize> = Vec::with_capacity(args.max_tokens);
+    let mut printed_len = 0usize;
+
+    let t0 = Instant::now();
+    let stream = generate_stream(&model, &token_ids, cfg, &mut rng, cancel);
+    for token in stream {
+        generated.push(token);
+        let full = tokenizer.decode(&generated);
+        if full.len() > printed_len {
+            print!("{}", &full[printed_len..]);
+            let _ = std::io::stdout().flush();
+            printed_len = full.len();
+        }
+    }
+    let elapsed = t0.elapsed();
+    println!();
+
     eprintln!(
         "{} tokens in {:.2}s ({:.1} tok/s)",
         generated.len(),

@@ -92,6 +92,10 @@ jobs:
   doc-tests:
     # nextest doesn't run doc-tests; one workspace-wide cargo test --doc
     # picks them up. Cheap because most crates have none.
+    #
+    # scry-stt is excluded: its `default = ["blas"]` activates scry-llm/blas via
+    # workspace feature unification, pulling in cblas-sys → requires libopenblas
+    # at link. scry-stt isn't covered by any other CI job either.
     name: doc-tests
     runs-on: ubuntu-latest
     steps:
@@ -100,7 +104,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: doc-tests
-      - run: cargo test --doc --workspace --locked
+      - run: cargo test --doc --workspace --exclude scry-stt --locked
 
   miri:
     name: miri
