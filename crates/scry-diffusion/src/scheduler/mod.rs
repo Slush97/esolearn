@@ -81,4 +81,20 @@ pub trait Scheduler<B: MathBackend> {
         timestep: f32,
         latent: &Tensor<B>,
     ) -> Result<Tensor<B>>;
+
+    /// Mix `original` with `noise` at `timestep` per the forward-diffusion
+    /// formula `latent = √(ᾱ_t) · original + √(1 − ᾱ_t) · noise`. Used by
+    /// img2img to lift a clean VAE-encoded latent up to the noise level
+    /// the truncated denoise loop starts at. Stateless — does not require
+    /// `set_timesteps`.
+    ///
+    /// # Errors
+    /// - shape / length mismatch between `original` and `noise`.
+    /// - timestep out of bounds for the training schedule.
+    fn add_noise(
+        &self,
+        original: &Tensor<B>,
+        noise: &Tensor<B>,
+        timestep: f32,
+    ) -> Result<Tensor<B>>;
 }

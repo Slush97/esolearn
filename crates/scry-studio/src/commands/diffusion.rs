@@ -12,7 +12,7 @@ use scry_diffusion::tokenizer::Tokenizer;
 use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::decoder::{VaeDecoder, VaeDecoderConfig};
 use scry_diffusion::weights::SafetensorsCheckpoint;
-use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
+use scry_diffusion::{GenerationParams, SdPipeline};
 use scry_llm::backend::DeviceBackend;
 
 use crate::state::{AppState, Backend, LoadedDiffusion};
@@ -59,11 +59,12 @@ fn load_pipeline(snapshot: &Path) -> Result<crate::state::DiffusionPipeline, Str
     let scheduler = DdimScheduler::new(DdimConfig::sd_1_5())
         .map_err(|e| format!("scheduler init failed: {e}"))?;
 
-    let mut pipeline = Txt2ImgPipeline {
+    let mut pipeline = SdPipeline {
         tokenizer,
         text_encoder,
         unet,
         vae,
+        vae_encoder: None,
         scheduler,
         progress: None,
     };

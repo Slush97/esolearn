@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! End-to-end txt2img pipeline.
+//! End-to-end SD pipeline — txt2img and img2img share the same struct.
 //!
-//! Wires tokenizer → text encoder → scheduler → UNet → VAE decoder. Scope is
-//! text-to-image today; img2img and inpainting reuse the same UNet + VAE
-//! plumbing once a VAE encoder and an init-latent path are added (M10+).
+//! Wires tokenizer → text encoder → scheduler → UNet → VAE decoder, with an
+//! optional VAE encoder for img2img / inpainting. The two entry points are
+//! [`SdPipeline::generate`] (txt2img) and [`SdPipeline::img2img`]; both
+//! reuse the same denoise loop after the latent is initialized.
 
 use scry_llm::backend::MathBackend;
 use scry_llm::tensor::shape::Shape;
@@ -14,7 +15,7 @@ use crate::scheduler::Scheduler;
 use crate::text_encoder::TextEncoder;
 use crate::tokenizer::Tokenizer;
 use crate::unet::Unet;
-use crate::vae::VaeDecoder;
+use crate::vae::{VaeDecoder, VaeEncoder};
 
 /// VAE downsample factor — latents are 1/8 of the output resolution.
 const VAE_SCALE: u32 = 8;
@@ -52,8 +53,45 @@ impl Default for GenerationParams {
     }
 }
 
-/// Top-level txt2img pipeline.
-pub struct Txt2ImgPipeline<B, T, S>
+/// Inputs to a single img2img generation. The init image is passed
+/// separately to [`SdPipeline::img2img`] because it is backend-typed.
+#[derive(Debug, Clone)]
+pub struct Img2ImgParams {
+    /// User-provided text prompt.
+    pub prompt: String,
+    /// Negative prompt for classifier-free guidance. Empty disables.
+    pub negative_prompt: String,
+    /// Total denoising steps in the schedule. The actual number of UNet
+    /// forwards equals `round(num_inference_steps * strength)` — img2img
+    /// skips the early (most-noisy) steps proportional to `1 - strength`.
+    pub num_inference_steps: u32,
+    /// CFG scale. 1.0 disables CFG (single forward); 7-9 is typical for SD 1.5.
+    pub guidance_scale: f32,
+    /// PRNG seed for the reparameterization and add-noise tensors.
+    pub seed: u64,
+    /// How much of the schedule to run, in `[0, 1]`. `0.0` returns the
+    /// VAE-decoded init image (no denoising); `1.0` runs the full
+    /// schedule (≈ txt2img). HF's default is `0.8`.
+    pub strength: f32,
+}
+
+impl Default for Img2ImgParams {
+    fn default() -> Self {
+        Self {
+            prompt: String::new(),
+            negative_prompt: String::new(),
+            num_inference_steps: 30,
+            guidance_scale: 7.5,
+            seed: 0,
+            strength: 0.8,
+        }
+    }
+}
+
+/// Top-level Stable-Diffusion pipeline. Hosts both txt2img
+/// ([`Self::generate`]) and img2img ([`Self::img2img`]); the img2img path
+/// is only available when [`Self::vae_encoder`] is `Some`.
+pub struct SdPipeline<B, T, S>
 where
     B: MathBackend,
     T: TextEncoder<B>,
@@ -67,6 +105,9 @@ where
     pub unet: Unet<B>,
     /// VAE decoder lifting latents back to RGB.
     pub vae: VaeDecoder<B>,
+    /// VAE encoder for img2img. Optional — txt2img-only callers leave
+    /// this `None`; [`Self::img2img`] errors when it is `None`.
+    pub vae_encoder: Option<VaeEncoder<B>>,
     /// Scheduler controlling the denoising trajectory.
     pub scheduler: S,
     /// Optional progress callback fired before each denoising step.
@@ -74,11 +115,11 @@ where
     pub progress: Option<ProgressCallback>,
 }
 
-/// Callback type for [`Txt2ImgPipeline::progress`]. Invoked once per
+/// Callback type for [`SdPipeline::progress`]. Invoked once per
 /// denoising step with `(step_index, total_steps, timestep)`.
 pub type ProgressCallback = Box<dyn FnMut(u32, u32, f32) + Send>;
 
-impl<B, T, S> Txt2ImgPipeline<B, T, S>
+impl<B, T, S> SdPipeline<B, T, S>
 where
     B: MathBackend,
     T: TextEncoder<B>,
@@ -194,6 +235,152 @@ where
         Ok(Tensor::from_vec(pixels, Shape::new(&dims)))
     }
 
+    /// Run an img2img generation: VAE-encode `init_image` to a latent,
+    /// mix with seed-deterministic noise at the strength-derived starting
+    /// timestep, then run the denoise loop and decode.
+    ///
+    /// `init_image` must be a `[3, H, W]` tensor with values **already
+    /// normalized to `[-1, 1]`** — HF's `image_processor.preprocess`
+    /// does `2 * x - 1` on `[0, 1]` inputs and we keep that step out of
+    /// the pipeline so the caller controls cropping / letterboxing.
+    /// `H` and `W` must be multiples of 8.
+    ///
+    /// # Errors
+    /// - [`Self::vae_encoder`] is `None`.
+    /// - `strength` is outside `[0, 1]`, or `num_inference_steps == 0`.
+    /// - `init_image` is not `[3, H, W]` with `H % 8 == 0`, `W % 8 == 0`.
+    /// - Tokenizer / encoder / VAE / UNet / scheduler propagated failures.
+    #[allow(clippy::too_many_lines)]
+    pub fn img2img(&mut self, params: &Img2ImgParams, init_image: &Tensor<B>) -> Result<Tensor<B>> {
+        let encoder = self.vae_encoder.as_ref().ok_or_else(|| {
+            Error::Llm("img2img requires vae_encoder; pipeline was built without one".into())
+        })?;
+        if !(0.0..=1.0).contains(&params.strength) {
+            return Err(Error::Llm(format!(
+                "strength {} must be in [0, 1]",
+                params.strength
+            )));
+        }
+        if params.num_inference_steps == 0 {
+            return Err(Error::Scheduler("num_inference_steps must be > 0".into()));
+        }
+        let img_dims = init_image.shape.dims();
+        if img_dims.len() != 3 || img_dims[0] != 3 {
+            return Err(Error::Llm(format!(
+                "init_image must be [3, H, W], got {img_dims:?}"
+            )));
+        }
+        let (height, width) = (img_dims[1], img_dims[2]);
+        let vae_scale = VAE_SCALE as usize;
+        if height == 0 || width == 0 || height % vae_scale != 0 || width % vae_scale != 0 {
+            return Err(Error::Llm(format!(
+                "init_image size {width}x{height} must be non-zero multiples of {VAE_SCALE}"
+            )));
+        }
+
+        // Same bf16 toggle as generate() so users don't have to set
+        // SCRY_GPU_MATMUL_BF16=1 to get the perf-target path.
+        #[cfg(feature = "scry-gpu-bf16")]
+        {
+            let _ = scry_llm::backend::scry_gpu::ScryGpuBackend::set_bf16_matmul(true);
+        }
+
+        let latent_h = height / vae_scale;
+        let latent_w = width / vae_scale;
+        let elements = LATENT_CHANNELS * latent_h * latent_w;
+        let latent_shape = Shape::new(&[LATENT_CHANNELS, latent_h, latent_w]);
+
+        // ---- Text conditioning (cond + uncond). ----
+        let cond_tokens = self.tokenizer.encode(&params.prompt)?;
+        let uncond_tokens = self.tokenizer.encode(&params.negative_prompt)?;
+        let cond_embed = self.text_encoder.encode(&cond_tokens)?;
+        let uncond_embed = self.text_encoder.encode(&uncond_tokens)?;
+
+        // ---- VAE encode + reparameterization. ----
+        // latent = (mean + exp(0.5 · logvar) · noise) · scaling_factor.
+        // logvar is small (16k–64k floats at SD shapes); exp() on host is
+        // cheaper than adding a backend op for the once-per-call work.
+        let (mean, logvar) = encoder.encode(init_image)?;
+        let std_host: Vec<f32> = logvar
+            .to_vec()
+            .into_iter()
+            .map(|v| (0.5 * v).exp())
+            .collect();
+        let std_tensor: Tensor<B> = Tensor::from_vec(std_host, logvar.shape.clone());
+        let noise_enc_host = sample_standard_normal(elements, params.seed);
+        let noise_enc: Tensor<B> = Tensor::from_vec(noise_enc_host, latent_shape.clone());
+        let scaled_noise = B::mul_elementwise(&std_tensor.data, &noise_enc.data);
+        let sampled = B::add(
+            &mean.data,
+            &scaled_noise,
+            &mean.shape,
+            &latent_shape,
+            &latent_shape,
+        );
+        let scaling = encoder.config.scaling_factor;
+        let latent_storage = B::scale(&sampled, scaling);
+        let mut latent: Tensor<B> = Tensor::new(latent_storage, latent_shape.clone());
+
+        // ---- Strength-truncated trajectory. ----
+        self.scheduler.set_timesteps(params.num_inference_steps)?;
+        let timesteps: Vec<f32> = self.scheduler.timesteps().to_vec();
+        let n_steps = params.num_inference_steps;
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let init_timestep = (((n_steps as f32) * params.strength).round() as u32).min(n_steps);
+        let t_start_idx = (n_steps - init_timestep) as usize;
+
+        // strength == 0 → empty denoise tail; skip add_noise too.
+        if t_start_idx < timesteps.len() {
+            let noise_add_host = sample_standard_normal(elements, params.seed.wrapping_add(1));
+            let noise_add: Tensor<B> = Tensor::from_vec(noise_add_host, latent_shape.clone());
+            let t_start = timesteps[t_start_idx];
+            latent = self.scheduler.add_noise(&latent, &noise_add, t_start)?;
+        }
+
+        // ---- Denoise loop over the truncated tail. ----
+        let total_steps = u32::try_from(timesteps.len() - t_start_idx).unwrap_or(u32::MAX);
+        let do_cfg = params.guidance_scale > 1.0 + f32::EPSILON;
+        let s = params.guidance_scale;
+        for (i, &t) in timesteps[t_start_idx..].iter().enumerate() {
+            if let Some(cb) = self.progress.as_mut() {
+                cb(u32::try_from(i).unwrap_or(u32::MAX), total_steps, t);
+            }
+            let model_input = self.scheduler.scale_model_input(&latent, t)?;
+
+            let cond_eps = self.unet.forward(&model_input, t, &cond_embed)?;
+            let combined = if do_cfg {
+                let uncond_eps = self.unet.forward(&model_input, t, &uncond_embed)?;
+                let scaled_cond = B::scale(&cond_eps.data, s);
+                let scaled_uncond = B::scale(&uncond_eps.data, 1.0 - s);
+                let storage = B::add(
+                    &scaled_cond,
+                    &scaled_uncond,
+                    &cond_eps.shape,
+                    &uncond_eps.shape,
+                    &cond_eps.shape,
+                );
+                Tensor::new(storage, cond_eps.shape.clone())
+            } else {
+                cond_eps
+            };
+
+            latent = self.scheduler.step(&combined, t, &latent)?;
+        }
+
+        // ---- VAE decode + range remap, identical to generate(). ----
+        let decoded = self.vae.decode(&latent)?;
+        let mut pixels = decoded.to_vec();
+        for v in &mut pixels {
+            *v = v.clamp(-1.0, 1.0) * 0.5 + 0.5;
+        }
+        let out_dims = decoded.shape.dims().to_vec();
+        Ok(Tensor::from_vec(pixels, Shape::new(&out_dims)))
+    }
+
     /// Install a progress callback fired before each denoising step.
     /// Returns `self` for builder-style chaining.
     pub fn with_progress<F>(mut self, callback: F) -> Self
@@ -216,6 +403,9 @@ where
         self.text_encoder.to_device();
         self.unet.to_device();
         self.vae.to_device();
+        if let Some(enc) = self.vae_encoder.as_mut() {
+            enc.to_device();
+        }
     }
 }
 

@@ -38,7 +38,7 @@ pub struct LoadedScrfd {
     pub detector: scry_vision::models::ScrfdDetector,
 }
 
-pub type DiffusionPipeline = scry_diffusion::Txt2ImgPipeline<
+pub type DiffusionPipeline = scry_diffusion::SdPipeline<
     Backend,
     scry_diffusion::text_encoder::clip_text::ClipTextEncoder<Backend>,
     scry_diffusion::scheduler::ddim::DdimScheduler,

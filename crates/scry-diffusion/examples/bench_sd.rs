@@ -47,7 +47,7 @@ use scry_diffusion::tokenizer::Tokenizer;
 use scry_diffusion::unet::{Unet, UnetConfig};
 use scry_diffusion::vae::decoder::{VaeDecoder, VaeDecoderConfig};
 use scry_diffusion::weights::SafetensorsCheckpoint;
-use scry_diffusion::{GenerationParams, Txt2ImgPipeline};
+use scry_diffusion::{GenerationParams, SdPipeline};
 
 #[cfg(not(feature = "scry-gpu-cuda"))]
 use scry_llm::backend::cpu::CpuBackend as Backend;
@@ -182,7 +182,7 @@ impl Args {
 const USAGE: &str = "\
 Usage: bench_sd [OPTIONS]
 
-Times the full Txt2ImgPipeline at the same shape PyTorch's bench_pytorch.py
+Times the full SdPipeline at the same shape PyTorch's bench_pytorch.py
 does, for a side-by-side perf comparison.
 
 Options:
@@ -261,11 +261,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = DdimScheduler::new(DdimConfig::sd_1_5())?;
     println!("  loaded in {:.1}s", t_load.elapsed().as_secs_f64());
 
-    let mut pipeline = Txt2ImgPipeline {
+    let mut pipeline = SdPipeline {
         tokenizer,
         text_encoder,
         unet,
         vae,
+        vae_encoder: None,
         scheduler,
         progress: None,
     };
