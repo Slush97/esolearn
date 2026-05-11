@@ -22,10 +22,14 @@
 pub mod common;
 pub mod ddim;
 pub mod dpm_solver_pp;
+pub mod lcm;
+pub mod turbo;
 
 pub use common::BetaSchedule;
 pub use ddim::DdimScheduler;
 pub use dpm_solver_pp::DpmSolverPpScheduler;
+pub use lcm::LcmScheduler;
+pub use turbo::TurboScheduler;
 
 use scry_llm::backend::MathBackend;
 use scry_llm::tensor::Tensor;

@@ -41,7 +41,7 @@ use scry_llm::tensor::Tensor;
 
 use crate::conditioning::Conditioning;
 use crate::error::{Error, Result};
-use crate::ops::sinusoidal_timestep_embedding;
+use crate::ops::{lcm_w_embedding, sinusoidal_timestep_embedding};
 
 pub use config::UnetConfig;
 
@@ -59,6 +59,15 @@ pub(crate) struct TimeEmbedding<B: MathBackend> {
     pub(crate) linear_1_bias: Tensor<B>,
     pub(crate) linear_2_weight: Tensor<B>,
     pub(crate) linear_2_bias: Tensor<B>,
+    /// Optional LCM guidance-scale projection. Present in LCM-distilled
+    /// checkpoints (e.g. `SimianLuo/LCM_Dreamshaper_v7`) as a bias-free
+    /// `Linear(time_cond_proj_dim=256, block_out_channels[0]=320)` whose
+    /// output is added to the sinusoidal time embed before `linear_1`.
+    /// `[time_cond_proj_dim, bc0]` in scry-llm convention.
+    pub(crate) cond_proj_weight: Option<Tensor<B>>,
+    /// Input dim of `cond_proj_weight` (256 for LCM). `None` when
+    /// `cond_proj_weight` is `None`.
+    pub(crate) cond_proj_in_dim: Option<usize>,
 }
 
 /// SD UNet predicting per-step noise (or v-prediction, depending on schedule).
@@ -73,6 +82,13 @@ pub struct Unet<B: MathBackend> {
     pub(crate) up_blocks: Vec<UpBlock<B>>,
     pub(crate) conv_norm_out: GroupNormParams<B>,
     pub(crate) conv_out: Conv2d<B>,
+
+    /// Cached `cond_proj(w_embedding)` for LCM-style guidance-scale
+    /// conditioning. `[block_out_channels[0]]`, added to the sinusoidal
+    /// time embed each forward when `Some`. Set via
+    /// [`Unet::set_guidance_scale`]; `None` (the default) keeps the
+    /// model on the vanilla SD path.
+    pub(crate) cached_cond_emb: Option<Tensor<B>>,
 }
 
 impl<B: MathBackend> TimeEmbedding<B> {
@@ -81,6 +97,9 @@ impl<B: MathBackend> TimeEmbedding<B> {
         B::to_device_in_place(&mut self.linear_1_bias.data);
         B::to_device_in_place(&mut self.linear_2_weight.data);
         B::to_device_in_place(&mut self.linear_2_bias.data);
+        if let Some(w) = self.cond_proj_weight.as_mut() {
+            B::to_device_in_place(&mut w.data);
+        }
     }
 }
 
@@ -103,6 +122,56 @@ impl<B: MathBackend> Unet<B> {
         }
         self.conv_norm_out.to_device();
         self.conv_out.to_device();
+        if let Some(c) = self.cached_cond_emb.as_mut() {
+            B::to_device_in_place(&mut c.data);
+        }
+    }
+
+    /// Set the LCM guidance-scale conditioning value `w`. Computes the
+    /// sinusoidal w-embedding (`half=dim/2` log-spaced frequencies,
+    /// `[sin, cos]` concat order, `w · 1000` scale factor — matching
+    /// `lcm_pipeline.py::get_w_embedding`) and projects it through
+    /// `time_embedding.cond_proj` once; the resulting
+    /// `[block_out_channels[0]]` vector is cached on the UNet and
+    /// added to the sinusoidal time embed each forward.
+    ///
+    /// Diffusers passes `w = guidance_scale - 1`, so a model trained
+    /// with `guidance_scale = 8.0` is called with `w = 7.0` here.
+    ///
+    /// # Errors
+    /// - The UNet has no `time_embedding.cond_proj.weight` loaded (i.e.
+    ///   it's a vanilla SD checkpoint, not an LCM one).
+    pub fn set_guidance_scale(&mut self, w: f32) -> Result<()> {
+        let cond_w = self.time_embed.cond_proj_weight.as_ref().ok_or_else(|| {
+            Error::Llm("set_guidance_scale: UNet has no cond_proj — not an LCM checkpoint".into())
+        })?;
+        let in_dim = self
+            .time_embed
+            .cond_proj_in_dim
+            .ok_or_else(|| Error::Llm("set_guidance_scale: cond_proj_in_dim missing".into()))?;
+        let bc0 = self.config.block_out_channels[0];
+        let w_emb_host = lcm_w_embedding(w, in_dim);
+        let w_emb = Tensor::<B>::from_vec(w_emb_host, Shape::new(&[in_dim]));
+        // `[1, in_dim] @ [in_dim, bc0]` → `[1, bc0]` — bias-free.
+        let zero_bias_t: Tensor<B> = Tensor::from_vec(vec![0.0_f32; bc0], Shape::new(&[bc0]));
+        let proj = B::matmul_bias(
+            &w_emb.data,
+            &cond_w.data,
+            &zero_bias_t.data,
+            1,
+            in_dim,
+            bc0,
+            false,
+            false,
+        );
+        self.cached_cond_emb = Some(Tensor::new(proj, Shape::new(&[bc0])));
+        // If `to_device` already ran, move the freshly-allocated cache
+        // onto the device too so the per-step `B::add` doesn't trigger
+        // a CPU→GPU upload on every forward.
+        if let Some(c) = self.cached_cond_emb.as_mut() {
+            B::to_device_in_place(&mut c.data);
+        }
+        Ok(())
     }
 
     /// Forward pass: `(noisy_latent, timestep, conditioning) → predicted_noise`.
@@ -146,12 +215,20 @@ impl<B: MathBackend> Unet<B> {
 
         // ---- 2. timestep embedding ---------------------------------
         // `block_out_channels[0]` sized sinusoidal embed → linear → silu →
-        // linear → `[time_embed_dim]`.
+        // linear → `[time_embed_dim]`. LCM checkpoints also add a
+        // precomputed `cond_proj(w_embedding)` to the sinusoidal embed
+        // before `linear_1` — see `Unet::set_guidance_scale`.
         let bc0 = self.config.block_out_channels[0];
         let time_embed = time_section("unet.time_embed", || -> Result<Tensor<B>> {
             let t_sin = sinusoidal_timestep_embedding::<B>(timestep, bc0, 10_000.0)?;
+            let t_sin_data = if let Some(cond_emb) = self.cached_cond_emb.as_ref() {
+                let shape = Shape::new(&[bc0]);
+                B::add(&t_sin.data, &cond_emb.data, &shape, &shape, &shape)
+            } else {
+                t_sin.data
+            };
             let t1 = B::matmul_bias(
-                &t_sin.data,
+                &t_sin_data,
                 &self.time_embed.linear_1_weight.data,
                 &self.time_embed.linear_1_bias.data,
                 1,
@@ -299,11 +376,51 @@ impl<B: MathBackend> Unet<B> {
             true,
             &mut consume,
         )?;
+        // Optional LCM guidance-scale projection. The HF weight is
+        // `[block_out_channels[0], time_cond_proj_dim]` (out, in); we
+        // infer `time_cond_proj_dim` from the file rather than wiring a
+        // new config field, because non-LCM SD checkpoints never ship it.
+        let (cond_proj_weight, cond_proj_in_dim) = if view
+            .names()
+            .iter()
+            .any(|n| *n == "time_embedding.cond_proj.weight")
+        {
+            use scry_vision::checkpoint::load_f32;
+            let raw = load_f32(&view, "time_embedding.cond_proj.weight")
+                .map_err(|e| Error::Llm(format!("load time_embedding.cond_proj.weight: {e}")))?;
+            if raw.len() % head_ch_0 != 0 {
+                return Err(Error::Llm(format!(
+                    "time_embedding.cond_proj.weight: {} elements not divisible by bc0={head_ch_0}",
+                    raw.len()
+                )));
+            }
+            let in_dim = raw.len() / head_ch_0;
+            // HF stores `[out=bc0, in=in_dim]`; transpose to scry-llm `[in, out]`.
+            let mut transposed = vec![0.0_f32; raw.len()];
+            for in_i in 0..in_dim {
+                for out_i in 0..head_ch_0 {
+                    transposed[in_i * head_ch_0 + out_i] = raw[out_i * in_dim + in_i];
+                }
+            }
+            consume("time_embedding.cond_proj.weight");
+            (
+                Some(Tensor::<B>::from_vec(
+                    transposed,
+                    Shape::new(&[in_dim, head_ch_0]),
+                )),
+                Some(in_dim),
+            )
+        } else {
+            (None, None)
+        };
+
         let time_embed = TimeEmbedding {
             linear_1_weight,
             linear_1_bias,
             linear_2_weight,
             linear_2_bias,
+            cond_proj_weight,
+            cond_proj_in_dim,
         };
 
         // ---- Down blocks ----
@@ -477,6 +594,7 @@ impl<B: MathBackend> Unet<B> {
             up_blocks,
             conv_norm_out,
             conv_out,
+            cached_cond_emb: None,
         })
     }
 }
